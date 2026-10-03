@@ -43,7 +43,7 @@ void main() {
                 }
             }
         }
-        cogl_color_out = color / count;
+        cogl_color_out = count > 0 ? color / count : vec4(0.0);
 
     } else
     // mode 1: triangular downsampling
@@ -63,7 +63,7 @@ void main() {
                 }
             }
         }
-        cogl_color_out = color / count;
+        cogl_color_out = count > 0 ? color / count : vec4(0.0);
 
     } else
     // mode 2: Dirac downsampling

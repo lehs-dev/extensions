@@ -63,6 +63,7 @@ export const ApplicationsBlur = class ApplicationsBlur {
 
         // stores every blurred meta window
         this.meta_window_map = new Map();
+        this.enabled = false;
 
         // cache for compiled patterns to avoid recompilation
         this._whitelist_pattern_cache = new Map();
@@ -87,6 +88,9 @@ export const ApplicationsBlur = class ApplicationsBlur {
     }
 
     enable() {
+        if (this.enabled)
+            return;
+        this.enabled = true;
         this._log("blurring applications...");
 
         // export dbus service for preferences
@@ -97,6 +101,9 @@ export const ApplicationsBlur = class ApplicationsBlur {
 
         // blur already existing windows
         this.update_all_windows();
+        this.connections.connect(Main.layoutManager, 'monitors-changed',
+            () => this.update_all_windows()
+        );
 
         // blur every new window
         this.connections.connect(
@@ -166,9 +173,9 @@ export const ApplicationsBlur = class ApplicationsBlur {
                         let window_actor = meta_window.get_compositor_private();
 
                         if (
-                            (!meta_window.get_workspace().active) || meta_window.minimized
+                            !meta_window.get_workspace()?.active || meta_window.minimized
                         )
-                            window_actor.hide();
+                            window_actor?.hide();
                     });
                 }
             );
@@ -183,7 +190,7 @@ export const ApplicationsBlur = class ApplicationsBlur {
         // remove all previously blurred windows, in the case where the
         // whitelist was changed
         this.meta_window_map.forEach(((_meta_window, pid) => {
-            this.remove_blur(pid);
+            this.untrack_meta_window(pid);
         }));
 
         for (
@@ -202,6 +209,9 @@ export const ApplicationsBlur = class ApplicationsBlur {
     /// needed.
     /// Accepts only untracked meta windows (i.e no `bms_pid` set)
     track_new(meta_window) {
+        // Sticky windows appear in more than one workspace's window list.
+        if (this.meta_window_map.get(meta_window.bms_pid) === meta_window)
+            return;
         // create a pid that will follow the window during its whole life
         const pid = ("" + Math.random()).slice(2, 16);
         meta_window.bms_pid = pid;
@@ -239,7 +249,9 @@ export const ApplicationsBlur = class ApplicationsBlur {
 
         if (this.settings.applications.STATIC_BLUR && meta_window.get_client_type() === Meta.WindowClientType.X11) {
             const window_actor = meta_window.get_compositor_private();
-            window_actor.connect('child-added', _ => {
+            if (!window_actor)
+                return;
+            this.connections.connect(window_actor, 'child-added', _ => {
                 if (!meta_window.blur_actor) {
                     this._warn("can't move blur actor to back, it doesn't exist");
                     return;
@@ -259,9 +271,13 @@ export const ApplicationsBlur = class ApplicationsBlur {
             if (blur_actor) {
                 if (this.settings.applications.STATIC_BLUR) {
                     const bg_manager = meta_window.bg_manager;
+                    if (!bg_manager?.backgroundActor)
+                        return;
                     const bg_actor_monitor_index = bg_manager.backgroundActor.monitor;
                     const window_monitor_index = meta_window.get_monitor();
                     const monitor = Main.layoutManager.monitors[window_monitor_index];
+                    if (!monitor || !bg_manager.backgroundActor)
+                        return;
 
                     if (bg_actor_monitor_index !== window_monitor_index) {
                         this._log(`application (pid ${pid}) switching to monitor: ${window_monitor_index}`);
@@ -342,6 +358,8 @@ export const ApplicationsBlur = class ApplicationsBlur {
     create_blur_effect(meta_window) {
         const pid = meta_window.bms_pid;
         const window_actor = meta_window.get_compositor_private();
+        if (!window_actor || !Main.layoutManager.monitors[meta_window.get_monitor()])
+            return;
 
         let blur_actor;
 
@@ -479,11 +497,11 @@ export const ApplicationsBlur = class ApplicationsBlur {
                         && Main.overview.visible
                     ) {
                         window_actor.show();
-                        window_actor.get_last_child().hide();
+                        window_actor.get_last_child()?.hide();
                     } else if (
                         window_actor.visible
                     )
-                        window_actor.get_last_child().show();
+                        window_actor.get_last_child()?.show();
                 }
             }
         );
@@ -504,7 +522,7 @@ export const ApplicationsBlur = class ApplicationsBlur {
             })
         } else {
             if (meta_window.bg_manager?._bms_pipeline?.effect)
-                meta_window.bg_manager._bms_pipeline.effect.corner_radius = use_0_radius ?
+                meta_window.bg_manager._bms_pipeline.effect.unscaled_corner_radius = use_0_radius ?
                     0 : this.settings.applications.CORNER_RADIUS;
         }
     }
@@ -551,7 +569,7 @@ export const ApplicationsBlur = class ApplicationsBlur {
         const monitor_index = meta_window.get_monitor();
         // check if the window is using wayland, or xwayland/xorg for rendering
         return !scale_monitor_framebuffer && is_wayland && meta_window.get_client_type() == 0
-            ? Main.layoutManager.monitors[monitor_index].geometry_scale
+            ? (Main.layoutManager.monitors[monitor_index]?.geometry_scale || 1)
             : 1;
     }
 
@@ -575,7 +593,10 @@ export const ApplicationsBlur = class ApplicationsBlur {
         this._log("resetting...");
 
         this.disable();
-        setTimeout(_ => this.enable(), 1);
+        this._restartId = setTimeout(() => {
+            this._restartId = null;
+            this.enable();
+        }, 1);
     }
 
     change_pipeline() {
@@ -631,6 +652,11 @@ export const ApplicationsBlur = class ApplicationsBlur {
     }
 
     disable() {
+        if (this._restartId) {
+            clearTimeout(this._restartId);
+            this._restartId = null;
+        }
+        this.enabled = false;
         this._log("removing blur from applications...");
 
         this.service?.unexport();

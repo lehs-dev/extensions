@@ -39,7 +39,7 @@ export const MonitorsConfig = GObject.registerClass(
       );
 
       // Connecting to a D-Bus signal
-      this._monitorsConfigProxy.connectSignal('MonitorsChanged', () =>
+      this._monitorsChangedId = this._monitorsConfigProxy.connectSignal('MonitorsChanged', () =>
         this._updateResources()
       );
 
@@ -51,11 +51,17 @@ export const MonitorsConfig = GObject.registerClass(
     }
 
     _updateResources() {
+      const request = this._request = (this._request || 0) + 1;
       this._monitorsConfigProxy.GetCurrentStateRemote((resources, err) => {
+        if (this._disposed || request !== this._request) return;
         if (err) {
           logError(err);
           return;
         }
+        // Replace a complete snapshot only after the newest request succeeds.
+        this._primaryMonitor = null;
+        this._monitors = [];
+        this._logicalMonitors = [];
 
         const [serial_, monitors, logicalMonitors] = resources;
         let index = 0;
@@ -69,11 +75,11 @@ export const MonitorsConfig = GObject.registerClass(
             vendor,
             product,
             serial,
-            displayName: props['display-name'].unpack(),
+            displayName: props['display-name']?.unpack() || connector,
           });
         }
 
-        for (const logicalMonitor of logicalMonitors) {
+        for (const [logicalIndex, logicalMonitor] of logicalMonitors.entries()) {
           const [x_, y_, scale_, transform_, isPrimary, monitorsSpecs] =
             logicalMonitor;
 
@@ -90,6 +96,7 @@ export const MonitorsConfig = GObject.registerClass(
 
             if (monitor) {
               monitor.active = true;
+              monitor.logicalIndex = logicalIndex;
               monitor.isPrimary = isPrimary;
               if (monitor.isPrimary) this._primaryMonitor = monitor;
               break;
@@ -101,15 +108,29 @@ export const MonitorsConfig = GObject.registerClass(
         if (activeMonitors.length > 1 && logicalMonitors.length === 1) {
           // We're in cloning mode, so let's just activate the primary monitor
           this._monitors.forEach((m) => (m.active = false));
-          this._primaryMonitor.active = true;
+          if (this._primaryMonitor) this._primaryMonitor.active = true;
         }
 
         this.emit('updated');
       });
     }
 
+    destroy() {
+      if (this._disposed) return;
+      this._disposed = true;
+      this._monitorsConfigProxy.disconnectSignal(this._monitorsChangedId);
+      this._monitorsConfigProxy = null;
+      this._monitors = [];
+      this._primaryMonitor = null;
+    }
+
     get primaryMonitor() {
       return this._primaryMonitor;
+    }
+
+    get activeMonitors() {
+      return this._monitors.filter((monitor) => monitor.active)
+        .sort((a, b) => a.logicalIndex - b.logicalIndex);
     }
 
     get monitors() {

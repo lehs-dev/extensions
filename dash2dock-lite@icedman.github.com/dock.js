@@ -153,7 +153,10 @@ export let Dock = GObject.registerClass(
         }
 
         this.remove_child(this.dash);
+        this.dash.destroy();
         this.dash = null;
+        this._clock = null;
+        this._calendar = null;
         this._trashIcon = null;
         this._recentFilesIcon = null;
         this._downloadsIcon = null;
@@ -658,8 +661,9 @@ export let Dock = GObject.registerClass(
     }
 
     _cleanupIcon(c) {
-      if (c._image && c._image.get_parent()) {
-        c._image.get_parent().remove_child(c._image);
+      if (c._image) {
+        c._image.destroy();
+        c._image = null;
       }
       if (c._menu && c._menu.actor) {
         Main.uiGroup.remove_child(c._menu.actor);
@@ -912,7 +916,7 @@ export let Dock = GObject.registerClass(
         },
         {
           icon: '_downloadsIcon',
-          folder: Gio.File.new_for_path('Downloads').get_path(),
+          folder: this.extension.services._downloadsDir.get_path(),
           //! find a way to avoid this
           path: tempPath('downloads-dash2dock-lite.desktop'),
           show: this.extension.downloads_icon,
@@ -1313,7 +1317,7 @@ export let Dock = GObject.registerClass(
 
     _destroyList() {
       if (this._list) {
-        Main.uiGroup.remove_child(this._list);
+        this._list.destroy();
         this._list = null;
       }
     }
@@ -1339,6 +1343,10 @@ export let Dock = GObject.registerClass(
       this._animationSeq = null;
       this.extension._hiTimer.cancel(this.autohider._animationSeq);
       this.autohider._animationSeq = null;
+      this.extension._loTimer.cancel(this.debounceEndSeq);
+      this.extension._loTimer.cancel(this._debounceBeginAnimateSeq);
+      this.debounceEndSeq = null;
+      this._debounceBeginAnimateSeq = null;
     }
 
     _updateFocusedIcon() {
@@ -1372,12 +1380,11 @@ export let Dock = GObject.registerClass(
 
       let event = Clutter.get_current_event();
       let modifiers = event ? event.get_state() : 0;
-      let pressed = event.type() == Clutter.EventType.BUTTON_PRESS;
       let button1 = (modifiers & Clutter.ModifierType.BUTTON1_MASK) != 0;
       let button2 = (modifiers & Clutter.ModifierType.BUTTON2_MASK) != 0;
       let button3 = (modifiers & Clutter.ModifierType.BUTTON3_MASK) != 0;
       let shift = (modifiers & Clutter.ModifierType.SHIFT_MASK) != 0;
-      let isMiddleButton = button3; // middle?
+      let isMiddleButton = button2;
       let isCtrlPressed = (modifiers & Clutter.ModifierType.CONTROL_MASK) != 0;
       let openNewWindow =
         app.can_open_new_window() &&
@@ -1573,7 +1580,7 @@ export let Dock = GObject.registerClass(
         w.raise();
         w.focus(0);
       } else {
-        activeWs.activate_with_focus(w, global.get_current_time());
+        w.get_workspace()?.activate_with_focus(w, global.get_current_time());
       }
     }
 

@@ -168,6 +168,11 @@ class TilingShellExtension extends Extension {
 
   _setupSignals() {
     if (!this._signals) return;
+    this._signals.connect(Main.layoutManager, "monitors-changed", () => {
+      GlobalState.get().validate_selected_layouts();
+      this._createTilingManagers();
+      this._windowBorderManager?.updateStyle();
+    });
     this._signals.connect(global.display, "workareas-changed", () => {
       const allMonitors = getMonitors();
       if (this._tilingManagers.length !== allMonitors.length) {
@@ -195,7 +200,7 @@ class TilingShellExtension extends Extension {
         if (this._windowBorderManager)
           this._windowBorderManager.destroy();
         this._windowBorderManager = new WindowBorderManager(
-          this._fractionalScalingEnabled
+          !this._fractionalScalingEnabled
         );
         this._windowBorderManager.enable();
       }
@@ -220,6 +225,7 @@ class TilingShellExtension extends Extension {
         "span-window-all-tiles",
         (kb, dp) => {
           const window = dp.focus_window;
+          if (!window) return;
           const monitorIndex = window.get_monitor();
           const manager = this._tilingManagers[monitorIndex];
           if (manager) manager.onSpanAllTiles(window);
@@ -260,6 +266,7 @@ class TilingShellExtension extends Extension {
         "highlight-current-window",
         (kb, dp) => {
           const focus_window = dp.get_focus_window();
+          if (!focus_window) return;
           getWindows(
             global.workspaceManager.get_active_workspace()
           ).forEach((win) => {
@@ -525,6 +532,7 @@ class TilingShellExtension extends Extension {
     const focusedIdx = windowList.findIndex((win) => {
       return win === focusParent;
     });
+    if (focusedIdx < 0 || windowList.length === 0) return;
     let nextIndex = -1;
     switch (direction) {
       case FocusSwitchDirection.PREV:
@@ -532,7 +540,7 @@ class TilingShellExtension extends Extension {
           windowList[windowList.length - 1].activate(
             global.get_current_time()
           );
-        } else {
+        } else if (focusedIdx > 0) {
           windowList[focusedIdx - 1].activate(
             global.get_current_time()
           );
@@ -564,14 +572,14 @@ class TilingShellExtension extends Extension {
   }
 
   disable() {
+    this._signals?.disconnect();
+    this._signals = null;
     this._keybindings?.destroy();
     this._keybindings = null;
     this._indicator?.destroy();
     this._indicator = null;
     this._tilingManagers.forEach((tm) => tm.destroy());
     this._tilingManagers = [];
-    this._signals?.disconnect();
-    this._signals = null;
     this._resizingManager?.destroy();
     this._resizingManager = null;
     this._windowBorderManager?.destroy();

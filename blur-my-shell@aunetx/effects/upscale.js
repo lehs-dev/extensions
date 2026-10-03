@@ -61,6 +61,7 @@ export const UpscaleEffect = utils.IS_IN_PREFERENCES ?
         }
 
         set factor(value) {
+            value = Number.isFinite(value) ? Math.max(1, Math.min(64, Math.round(value))) : DEFAULT_PARAMS.factor;
             if (this._factor !== value) {
                 this._factor = value;
 

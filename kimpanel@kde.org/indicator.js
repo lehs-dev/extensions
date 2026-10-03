@@ -18,8 +18,8 @@ export class KimIndicator extends PanelMenu.Button {
     _init(params) {
         super._init(0.5, 'kimpanel');
         params = Params.parse(params, {kimpanel : null});
-        this._properties = {};
-        this._propertySwitch = {};
+        this._properties = Object.create(null);
+        this._propertySwitch = Object.create(null);
 
         let hbox =
             new St.BoxLayout({style_class : 'panel-status-menu-box'});
@@ -94,6 +94,8 @@ export class KimIndicator extends PanelMenu.Button {
         }
         let key = property.key;
         this._properties[key] = property;
+        if (!(key in this._propertySwitch))
+            this._addPropertyItem(key);
         this._updateProperties();
     }
 
@@ -107,19 +109,25 @@ export class KimIndicator extends PanelMenu.Button {
             }
             return;
         } else {
+            // RegisterProperties is an array of strings, keyed here by protocol key.
+            // Comparing the old keys with array indices recreated every menu item.
+            const parsedProperties = Object.create(null);
+            for (const propstr of properties) {
+                const property = Lib.parseProperty(propstr);
+                if (property)
+                    parsedProperties[property.key] = property;
+            }
             for (let p in this._propertySwitch) {
-                if (properties[p] == undefined) {
+                if (parsedProperties[p] == undefined) {
                     this._propertySwitch[p].destroy();
                     delete this._propertySwitch[p];
                 }
             }
 
+            this._properties = parsedProperties;
             let count = 0;
-            for (let p in properties) {
-                let property = Lib.parseProperty(properties[p]);
-                if (property == null) {
-                    continue;
-                }
+            for (let p in parsedProperties) {
+                let property = parsedProperties[p];
                 count++;
                 let key = property.key;
                 this._properties[key] = property;
@@ -168,7 +176,7 @@ export class KimIndicator extends PanelMenu.Button {
         if (this._properties['/Fcitx/im']) {
             this._setIcon(this._properties['/Fcitx/im']);
         } else {
-            self._deactive()
+            this._deactive();
         }
     }
 

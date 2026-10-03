@@ -46,7 +46,8 @@ class WindowBorderManager {
       Settings.KEY_WINDOW_USE_CUSTOM_BORDER_COLOR,
       () => this._border?.updateStyle()
     );
-    this._interfaceSettings.connect(
+    this._signals.connect(
+      this._interfaceSettings,
       "changed::accent-color",
       () => this._border?.updateStyle()
     );
@@ -66,6 +67,10 @@ class WindowBorderManager {
     this._signals.disconnect();
     this._border?.destroy();
     this._border = null;
+  }
+
+  updateStyle() {
+    this._border?.updateStyle();
   }
 
   _onWindowFocused() {

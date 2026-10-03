@@ -1,5 +1,8 @@
+import SignalHandling from "../../utils/signalHandling.js";
+
 class MetaWindowGroup {
   _windows;
+  _signals;
   _unmanagedCounter;
   // count how many windows are unmanaged
   _unmanagedEventHandler;
@@ -9,10 +12,12 @@ class MetaWindowGroup {
    */
   constructor(windows) {
     this._windows = windows;
+    this._signals = new SignalHandling();
     this._unmanagedCounter = 0;
     this._unmanagedEventHandler = null;
     this._windows.forEach(
-      (win) => win.connect("unmanaged", () => {
+      (win) => this._signals.connect(win, "unmanaged", () => {
+        this._signals.disconnect(win);
         this._unmanagedCounter++;
         if (this._unmanagedEventHandler && this._unmanagedCounter === this._windows.length)
           this._unmanagedEventHandler();
@@ -53,6 +58,11 @@ class MetaWindowGroup {
 
   connectObject(...args) {
     return this._windows[0].connectObject(...args);
+  }
+
+  destroy() {
+    this._signals.disconnect();
+    this._unmanagedEventHandler = null;
   }
 
   onAllWindowsUnmanaged(fn) {

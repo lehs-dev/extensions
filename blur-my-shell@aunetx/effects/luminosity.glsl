@@ -23,6 +23,10 @@ vec3 rgb_to_hsl(vec3 c) {
 
 void main() {
     vec4 c = texture2D(tex, cogl_tex_coord_in[0].st);
+    if (c.a <= 0.0) {
+        cogl_color_out = vec4(0.0);
+        return;
+    }
 
     vec3 pix_hsl = rgb_to_hsl(c.xyz) / c.a;
     pix_hsl.z = clamp(pix_hsl.z * brightness_multiplicator, 0., 1.);

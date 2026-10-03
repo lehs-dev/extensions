@@ -4,8 +4,8 @@ import { PrefKeys } from './prefKeys.js';
 
 export const schemaId = 'org.gnome.shell.extensions.search-light';
 
-export const SettingsKeys = () => {
-  let settingsKeys = new PrefKeys();
+export const SettingsKeys = (toRGBA) => {
+  let settingsKeys = new PrefKeys(toRGBA);
 
   settingsKeys.setKeys({
     'border-radius': {

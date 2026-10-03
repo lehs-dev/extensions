@@ -515,7 +515,10 @@ class Settings {
       );
       if (layouts.length === 0)
         throw new Error("At least one layout is required");
-      return layouts.filter((layout) => layout.tiles.length > 0);
+      const usableLayouts = layouts.filter((layout) => layout.tiles.length > 0);
+      if (usableLayouts.length === 0)
+        throw new Error("At least one nonempty layout is required");
+      return usableLayouts;
     } catch (_unused) {
       this.reset_layouts_json();
       return JSON.parse(

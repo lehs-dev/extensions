@@ -43,9 +43,11 @@ export class KimMenu extends PopupMenu.PopupMenu {
 
         for (let i = 0; i < properties.length; i++) {
             let property = Lib.parseProperty(properties[i]);
+            if (!property)
+                continue;
             this._addPropertyItem(property);
         }
-        if (properties.length > 0) {
+        if (this._propertySwitch.length > 0) {
             this.open(true);
         }
     }
@@ -95,7 +97,10 @@ export class KimMenu extends PopupMenu.PopupMenu {
         // Setting the max-height won't do any good if the minimum height of the
         // menu is higher then the screen; it's useful if part of the menu is
         // scrollable so the minimum height is smaller than the natural height
-        let monitor = Main.layoutManager.primaryMonitor;
+        let monitor = Main.layoutManager.findMonitorForActor(this.sourceActor);
+        monitor ??= Main.layoutManager.primaryMonitor;
+        if (!monitor)
+            return;
         this.actor.style =
             ('max-height: ' +
              Math.round(monitor.height - Main.panel.height) + 'px;');

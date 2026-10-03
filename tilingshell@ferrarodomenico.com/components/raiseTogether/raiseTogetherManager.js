@@ -21,12 +21,7 @@ class RaiseTogetherManager {
 
   destroy() {
     this._signals.disconnect();
-    const toDelete = [];
-    Object.keys(this._raiseId).forEach((key) => {
-      this._raiseId[key].win.disconnect(this._raiseId[key].id);
-      toDelete.push(key);
-    });
-    toDelete.forEach((key) => delete this._raiseId[key]);
+    this._raiseId = {};
   }
 
   _turnOn() {
@@ -46,12 +41,14 @@ class RaiseTogetherManager {
   }
 
   _connectRaisedSignal(window) {
+    if (this._raiseId[window.get_id()]) return;
     const raisedId = this._signals.connect(window, "raised", () => {
       if (!window.assignedTile) return;
       this._onTiledWindowRaised(window);
     });
     this._raiseId[window.get_id()] = { id: raisedId, win: window };
-    window.connect("unmanaged", () => {
+    this._signals.connect(window, "unmanaged", () => {
+      this._signals.disconnect(window);
       delete this._raiseId[window.get_id()];
     });
   }

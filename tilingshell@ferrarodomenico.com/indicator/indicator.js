@@ -210,6 +210,10 @@ const _Indicator = class _Indicator extends PanelMenu.Button {
   }
 
   _onDestroy() {
+    if (this._keyPressEvent) {
+      global.stage.disconnect(this._keyPressEvent);
+      this._keyPressEvent = null;
+    }
     this._editorDialog?.destroy();
     this._editorDialog = null;
     this._layoutEditor?.destroy();

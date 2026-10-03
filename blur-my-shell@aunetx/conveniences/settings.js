@@ -12,6 +12,47 @@ export const Type = {
     PIPELINES: 'Pipelines'
 };
 
+// Validate the whole value before exposing it to pipeline consumers. Returning
+// from a forEach callback would otherwise leave the original malformed value
+// in use even after resetting the setting.
+function unpack_pipelines(value) {
+    const is_record = object => object !== null && typeof object === 'object' && !Array.isArray(object);
+    const pips = value.deep_unpack();
+    if (!is_record(pips))
+        throw new Error('pipelines is not an object');
+
+    for (const pipeline_id of Object.keys(pips)) {
+        const pipeline = pips[pipeline_id];
+        if (!is_record(pipeline) || !('name' in pipeline) || !('effects' in pipeline))
+            throw new Error('pipeline has no name or effects');
+        const name = pipeline.name.deep_unpack();
+        if (typeof name !== 'string')
+            throw new Error('pipeline name is not a string');
+        const packed_effects = pipeline.effects.deep_unpack();
+        if (!Array.isArray(packed_effects))
+            throw new Error('pipeline effects is not an array');
+
+        const effects = [];
+        for (const packed_effect of packed_effects) {
+            const effect = packed_effect.deep_unpack();
+            if (!is_record(effect) || !('type' in effect) || !('id' in effect))
+                throw new Error('effect has no type or id');
+            const type = effect.type.deep_unpack();
+            const id = effect.id.deep_unpack();
+            if (typeof type !== 'string' || typeof id !== 'string')
+                throw new Error('effect type or id is not a string');
+            const params = 'params' in effect ? effect.params.deep_unpack() : {};
+            if (!is_record(params))
+                throw new Error('effect params is not an object');
+            for (const param_key of Object.keys(params))
+                params[param_key] = params[param_key].deep_unpack();
+            effects.push({ type, id, params });
+        }
+        pips[pipeline_id] = { name, effects };
+    }
+    return pips;
+}
+
 /// An object to get and manage the gsettings preferences.
 ///
 /// Should be initialized with an array of keys, for example:
@@ -122,80 +163,20 @@ export const Settings = class Settings {
                     case Type.PIPELINES:
                         Object.defineProperty(component, property_name, {
                             get() {
-                                let pips = component_settings.get_value(key.name).deep_unpack();
-                                Object.keys(pips).forEach(pipeline_id => {
-                                    let pipeline = pips[pipeline_id];
-
-                                    if (!('name' in pipeline)) {
-                                        this._warn('impossible to get pipelines, pipeline has not name, resetting');
-                                        component[property_name + '_reset']();
-                                        return component[property_name];
+                                try {
+                                    return unpack_pipelines(component_settings.get_value(key.name));
+                                } catch (error) {
+                                    this._warn(`impossible to get pipelines, ${error.message}, resetting`);
+                                    component[property_name + '_reset']();
+                                    // Read the default directly: do not recursively call this
+                                    // getter or return a partially unpacked invalid value.
+                                    try {
+                                        return unpack_pipelines(component_settings.get_default_value(key.name));
+                                    } catch (default_error) {
+                                        this._warn(`impossible to get default pipelines, ${default_error.message}`);
+                                        return {};
                                     }
-                                    let name = pipeline.name.deep_unpack();
-                                    if (typeof name !== 'string') {
-                                        this._warn('impossible to get pipelines, pipeline name is not a string, resetting');
-                                        component[property_name + '_reset']();
-                                        return component[property_name];
-                                    }
-
-                                    if (!('effects' in pipeline)) {
-                                        this._warn('impossible to get pipelines, pipeline has not effects, resetting');
-                                        component[property_name + '_reset']();
-                                        return component[property_name];
-                                    }
-                                    let effects = pipeline.effects.deep_unpack();
-                                    if (!Array.isArray(effects)) {
-                                        this._warn('impossible to get pipelines, pipeline effects is not an array, resetting');
-                                        component[property_name + '_reset']();
-                                        return component[property_name];
-                                    }
-
-                                    effects = effects.map(effect => effect.deep_unpack());
-                                    effects.forEach(effect => {
-                                        if (!('type' in effect)) {
-                                            this._warn('impossible to get pipelines, effect has not type, resetting');
-                                            component[property_name + '_reset']();
-                                            return component[property_name];
-                                        }
-                                        let type = effect.type.deep_unpack();
-                                        if (typeof type !== 'string') {
-                                            this._warn('impossible to get pipelines, effect type is not a string, resetting');
-                                            component[property_name + '_reset']();
-                                            return component[property_name];
-                                        }
-
-                                        if (!('id' in effect)) {
-                                            this._warn('impossible to get pipelines, effect has not id, resetting');
-                                            component[property_name + '_reset']();
-                                            return component[property_name];
-                                        }
-                                        let id = effect.id.deep_unpack();
-                                        if (typeof id !== 'string') {
-                                            this._warn('impossible to get pipelines, effect id is not a string, resetting');
-                                            component[property_name + '_reset']();
-                                            return component[property_name];
-                                        }
-
-                                        let params = {};
-                                        if ('params' in effect)
-                                            params = effect.params.deep_unpack();
-                                        if (!(params && typeof params === 'object' && params.constructor === Object)) {
-                                            this._warn('impossible to get pipelines, effect params is not an object, resetting');
-                                            component[property_name + '_reset']();
-                                            return component[property_name];
-                                        }
-                                        Object.keys(params).forEach(param_key => {
-                                            params[param_key] = params[param_key].deep_unpack();
-                                        });
-
-                                        effect.type = type;
-                                        effect.id = id;
-                                        effect.params = params;
-                                    });
-                                    pipeline.name = name;
-                                    pipeline.effects = effects;
-                                });
-                                return pips;
+                                }
                             },
                             set(pips) {
                                 let pipelines = {};

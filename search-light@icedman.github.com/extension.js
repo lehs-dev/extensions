@@ -79,7 +79,10 @@ var SearchLight = GObject.registerClass(
 
 export default class SearchLightExt extends Extension {
   enable() {
-    Main.overview.graphene = Graphene;
+    this._eventOwner = {};
+    this._visible = false;
+    this._unredirectDisabled = false;
+    this._inOverview = Main.overview.visible;
 
     this._style = new Style();
 
@@ -190,12 +193,16 @@ export default class SearchLightExt extends Extension {
     this._animationSpeed = this._settings.get_double('animation-speed');
 
     Main.overview.connectObject(
-      'overview-showing',
+      'showing',
       this._onOverviewShowing.bind(this),
-      'overview-hidden',
+      'hidden',
       this._onOverviewHidden.bind(this),
       this
     );
+
+    Main.layoutManager.connectObject('monitors-changed', () => {
+      if (this._visible) this._layout();
+    }, this);
 
     Shell.AppSystem.get_default().connectObject(
       'app-state-changed',
@@ -237,6 +244,15 @@ export default class SearchLightExt extends Extension {
   }
 
   disable() {
+    this.mainContainer?.remove_all_transitions();
+    this._visible = false;
+    this._remove_events();
+    this._release_ui();
+    this._restoreUnredirect();
+    global.display.disconnectObject(this);
+    Main.overview.disconnectObject(this);
+    Main.layoutManager.disconnectObject(this);
+    Shell.AppSystem.get_default().disconnectObject(this);
     this._hiTimer?.shutdown();
     this._loTimer?.shutdown();
     this._hiTimer = null;
@@ -244,9 +260,7 @@ export default class SearchLightExt extends Extension {
 
     if (this._indicator) {
       this._indicator.disconnectObject(this);
-      if (this._indicator.get_parent()) {
-        this._indicator.get_parent().remove_child(this._indicator);
-      }
+      this._indicator.destroy();
       this._indicator = null;
     }
 
@@ -256,7 +270,7 @@ export default class SearchLightExt extends Extension {
     this._settingsKeys.disconnectSettings();
     this._settings = null;
 
-    this._desktopSettings.disconnectObject();
+    this._desktopSettings.disconnectObject(this);
     this._desktopSettings = null;
 
     if (this.accel) {
@@ -273,15 +287,16 @@ export default class SearchLightExt extends Extension {
     this._removeProviders();
     this._providers = null;
 
-    if (this._background) {
-      if (this._background.get_parent()) {
-        this._background.get_parent().remove_child(this._background);
-      }
-      this._background = null;
-    }
-
     Main.layoutManager.removeChrome(this.mainContainer);
+    this.mainContainer.destroy();
     this.mainContainer = null;
+    this.container = null;
+    this._background = null;
+    this._bms = null;
+    this.windowEffect = null;
+    this._searchResults = null;
+    this._eventOwner = null;
+    if (Main.overview.searchLight === this) Main.overview.searchLight = null;
   }
 
   _createIndicator() {
@@ -407,13 +422,15 @@ export default class SearchLightExt extends Extension {
   }
 
   show() {
-    if (Main.overview.visible) return;
+    if (!this.mainContainer || Main.overview.visible || this._visible) return;
+    this.mainContainer.remove_all_transitions();
 
     if (this._animSeq) {
       this._hiTimer.cancel(this._animSeq);
       this._animSeq = null;
     }
     this._acquire_ui();
+    if (!this._entry || !this.monitor) return;
 
     if (this._bgActor) {
       let bgSource = Main.layoutManager._backgroundGroup.get_child_at_index(0);
@@ -423,7 +440,10 @@ export default class SearchLightExt extends Extension {
     this._updateCss();
     this._layout();
 
-    global.compositor.disable_unredirect();
+    if (!this._unredirectDisabled) {
+      global.compositor.disable_unredirect();
+      this._unredirectDisabled = true;
+    }
 
     this.mainContainer.show();
     this.container.show();
@@ -452,20 +472,28 @@ export default class SearchLightExt extends Extension {
       } else {
         this.mainContainer.scale_x = 1.0;
         this.mainContainer.scale_y = 1.0;
+        this.mainContainer.translation_x = 0;
+        this.mainContainer.translation_y = 0;
         this.mainContainer.opacity = 255;
       }
     }, 100);
   }
 
   hide() {
+    if (!this.mainContainer) return;
     if (this._isDraggingIcon()) {
       return;
     }
 
-    this._release_ui();
+    const wasVisible = this._visible;
+    this._visible = false;
+    this._hiTimer?.cancel(this._animSeq);
+    this._animSeq = null;
+    this.mainContainer.remove_all_transitions();
     this._remove_events();
+    this._release_ui();
 
-    if (this._useAnimations) {
+    if (wasVisible && this._useAnimations) {
       this.mainContainer.ease({
         opacity: 0,
         scale_x: 0.9,
@@ -477,16 +505,23 @@ export default class SearchLightExt extends Extension {
         onComplete: () => {
           this._visible = false;
           this.mainContainer.hide();
-          global.compositor.enable_unredirect();
+          this._restoreUnredirect();
         },
       });
     } else {
       this.mainContainer.opacity = 0;
       this._visible = false;
       this.mainContainer.hide();
-      global.compositor.enable_unredirect();
+      this._restoreUnredirect();
     }
     // this._hidePopups();
+  }
+
+  _restoreUnredirect() {
+    if (this._unredirectDisabled) {
+      global.compositor.enable_unredirect();
+      this._unredirectDisabled = false;
+    }
   }
 
   _isDraggingIcon() {
@@ -523,6 +558,8 @@ export default class SearchLightExt extends Extension {
       600 + ((this.sw * this.scaleFactor) / 2) * (this.scale_width || 0);
     this.height =
       400 + ((this.sh * this.scaleFactor) / 2) * (this.scale_height || 0);
+    this.width = Math.min(this.width, Math.max(1, this.sw - 32 * this.scaleFactor));
+    this.height = Math.min(this.height, Math.max(1, this.sh - 32 * this.scaleFactor));
 
     // initial height
     let font_size = 14;
@@ -606,7 +643,7 @@ export default class SearchLightExt extends Extension {
         return;
       }
 
-      let meta_background = bms.first_child.first_child;
+      let meta_background = bms.first_child?.first_child;
       if (!meta_background) {
         // this should exists
         return;
@@ -668,7 +705,7 @@ export default class SearchLightExt extends Extension {
       //
     }
     if (shortcut == '') {
-      shortcut = '<Control><Super>Space';
+      return;
     }
 
     if (!disable) {
@@ -677,12 +714,9 @@ export default class SearchLightExt extends Extension {
   }
 
   _queryDisplay() {
-    let idx = this.preferred_monitor || 0;
-    if (idx == 0) {
-      idx = Main.layoutManager.primaryIndex;
-    } else if (idx == Main.layoutManager.primaryIndex) {
-      idx = 0;
-    }
+    let idx = this.preferred_monitor > 0
+      ? this.preferred_monitor - 1
+      : Main.layoutManager.primaryIndex;
     this.monitor =
       Main.layoutManager.monitors[idx] || Main.layoutManager.primaryMonitor;
 
@@ -691,15 +725,16 @@ export default class SearchLightExt extends Extension {
       Main.layoutManager.monitors.forEach((m) => {
         if (
           pointer[0] >= m.x &&
-          pointer[0] <= m.x + m.width &&
+          pointer[0] < m.x + m.width &&
           pointer[1] >= m.y &&
-          pointer[1] <= m.y + m.height
+          pointer[1] < m.y + m.height
         ) {
           this.monitor = m;
         }
       });
     }
 
+    if (!this.monitor) return;
     this.sw = this.monitor.width;
     this.sh = this.monitor.height;
 
@@ -714,6 +749,9 @@ export default class SearchLightExt extends Extension {
 
   _acquire_ui() {
     if (this._entry) return;
+    if (!Main.overview.searchEntry || !Main.overview.searchController) return;
+    this._queryDisplay();
+    if (!this.monitor) return;
 
     if (!Main.overview._toggle) {
       Main.overview._toggle = Main.overview.toggle;
@@ -739,6 +777,7 @@ export default class SearchLightExt extends Extension {
     if (!this._entry) return;
     
     this._entryParent = this._entry.get_parent();
+    this._entryIndex = this._entryParent.get_children().indexOf(this._entry);
     this._entry.add_style_class_name('slc');
 
     this._search = Main.overview.searchController;
@@ -746,6 +785,7 @@ export default class SearchLightExt extends Extension {
     this._search.hide();
     this._searchResults = this._search._searchResults;
     this._searchParent = this._search.get_parent();
+    this._searchIndex = this._searchParent.get_children().indexOf(this._search);
 
     if (!this._searchResults._activateDefault) {
       this._searchResults._activateDefault =
@@ -790,11 +830,13 @@ export default class SearchLightExt extends Extension {
 
   _release_ui() {
     if (this._entry) {
+      this._entry.remove_style_class_name('slc');
       if (this._entry.get_parent()) {
         this._entry.get_parent().remove_child(this._entry);
       }
-      this._entryParent.add_child(this._entry);
+      this._entryParent.insert_child_at_index(this._entry, this._entryIndex);
       this._entry = null;
+      this._entryParent = null;
     }
 
     if (this._search) {
@@ -803,7 +845,7 @@ export default class SearchLightExt extends Extension {
       if (this._search.get_parent()) {
         this._search.get_parent().remove_child(this._search);
       }
-      this._searchParent.add_child(this._search);
+      this._searchParent.insert_child_at_index(this._search, this._searchIndex);
       if (this._textChangedEventId) {
         this._search._text.disconnect(this._textChangedEventId);
         this._textChangedEventId = null;
@@ -813,6 +855,7 @@ export default class SearchLightExt extends Extension {
         this._search.__searchCancelled = null;
       }
       this._search = null;
+      this._searchParent = null;
 
       if (this._searchResults._activateDefault) {
         this._searchResults.activateDefault =
@@ -930,12 +973,13 @@ export default class SearchLightExt extends Extension {
   }
 
   _add_events() {
+    this._remove_events();
     global.stage.connectObject(
       'notify::key-focus',
       this._onKeyFocusChanged.bind(this),
       'key-press-event',
       this._onKeyPressed.bind(this),
-      this
+      this._eventOwner
     );
 
     global.display.connectObject(
@@ -943,15 +987,14 @@ export default class SearchLightExt extends Extension {
       this._onFocusWindow.bind(this),
       'in-fullscreen-changed',
       this._onFullScreen.bind(this),
-      this
+      this._eventOwner
     );
   }
 
   _remove_events() {
-    global.display.disconnectObject(this);
-    global.stage.disconnectObject(this);
-    Main.overview.disconnectObject(this);
-    Shell.AppSystem.get_default().disconnectObject(this);
+    if (!this._eventOwner) return;
+    global.display.disconnectObject(this._eventOwner);
+    global.stage.disconnectObject(this._eventOwner);
   }
 
   _onOverviewShowing() {
@@ -1021,16 +1064,6 @@ export default class SearchLightExt extends Extension {
       this.hide();
     }
 
-    // hide window immediately when activated
-    if (focus && focus.activate) {
-      if (!focus._activate) {
-        focus._activate = focus.activate;
-        focus.activate = () => {
-          this.mainContainer.opacity = 0;
-          focus._activate();
-        };
-      }
-    }
   }
 
   _onKeyPressed(obj, evt) {

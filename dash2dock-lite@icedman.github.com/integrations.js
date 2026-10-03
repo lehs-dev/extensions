@@ -180,7 +180,7 @@ export const Integrations = class {
       let rw = dock.renderArea.width;
       let rh = dock.renderArea.height;
 
-      let meta_background = bms.first_child.first_child;
+      let meta_background = bms.first_child?.first_child;
       if (!meta_background) {
         // this should exists
         return;

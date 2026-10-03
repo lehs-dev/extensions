@@ -1634,17 +1634,20 @@ export class API
             this._main.activateWindow(window);
         };
 
+        // Preserve Shell's existing handlers and their connectObject ownership.
+        this._windowAttentionOriginalSignals = [
+            this.#getSignalId(display, 'window-demands-attention'),
+            this.#getSignalId(display, 'window-marked-urgent'),
+        ].filter(id => id !== 0);
+        for (const id of this._windowAttentionOriginalSignals) {
+            this._gobject.signal_handler_block(display, id);
+        }
+
         this._displayWindowDemandsAttentionSignal
         = display.connect('window-demands-attention', demandFunction);
         this._displayWindowMarkedUrgentSignal
         = display.connect('window-marked-urgent', demandFunction);
 
-        // since removing '_windowDemandsAttentionId' doesn't have any effect
-        // we remove the original signal and re-connect it on disable
-        let signalId = this.#getSignalId(global.display, 'window-demands-attention');
-        let signalId2 = this.#getSignalId(global.display, 'window-marked-urgent');
-        display.disconnect(signalId);
-        display.disconnect(signalId2);
     }
 
     /**
@@ -1668,15 +1671,12 @@ export class API
         this._displayWindowDemandsAttentionSignal = null;
         this._displayWindowMarkedUrgentSignal = null;
 
-        let wah = this._main.windowAttentionHandler;
-        wah._windowDemandsAttentionId = display.connect(
-            'window-demands-attention',
-            wah._onWindowDemandsAttention.bind(wah)
-        );
-        wah._windowDemandsAttentionId = display.connect(
-            'window-marked-urgent',
-            wah._onWindowDemandsAttention.bind(wah)
-        );
+        for (const id of this._windowAttentionOriginalSignals ?? []) {
+            if (this._gobject.signal_handler_is_connected(display, id)) {
+                this._gobject.signal_handler_unblock(display, id);
+            }
+        }
+        delete this._windowAttentionOriginalSignals;
     }
 
     /**
@@ -1779,7 +1779,9 @@ export class API
 
         if (this._startupCompleteSignal) {
             this._main.layoutManager.disconnect(this._startupCompleteSignal);
+            this._startupCompleteSignal = null;
         }
+        this._main.sessionMode.hasOverview = this.#originals['sessionModeHasOverview'];
     }
 
     /**
@@ -1865,6 +1867,7 @@ export class API
         let classname = this.#getAPIClassname('no-workspaces-in-app-grid');
         if (this._appButtonForComputeWorkspacesSignal) {
             showAppsButton.disconnect(this._appButtonForComputeWorkspacesSignal);
+            this._appButtonForComputeWorkspacesSignal = null;
             this.UIStyleClassRemove(classname);
         }
 
@@ -2448,6 +2451,9 @@ export class API
      */
     blockOverlayKey()
     {
+        if (this._overlayKeyOldSignalId) {
+            return;
+        }
         this._overlayKeyOldSignalId = this.#getSignalId(global.display, 'overlay-key');
 
         if (!this._overlayKeyOldSignalId) {
@@ -2594,6 +2600,9 @@ export class API
             this.#originals['osdWindowYAlign'] === undefined
         ) {
             let osdWindows = this._main.osdWindowManager._osdWindows;
+            if (osdWindows.length === 0) {
+                return;
+            }
             this.#originals['osdWindowXAlign'] = osdWindows[0].x_align;
             this.#originals['osdWindowYAlign'] = osdWindows[0].y_align;
         }
@@ -3005,6 +3014,9 @@ export class API
         this._lookingGlassShowSignal = lookingGlass.connect('show', () => {
             let [originalWidth, originalHeight] = this._lookingGlassOriginalSize;
             let monitorInfo = this.monitorGetInfo();
+            if (!monitorInfo) {
+                return;
+            }
 
             let width = this._lookingGlassWidth ?? null;
             let height = this._lookingGlassHeight ?? null;
@@ -3037,6 +3049,9 @@ export class API
         if (!this._monitorsChangedSignal) {
             this._monitorsChangedSignal = this._main.layoutManager.connect('monitors-changed',
             () => {
+                if (!this._main.layoutManager.primaryMonitor) {
+                    return;
+                }
                 this.#unregisterLookingGlassSignals()
                 this.#registerLookingGlassSignals();
             });
@@ -3422,6 +3437,7 @@ export class API
         this.#onQuickSettingsPropertyCall('_rfkill', (rfkill) => {
             if (this._rfkillToggleShowSignal) {
                 rfkill._rfkillToggle.disconnect(this._rfkillToggleShowSignal);
+                this._rfkillToggleShowSignal = null;
             }
 
             if (this.#originals['rfkilToggleVisibleDefaultStatus'] !== undefined) {
@@ -3442,7 +3458,7 @@ export class API
         this._rfkillToggleShowSignal;
 
         this.#onQuickSettingsPropertyCall('_rfkill', (rfkill) => {
-            if (!this.#originals['rfkilToggleVisibleDefaultStatus']) {
+            if (this.#originals['rfkilToggleVisibleDefaultStatus'] === undefined) {
                 this.#originals['rfkilToggleVisibleDefaultStatus'] = rfkill._rfkillToggle.visible;
             }
 
@@ -3555,6 +3571,7 @@ export class API
 
             if (this._backlightToggleShowSignal) {
                 item.disconnect(this._backlightToggleShowSignal);
+                this._backlightToggleShowSignal = null;
             }
         });
     }
@@ -3571,7 +3588,7 @@ export class API
         this.#onQuickSettingsPropertyCall('_backlight', (backlight) => {
             let item = backlight.quickSettingsItems[0];
 
-            if (!this.#originals['backlightToggleVisibleDefaultStatus']) {
+            if (this.#originals['backlightToggleVisibleDefaultStatus'] === undefined) {
                 this.#originals['backlightToggleVisibleDefaultStatus'] = item.visible;
             }
 
@@ -3598,6 +3615,11 @@ export class API
         const quickSettings = this._main.panel.statusArea.quickSettings;
         const indicators = quickSettings._indicators;
 
+        if (this._quickSettingsCallSignals?.[propertyName]) {
+            indicators.disconnect(this._quickSettingsCallSignals[propertyName]);
+            delete this._quickSettingsCallSignals[propertyName];
+        }
+
         if (quickSettings[propertyName]) {
             func(quickSettings[propertyName]);
             return;
@@ -3620,6 +3642,7 @@ export class API
 
                 if (this._quickSettingsCallSignals[propertyName]) {
                     indicators.disconnect(this._quickSettingsCallSignals[propertyName]);
+                    delete this._quickSettingsCallSignals[propertyName];
                 }
 
                 func(quickSettings[propertyName]);

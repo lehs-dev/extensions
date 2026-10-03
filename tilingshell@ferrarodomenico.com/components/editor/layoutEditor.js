@@ -282,10 +282,12 @@ const _LayoutEditor = class _LayoutEditor extends St.Widget {
   }
 
   _onDestroy() {
-    this._minimizedWindows.forEach((win) => win.unminimize());
+    this._minimizedWindows.forEach((win) => {
+      if (win.get_compositor_private()) win.unminimize();
+    });
+    this._minimizedWindows = [];
     this.destroy_all_children();
     this._sliders = [];
-    super.destroy();
   }
 };
 registerGObjectClass(_LayoutEditor);

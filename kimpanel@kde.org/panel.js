@@ -150,22 +150,24 @@ export class InputPanel extends GObject.Object {
         // update label and text
         let lookupTable = this.lookupTableLayout.get_children();
         for (let i = 0; i < lookupTable.length; i++) {
-            if (label[i].length == 0)
+            const candidateLabel = label[i] ?? '';
+            if (candidateLabel.length == 0)
                 lookupTable[i].ignore_focus = true;
             else
                 lookupTable[i].ignore_focus = false;
             lookupTable[i].candidate_index = i;
-            lookupTable[i].text = label[i] + table[i];
+            lookupTable[i].text = candidateLabel + table[i];
         }
     }
     setLookupTableCursor(cursor) {
-        let labelLen = this.lookupTableLayout.get_children().length;
+        const candidates = this.lookupTableLayout.get_children();
+        let labelLen = candidates.length;
         for (var i = 0; i < labelLen; i++) {
             if (i == cursor)
-                this.lookupTableLayout.get_children()[i].add_style_pseudo_class(
+                candidates[i].add_style_pseudo_class(
                     'active');
             else
-                this.lookupTableLayout.get_children()[i]
+                candidates[i]
                     .remove_style_pseudo_class('active');
         }
     }
@@ -224,11 +226,15 @@ export class InputPanel extends GObject.Object {
         if (monitorIndex >= 0 && monitorIndex < Main.layoutManager.monitors.length) {
             monitor = Main.layoutManager.monitors[monitorIndex];
         }
+        if (!monitor) {
+            this.hide();
+            return;
+        }
 
         x = rect.x;
         y = rect.y;
-        w = rect.w;
-        h = rect.h;
+        w = rect.width;
+        h = rect.height;
 
         let panel_height = this.panel.get_height();
 

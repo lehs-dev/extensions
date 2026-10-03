@@ -11,34 +11,58 @@ export class GapManager {
     }
 
     rebuild() {
-        this._destroyActors();
-
         const margins = this._getMargins();
+        const edges = [];
 
         for (const monitor of Main.layoutManager.monitors) {
-            if (margins.top > 0)
-                this._addEdge(monitor.x, monitor.y, monitor.width, margins.top);
+            // Keep a usable work area even on tiny virtual displays.
+            const horizontalScale = Math.min(1,
+                Math.max(0, monitor.width - 1) / Math.max(1, margins.left + margins.right));
+            const verticalScale = Math.min(1,
+                Math.max(0, monitor.height - 1) / Math.max(1, margins.top + margins.bottom));
+            const top = Math.floor(margins.top * verticalScale);
+            const bottom = Math.floor(margins.bottom * verticalScale);
+            const left = Math.floor(margins.left * horizontalScale);
+            const right = Math.floor(margins.right * horizontalScale);
+            if (top > 0)
+                edges.push([monitor.x, monitor.y, monitor.width, top]);
 
-            if (margins.bottom > 0) {
-                this._addEdge(
+            if (bottom > 0) {
+                edges.push([
                     monitor.x,
-                    monitor.y + monitor.height - margins.bottom,
+                    monitor.y + monitor.height - bottom,
                     monitor.width,
-                    margins.bottom
-                );
+                    bottom,
+                ]);
             }
 
-            if (margins.left > 0)
-                this._addEdge(monitor.x, monitor.y, margins.left, monitor.height);
+            if (left > 0)
+                edges.push([monitor.x, monitor.y, left, monitor.height]);
 
-            if (margins.right > 0) {
-                this._addEdge(
-                    monitor.x + monitor.width - margins.right,
+            if (right > 0) {
+                edges.push([
+                    monitor.x + monitor.width - right,
                     monitor.y,
-                    margins.right,
-                    monitor.height
-                );
+                    right,
+                    monitor.height,
+                ]);
             }
+        }
+
+        // Updating actors preserves Shell's chrome tracking and avoids destroying
+        // and recreating four actors per monitor for every preferences change.
+        edges.forEach(([x, y, width, height], index) => {
+            const actor = this._actors[index];
+            if (actor) {
+                actor.set_position(x, y);
+                actor.set_size(width, height);
+            } else {
+                this._addEdge(x, y, width, height);
+            }
+        });
+        for (const actor of this._actors.splice(edges.length)) {
+            Main.layoutManager.removeChrome(actor);
+            actor.destroy();
         }
     }
 

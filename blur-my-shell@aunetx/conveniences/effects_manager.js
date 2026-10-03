@@ -32,6 +32,8 @@ export const EffectsManager = class EffectsManager {
     }
 
     connect_to_destroy(effect) {
+        // Pooled effects must have exactly one actor observer per checkout.
+        this.connections.disconnect_all_for(effect);
         effect.old_actor = effect.get_actor();
         if (effect.old_actor)
             effect.old_actor_id = effect.old_actor.connect('destroy', _ => {
@@ -40,11 +42,15 @@ export const EffectsManager = class EffectsManager {
 
         this.connections.connect(effect, 'notify::actor', _ => {
             let actor = effect.get_actor();
+            if (actor === effect.old_actor)
+                return;
 
-            if (effect.old_actor && actor != effect.old_actor)
+            if (effect.old_actor && effect.old_actor_id)
                 effect.old_actor.disconnect(effect.old_actor_id);
 
-            if (actor && actor != effect.old_actor) {
+            effect.old_actor = actor;
+            effect.old_actor_id = null;
+            if (actor) {
                 effect.old_actor_id = actor.connect('destroy', _ => {
                     this.remove(effect, true);
                 });
@@ -54,16 +60,17 @@ export const EffectsManager = class EffectsManager {
 
     // IMPORTANT: do never call this in a mutable `this.used.forEach`
     remove(effect, actor_already_destroyed = false) {
+        this.connections.disconnect_all_for(effect);
+        if (effect.old_actor && effect.old_actor_id)
+            effect.old_actor.disconnect(effect.old_actor_id);
+        delete effect.old_actor;
+        delete effect.old_actor_id;
         if (!actor_already_destroyed)
             try {
                 effect.get_actor()?.remove_effect(effect);
             } catch (e) {
                 this._warn(`could not remove the effect, continuing: ${e}`);
             }
-        if (effect.old_actor)
-            effect.old_actor.disconnect(effect.old_actor_id);
-        delete effect.old_actor;
-        delete effect.old_actor_id;
 
         let index = this.used.indexOf(effect);
         if (index >= 0) {

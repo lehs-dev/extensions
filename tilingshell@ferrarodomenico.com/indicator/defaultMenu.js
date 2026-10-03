@@ -122,6 +122,9 @@ class DefaultMenu {
   _scalingFactor;
   _children;
   _openPrefsFn;
+  _destroyed = false;
+  _monitorDetailsProcess = null;
+  _monitorDetailsCancellable = null;
   constructor(indicator, enableScalingFactor, openPrefsFn) {
     this._indicator = indicator;
     this._signals = new SignalHandling();
@@ -148,7 +151,7 @@ class DefaultMenu {
         this._container
       );
       const scalingFactor = getMonitorScalingFactor(
-        monitor?.index || Main.layoutManager.primaryIndex
+        monitor?.index ?? Main.layoutManager.primaryIndex
       );
       enableScalingFactorSupport(this._container, scalingFactor);
     }
@@ -193,17 +196,15 @@ class DefaultMenu {
       }
     );
     this._signals.connect(Main.layoutManager, "monitors-changed", () => {
-      if (!enableScalingFactor) return;
-      const monitor = Main.layoutManager.findMonitorForActor(
-        this._container
-      );
-      const scalingFactor = getMonitorScalingFactor(
-        monitor?.index || Main.layoutManager.primaryIndex
-      );
-      enableScalingFactorSupport(this._container, scalingFactor);
-      this._updateScaling();
-      if (this._layoutsRows.length !== getMonitors().length)
-        this._drawLayouts();
+      if (enableScalingFactor) {
+        const monitor = Main.layoutManager.findMonitorForActor(this._container);
+        const scalingFactor = getMonitorScalingFactor(
+          monitor?.index ?? Main.layoutManager.primaryIndex
+        );
+        enableScalingFactorSupport(this._container, scalingFactor);
+        this._updateScaling();
+      }
+      this._drawLayouts();
       this._computeMonitorsDetails();
     });
     this._computeMonitorsDetails();
@@ -216,6 +217,11 @@ class DefaultMenu {
 
   // compute monitors details and update labels asynchronously (if we have successful results...)
   _computeMonitorsDetails() {
+    this._monitorDetailsCancellable?.cancel();
+    this._monitorDetailsProcess?.force_exit();
+    this._monitorDetailsCancellable = null;
+    this._monitorDetailsProcess = null;
+    if (this._destroyed) return;
     if (getMonitors().length === 1) {
       this._layoutsRows.forEach((lr) => lr.updateMonitorName(false, []));
       return;
@@ -232,14 +238,14 @@ class DefaultMenu {
         ["gjs", "-m", `${this._indicator.path}/monitorDescription.js`],
         Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
       );
-      proc.communicate_utf8_async(
-        null,
-        null,
-        (pr, res) => {
-          if (!pr) return;
+      const cancellable = new Gio.Cancellable();
+      this._monitorDetailsProcess = proc;
+      this._monitorDetailsCancellable = cancellable;
+      proc.communicate_utf8_async(null, cancellable, (pr, res) => {
+        try {
           const [, stdout, stderr] = pr.communicate_utf8_finish(res);
+          if (this._destroyed || cancellable.is_cancelled()) return;
           if (pr.get_successful()) {
-            debug(stdout);
             const parsedMonitorsDetails = JSON.parse(stdout);
             this._layoutsRows.forEach(
               (lr) => lr.updateMonitorName(true, parsedMonitorsDetails)
@@ -247,8 +253,15 @@ class DefaultMenu {
           } else {
             debug("error:", stderr);
           }
+        } catch (error) {
+          if (!cancellable.is_cancelled()) debug(error);
+        } finally {
+          if (this._monitorDetailsProcess === proc) {
+            this._monitorDetailsProcess = null;
+            this._monitorDetailsCancellable = null;
+          }
         }
-      );
+      });
     } catch (e) {
       debug(e);
     }
@@ -360,6 +373,11 @@ class DefaultMenu {
   }
 
   destroy() {
+    this._destroyed = true;
+    this._monitorDetailsCancellable?.cancel();
+    this._monitorDetailsProcess?.force_exit();
+    this._monitorDetailsCancellable = null;
+    this._monitorDetailsProcess = null;
     this._signals.disconnect();
     this._layoutsRows.forEach((lr) => lr.destroy());
     this._layoutsRows = [];

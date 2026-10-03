@@ -6,7 +6,8 @@ export const SLIDE_FACTOR = 0.75;
 export const RETURN_MS = 130;
 
 export function computeBounceParams({duration, target, current = 0}) {
-  if (duration === undefined || duration <= 0 || duration > BOUNCE_MAX_MS)
+  if (!Number.isFinite(duration) || !Number.isFinite(target) ||
+      !Number.isFinite(current) || duration <= 0 || duration > BOUNCE_MAX_MS)
     return null;
 
   const delta = target - current;

@@ -39,6 +39,7 @@ class ServiceCounter {
 
 export const Services = class {
   enable() {
+    this._enabled = true;
     this._mounts = {};
     this._services = [
       new ServiceCounter('trash', 1000 * 15, this.checkTrash.bind(this)),
@@ -91,23 +92,26 @@ export const Services = class {
     );
 
     this._trashDir = Gio.File.new_for_uri('trash:///');
-    this._trashMonitor = this._trashDir.monitor(
-      Gio.FileMonitorFlags.WATCH_MOVES,
-      null
-    );
-    this._trashMonitor.connectObject(
-      'changed',
-      (fileMonitor, file, otherFile, eventType) => {
-        switch (eventType) {
-          case Gio.FileMonitorEvent.CHANGED:
-          case Gio.FileMonitorEvent.CREATED:
-          case Gio.FileMonitorEvent.MOVED_IN:
-            return;
-        }
-        this.checkTrash();
-      },
-      this
-    );
+    try {
+      this._trashMonitor = this._trashDir.monitor(
+        Gio.FileMonitorFlags.WATCH_MOVES,
+        null
+      );
+      this._trashMonitor.connectObject(
+        'changed',
+        (fileMonitor, file, otherFile, eventType) => {
+          switch (eventType) {
+            case Gio.FileMonitorEvent.CHANGED:
+              return;
+          }
+          this.checkTrash();
+        },
+        this
+      );
+    } catch (err) {
+      this._trashMonitor = null;
+      console.log(err);
+    }
 
     this.setupDownloads();
 
@@ -123,12 +127,22 @@ export const Services = class {
   }
 
   disable() {
-    this._downloadsMonitor.disconnectObject(this);
+    this._enabled = false;
+    this._downloadScanGeneration = (this._downloadScanGeneration || 0) + 1;
+    this._downloadsCancellable?.cancel();
+    this._downloadsCancellable = null;
+    this.extension._loTimer?.cancel(this._debounceDownloadsSeq);
+    this.extension._loTimer?.cancel(this._debounceRecentsSeq);
+    this._debounceDownloadsSeq = null;
+    this._debounceRecentsSeq = null;
+    this._downloadsMonitor?.disconnectObject(this);
+    this._downloadsMonitor?.cancel();
     this._downloadsMonitor = null;
     this._services = [];
     this._volumeMonitor.disconnectObject(this);
     this._volumeMonitor = null;
-    this._trashMonitor.disconnectObject(this);
+    this._trashMonitor?.disconnectObject(this);
+    this._trashMonitor?.cancel();
     this._trashMonitor = null;
     this._trashDir = null;
   }
@@ -136,37 +150,51 @@ export const Services = class {
   setupDownloads() {
     if (this._downloadsMonitor) {
       this._downloadsMonitor.disconnectObject(this);
+      this._downloadsMonitor.cancel();
       this._downloadsMonitor = null;
     }
-    this._downloadsUserDir = this.extension.downloads_path;
-    let fn = Gio.File.new_for_path(this._downloadsUserDir);
-    if (!fn.query_exists(null)) {
+    this._downloadsCancellable?.cancel();
+    this._downloadsCancellable = new Gio.Cancellable();
+    this._downloadScanGeneration = (this._downloadScanGeneration || 0) + 1;
+    this._downloadsUserDir = this.extension.downloads_path || null;
+    if (this._downloadsUserDir && !Gio.File.new_for_path(this._downloadsUserDir).query_exists(null))
       this._downloadsUserDir = null;
-    }
     if (this._downloadsUserDir) {
       this._downloadsDir = Gio.File.new_for_path(this._downloadsUserDir);
     } else {
       // fallback
-      this._downloadsDir = Gio.File.new_for_path('Downloads');
+      this._downloadsDir = Gio.File.new_for_path(
+        GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) ||
+        GLib.build_filenamev([GLib.get_home_dir(), 'Downloads'])
+      );
     }
 
-    this._downloadsMonitor = this._downloadsDir.monitor(
-      Gio.FileMonitorFlags.WATCH_MOVES,
-      null
-    );
-    this._downloadsMonitor.connectObject(
-      'changed',
-      (fileMonitor, file, otherFile, eventType) => {
-        switch (eventType) {
-          case Gio.FileMonitorEvent.CHANGED:
-          case Gio.FileMonitorEvent.CREATED:
-          case Gio.FileMonitorEvent.MOVED_IN:
-            return;
-        }
-        this._debounceCheckDownloads();
-      },
-      this
-    );
+    if (!this._downloadsDir.query_exists(null)) {
+      this._downloadFiles = [];
+      this._downloadFilesLength = 0;
+      return;
+    }
+
+    try {
+      this._downloadsMonitor = this._downloadsDir.monitor(
+        Gio.FileMonitorFlags.WATCH_MOVES,
+        null
+      );
+      this._downloadsMonitor.connectObject(
+        'changed',
+        (fileMonitor, file, otherFile, eventType) => {
+          switch (eventType) {
+            case Gio.FileMonitorEvent.CHANGED:
+              return;
+          }
+          this._debounceCheckDownloads();
+        },
+        this
+      );
+    } catch (err) {
+      // A usable directory may be on a backend without monitor support.
+      console.log(err);
+    }
 
     this._debounceCheckDownloads();
   }
@@ -387,70 +415,94 @@ export const Services = class {
   checkTrash() {
     if (!this.extension.trash_icon) return;
 
-    let iter = this._trashDir.enumerate_children(
-      'standard::*',
-      Gio.FileQueryInfoFlags.NONE,
-      null
-    );
-    let prev = this.trashFull;
-    this.trashFull = iter.next_file(null) != null;
-    if (prev != this.trashFull) {
-      this.extension.animate({ refresh: true });
+    let iter;
+    try {
+      iter = this._trashDir.enumerate_children(
+        Gio.FILE_ATTRIBUTE_STANDARD_NAME,
+        Gio.FileQueryInfoFlags.NONE,
+        null
+      );
+      let prev = this.trashFull;
+      this.trashFull = iter.next_file(null) != null;
+      if (prev != this.trashFull) {
+        this.extension.animate({ refresh: true });
+      }
+      return this.trashFull;
+    } catch (err) {
+      console.log(err);
+      return false;
+    } finally {
+      iter?.close(null);
     }
-    return this.trashFull;
   }
 
-  async checkRecentFilesInFolder(path) {
-    console.log(`checking ${path}`);
+  async checkRecentFilesInFolder(path, cancellable = null) {
     let maxs = [5, 8, 10, 12, 15, 20, 25];
-    let max_recent_items = maxs[this.extension.max_recent_items || 0];
+    let max_recent_items = maxs[this.extension.max_recent_items || 0] || maxs[0];
     let downloadFiles = [];
     let downloadFilesLength = 0;
 
     let directory = Gio.File.new_for_path(path);
-    let enumerator = directory.enumerate_children(
-      [
-        Gio.FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
-        Gio.FILE_ATTRIBUTE_STANDARD_NAME,
-        Gio.FILE_ATTRIBUTE_STANDARD_ICON,
-        Gio.FILE_ATTRIBUTE_TIME_MODIFIED,
-      ].join(','),
-      Gio.FileQueryInfoFlags.NONE,
-      null
-    );
+    let enumerator = await new Promise((resolve, reject) => {
+      directory.enumerate_children_async(
+        [
+          Gio.FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+          Gio.FILE_ATTRIBUTE_STANDARD_NAME,
+          Gio.FILE_ATTRIBUTE_STANDARD_ICON,
+          Gio.FILE_ATTRIBUTE_TIME_MODIFIED,
+        ].join(','),
+        Gio.FileQueryInfoFlags.NONE,
+        GLib.PRIORITY_DEFAULT,
+        cancellable,
+        (file, result) => {
+          try { resolve(file.enumerate_children_finish(result)); }
+          catch (err) { reject(err); }
+        });
+    });
 
-    let fileInfo;
-    while ((fileInfo = enumerator.next_file(null)) !== null) {
-      let fileName = fileInfo.get_name();
-      let fileModified = fileInfo.get_modification_time();
+    try {
+      while (true) {
+        const infos = await new Promise((resolve, reject) => {
+          enumerator.next_files_async(100, GLib.PRIORITY_DEFAULT, cancellable,
+            (source, result) => {
+              try { resolve(source.next_files_finish(result)); }
+              catch (err) { reject(err); }
+            });
+        });
+        if (!infos.length) break;
+        downloadFilesLength += infos.length;
+        for (const fileInfo of infos) {
+          let fileName = fileInfo.get_name();
+          let modified = fileInfo.get_attribute_uint64(Gio.FILE_ATTRIBUTE_TIME_MODIFIED);
 
-      let icon = 'file';
-      if (fileInfo.get_icon() && fileInfo.get_icon().names) {
-        icon =
-          this.extension.lookup_icon_from_names(fileInfo.get_icon().names) ??
-          icon;
+          downloadFiles.push({
+            index: 0,
+            name: fileName,
+            display: fileName,
+            type: fileInfo.get_content_type() || 'application/octet-stream',
+            path: [path, fileName].join('/'),
+            date: { tv_sec: modified },
+            fileInfo: fileInfo,
+          });
+        }
+        // Keep only the newest items; large folders do not retain every FileInfo.
+        downloadFiles.sort((a, b) => b.date.tv_sec - a.date.tv_sec);
+        downloadFiles.splice(max_recent_items);
       }
-
-      downloadFiles.push({
-        index: 0,
-        name: fileName,
-        display: fileName,
-        icon: icon,
-        type: fileInfo.get_content_type(),
-        path: [path, fileName].join('/'),
-        date: fileModified ?? { tv_sec: 0 },
-        fileInfo: fileInfo,
+    } finally {
+      await new Promise((resolve, reject) => {
+        enumerator.close_async(GLib.PRIORITY_DEFAULT, null, (source, result) => {
+          try { source.close_finish(result); resolve(); }
+          catch (err) { reject(err); }
+        });
       });
     }
-
-    downloadFilesLength = downloadFiles.length;
-    downloadFiles.sort((a, b) => {
-      return a.date.tv_sec > b.date.tv_sec ? -1 : 1;
-    });
 
     let index = 0;
     downloadFiles.forEach((f) => {
       f.index = index++;
+      const names = f.fileInfo.get_icon()?.get_names?.() || [];
+      f.icon = this.extension.lookup_icon_from_names(names) || 'file';
     });
 
     downloadFiles.splice(max_recent_items);
@@ -594,8 +646,8 @@ export const Services = class {
 
   _debounceCheckRecents() {
     if (this.extension._loTimer) {
-      if (!this._debounceCheckSeq) {
-        this._debounceCheckSeq = this.extension._loTimer.runDebounced(
+      if (!this._debounceRecentsSeq) {
+        this._debounceRecentsSeq = this.extension._loTimer.runDebounced(
           () => {
             this.checkRecents();
           },
@@ -603,25 +655,29 @@ export const Services = class {
           'debounceCheckRecents'
         );
       } else {
-        this.extension._loTimer.runDebounced(this._debounceCheckSeq);
+        this.extension._loTimer.runDebounced(this._debounceRecentsSeq);
       }
     }
   }
 
   async checkDownloads() {
+    const generation = this._downloadScanGeneration = (this._downloadScanGeneration || 0) + 1;
+    this._downloadsCancellable?.cancel();
+    this._downloadsCancellable = new Gio.Cancellable();
     try {
       let path = this._downloadsDir.get_path();
-      [this._downloadFiles, this._downloadFilesLength] =
-        await this.checkRecentFilesInFolder(path);
+      const result = await this.checkRecentFilesInFolder(path, this._downloadsCancellable);
+      if (this._enabled && generation === this._downloadScanGeneration)
+        [this._downloadFiles, this._downloadFilesLength] = result;
     } catch (err) {
-      console.log(err);
+      if (this._enabled && generation === this._downloadScanGeneration) console.log(err);
     }
   }
 
   _debounceCheckDownloads() {
     if (this.extension._loTimer) {
-      if (!this._debounceCheckSeq) {
-        this._debounceCheckSeq = this.extension._loTimer.runDebounced(
+      if (!this._debounceDownloadsSeq) {
+        this._debounceDownloadsSeq = this.extension._loTimer.runDebounced(
           () => {
             this.checkDownloads();
           },
@@ -629,7 +685,7 @@ export const Services = class {
           'debounceCheckDownloads'
         );
       } else {
-        this.extension._loTimer.runDebounced(this._debounceCheckSeq);
+        this.extension._loTimer.runDebounced(this._debounceDownloadsSeq);
       }
     }
   }
@@ -652,7 +708,7 @@ export const Services = class {
       }
     }
 
-    return 'Volume';
+    return name || mount.get_name() || 'Volume';
   }
 
   checkMounts() {

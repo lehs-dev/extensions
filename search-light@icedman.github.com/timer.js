@@ -10,6 +10,7 @@ export const Timer = class {
   }
 
   initialize(resolution) {
+    this._paused = false;
     this._resolution = resolution || 1000;
     this._autoStart = true;
     this._autoHibernate = true;
@@ -23,6 +24,7 @@ export const Timer = class {
     this._autoStart = false;
     this._hibernating = false;
     this.stop();
+    this._subscribers = [];
   }
 
   start(resolution) {
@@ -136,11 +138,17 @@ export const Timer = class {
       return true;
     }
 
-    this._subscribers.forEach((s) => {
-      if (s.onUpdate) {
-        s.onUpdate(s, this._resolution);
+    for (const s of [...this._subscribers]) {
+      if (!this._timeoutId) break;
+      if (s.onUpdate && this._subscribers.some((active) => active._id === s._id)) {
+        try {
+          s.onUpdate(s, this._resolution);
+        } catch (err) {
+          this.unsubscribe(s);
+          console.error(err);
+        }
       }
-    });
+    }
 
     this._time += this._resolution;
 
@@ -285,8 +293,8 @@ export const Timer = class {
       onUpdate: (s, dt) => {
         s._time += dt;
         if (s._time >= s._delay) {
-          s._func(s);
           this.unsubscribe(s);
+          s._func(s);
         }
       },
     };
@@ -307,8 +315,8 @@ export const Timer = class {
       onUpdate: (s, dt) => {
         s._time += dt;
         if (s._time >= s._delay) {
-          s._func(s);
           this.unsubscribe(s);
+          s._func(s);
         }
       },
     };

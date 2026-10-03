@@ -106,8 +106,8 @@ const _TilingShellWindowManager = class _TilingShellWindowManager extends GObjec
     staticClone.ease({
       x: params.to.x - xExcludingShadow,
       y: params.to.y - yExcludingShadow,
-      width: params.to.width + 2 * yExcludingShadow,
-      height: params.to.height + 2 * xExcludingShadow,
+      width: params.to.width + 2 * xExcludingShadow,
+      height: params.to.height + 2 * yExcludingShadow,
       duration: params.duration,
       onStopped: () => {
         winActor.opacity = 255;
@@ -119,7 +119,7 @@ const _TilingShellWindowManager = class _TilingShellWindowManager extends GObjec
     winActor.set_position(params.to.x, params.to.y);
     winActor.set_size(params.to.width, params.to.height);
     const user_op = false;
-    if (params.monitorIndex)
+    if (params.monitorIndex !== undefined)
       params.window.move_to_monitor(params.monitorIndex);
     params.window.move_frame(user_op, params.to.x, params.to.y);
     params.window.move_resize_frame(

@@ -324,6 +324,7 @@ const _KeyBindings = class _KeyBindings extends GObject.Object {
   }
 
   destroy() {
+    this._signals.disconnect();
     this._removeKeybindings();
   }
 };

@@ -1,35 +1,24 @@
 class SignalHandling {
   _signalsIds;
   constructor() {
-    this._signalsIds = {};
+    this._signalsIds = [];
   }
 
   connect(obj, key, fun) {
     const signalId = obj.connect(key, fun);
-    this._signalsIds[key] = { id: signalId, obj };
+    this._signalsIds.push({ id: signalId, obj });
     return signalId;
   }
 
-  disconnect(obj) {
-    if (!obj) {
-      const toDelete = [];
-      Object.keys(this._signalsIds).forEach((key) => {
-        this._signalsIds[key].obj.disconnect(this._signalsIds[key].id);
-        toDelete.push(key);
-      });
-      const result = toDelete.length > 0;
-      toDelete.forEach((key) => delete this._signalsIds[key]);
-      return result;
-    } else {
-      const keyFound = Object.keys(this._signalsIds).find(
-        (key) => this._signalsIds[key].obj === obj
-      );
-      if (keyFound) {
-        obj.disconnect(this._signalsIds[keyFound].id);
-        delete this._signalsIds[keyFound];
-      }
-      return keyFound;
-    }
+  disconnect(obj, signalId) {
+    const matches = this._signalsIds.filter((signal) =>
+      (!obj || signal.obj === obj) &&
+      (signalId === undefined || signal.id === signalId)
+    );
+    // Forget handlers first so callbacks may safely disconnect during cleanup.
+    this._signalsIds = this._signalsIds.filter((signal) => !matches.includes(signal));
+    matches.forEach((signal) => signal.obj.disconnect(signal.id));
+    return matches.length > 0;
   }
 }
 

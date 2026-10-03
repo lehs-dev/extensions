@@ -69,6 +69,7 @@ export const DownscaleEffect = utils.IS_IN_PREFERENCES ?
         }
 
         set divider(value) {
+            value = Number.isFinite(value) ? Math.max(1, Math.min(64, Math.round(value))) : DEFAULT_PARAMS.divider;
             if (this._divider !== value) {
                 this._divider = value;
 

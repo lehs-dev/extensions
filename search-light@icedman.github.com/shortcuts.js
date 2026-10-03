@@ -53,8 +53,6 @@ export let ShortcutSettingWidget = class extends Gtk.Button {
   }
 
   _onActivated(widget) {
-    let ctl = new Gtk.EventControllerKey();
-
     if (!this._editor) {
       this._editor = new Gtk.Window({
         title: 'Accelerator',
@@ -65,10 +63,10 @@ export let ShortcutSettingWidget = class extends Gtk.Button {
         height_request: 320,
         child: this.content,
       });
+      const ctl = new Gtk.EventControllerKey();
+      this._editor.add_controller(ctl);
+      ctl.connect('key-pressed', this._onKeyPressed.bind(this));
     }
-
-    this._editor.add_controller(ctl);
-    ctl.connect('key-pressed', this._onKeyPressed.bind(this));
     this._editor.present();
   }
 
@@ -143,7 +141,7 @@ export let ShortcutSettingWidget = class extends Gtk.Button {
   isValidBinding(mask, keycode, keyval) {
     return !(
       mask === 0 ||
-      (mask === Gdk.SHIFT_MASK &&
+      (mask === Gdk.ModifierType.SHIFT_MASK &&
         keycode !== 0 &&
         ((keyval >= Gdk.KEY_a && keyval <= Gdk.KEY_z) ||
           (keyval >= Gdk.KEY_A && keyval <= Gdk.KEY_Z) ||

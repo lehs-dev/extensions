@@ -40,18 +40,14 @@ export let AutoHide = class {
     if (this.extension._hiTimer) {
       this.extension._hiTimer.cancel(this._animationSeq);
     }
+    this.extension._loTimer?.cancel(this._debounceCheckSeq);
+    this._debounceCheckSeq = null;
 
     this.show();
 
     this._enabled = false;
 
-    let actors = global.get_window_actors();
-    let windows = actors.map((a) => a.get_meta_window());
-    windows.forEach((w) => {
-      if (w._tracked) {
-        this._untrack(w);
-      }
-    });
+    for (const window of this._trackedWindows || []) this._untrack(window);
 
     console.log('autohide disabled');
   }
@@ -161,7 +157,8 @@ export let AutoHide = class {
 
   _track(window) {
     //! window tracking should be made global
-    if (!window._tracked) {
+    this._trackedWindows ??= new Set();
+    if (!this._trackedWindows.has(window)) {
       window.connectObject(
         'position-changed',
         // this._debounceCheckHide.bind(this),
@@ -173,21 +170,23 @@ export let AutoHide = class {
         () => {
           this.dock.extension.checkHide();
         },
+        'unmanaged',
+        () => this._untrack(window),
         this
       );
-      window._tracked = true;
+      this._trackedWindows.add(window);
     }
   }
 
   _untrack(window) {
     try {
-      if (window && window._tracked) {
+      if (window && this._trackedWindows?.has(window)) {
         window.disconnectObject(this);
-        window._tracked = false;
       }
     } catch (err) {
       // may have been destroyed already
     }
+    this._trackedWindows?.delete(window);
   }
 
   _checkOverlap() {
@@ -237,6 +236,7 @@ export let AutoHide = class {
     // console.log("checking windows...");
 
     let monitor = this.dock._monitor;
+    if (!monitor) return false;
     let actors = global.get_window_actors();
     let windows = actors.map((a) => {
       let w = a.get_meta_window();
@@ -249,9 +249,9 @@ export let AutoHide = class {
     let workspace = global.workspace_manager.get_active_workspace_index();
     windows = windows.filter(
       (w) =>
-        workspace == w.get_workspace().index() && w.showing_on_its_workspace()
+        workspace == w.get_workspace()?.index() && w.showing_on_its_workspace()
     );
-    windows = windows.filter((w) => w.get_window_type() in handledWindowTypes);
+    windows = windows.filter((w) => handledWindowTypes.includes(w.get_window_type()));
 
     let isOverlapped = false;
     let dockRect = this.dock.struts.get_transformed_position();

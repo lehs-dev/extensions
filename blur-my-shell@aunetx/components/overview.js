@@ -31,6 +31,8 @@ export const OverviewBlur = class OverviewBlur {
     }
 
     enable() {
+        if (this.enabled)
+            return;
         this._log("blurring overview");
 
         // add css class name for workspace-switch background
@@ -74,7 +76,7 @@ export const OverviewBlur = class OverviewBlur {
                     let ws_index = w_m.get_active_workspace_index();
                     [ws_index - 1, ws_index + 1].forEach(
                         i => w_m.get_workspace_by_index(i)?.list_windows().forEach(
-                            window => window.get_compositor_private().show()
+                            window => window.get_compositor_private()?.show()
                         )
                     );
                 }
@@ -108,7 +110,7 @@ export const OverviewBlur = class OverviewBlur {
                     for (let i = 0; i < w_m.get_n_workspaces(); i++) {
                         if (i != w_m.get_active_workspace_index())
                             w_m.get_workspace_by_index(i)?.list_windows().forEach(
-                                window => window.get_compositor_private().hide()
+                                window => window.get_compositor_private()?.hide()
                             );
                     }
 
@@ -174,6 +176,7 @@ export const OverviewBlur = class OverviewBlur {
     remove_background_actors() {
         this.overview_background_group.remove_all_children();
         this.animation_background_group.remove_all_children();
+        this.animation_background_group.get_parent()?.remove_child(this.animation_background_group);
 
         this.connections.disconnect_all_for(Main.layoutManager.overviewGroup);
         if (this.overview_background_group.get_parent())
@@ -202,6 +205,7 @@ export const OverviewBlur = class OverviewBlur {
 
         this.connections.disconnect_all();
         this.enabled = false;
+        this.restore_patched_proto();
     }
 
     restore_patched_proto() {

@@ -55,6 +55,7 @@ const _TilingLayoutWithSuggestions = class _TilingLayoutWithSuggestions extends 
     this._showVacantPreviewsOnly(tiledWindows, windowDesiredRect, window);
     this.show();
     this._recursivelyShowPopup(nontiledWindows, monitorIndex);
+    if (!this._showing) return;
     this._signals.disconnect();
     this._signals.connect(this, "key-focus-out", () => this.close());
     this._signals.connect(

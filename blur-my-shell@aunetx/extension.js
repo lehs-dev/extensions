@@ -182,6 +182,10 @@ export default class BlurMyShell extends Extension {
 
         // make sure no settings change can re-enable them
         this._settings.disconnect_all_settings();
+        this._pipelines_manager.destroy();
+        this._effects_manager.destroy_all();
+        this._pipelines_manager = null;
+        this._effects_manager = null;
 
         // force disconnecting every signal, even if component crashed
         this._connections.forEach((connections) => {

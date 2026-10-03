@@ -56,7 +56,7 @@ export const LockscreenBlur = class LockscreenBlur {
 
     _updateBackgrounds() {
         for (let i = 0; i < this._bgManagers.length; i++) {
-            this._bgManagers[i]._bms_pipeline.destroy();
+            this._bgManagers[i]._bms_pipeline?.destroy();
             this._bgManagers[i].destroy();
         }
 

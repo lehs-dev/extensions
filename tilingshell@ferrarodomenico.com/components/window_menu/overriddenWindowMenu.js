@@ -97,7 +97,7 @@ const _OverriddenWindowMenu = class _OverriddenWindowMenu extends GObject.Object
       vacantTiles.sort((a, b) => a.x - b.x);
       let bestTileIndex = 0;
       let bestDistance = Math.abs(
-        0.5 - vacantTiles[bestTileIndex].x + vacantTiles[bestTileIndex].width / 2
+        0.5 - (vacantTiles[bestTileIndex].x + vacantTiles[bestTileIndex].width / 2)
       );
       for (let index = 1; index < vacantTiles.length; index++) {
         const distance = Math.abs(

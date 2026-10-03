@@ -31,6 +31,7 @@ export const DummyPipeline = class DummyPipeline {
     };
 
     attach_effect_to_actor(actor) {
+        this.remove_pipeline_from_actor();
         // set the actor
         if (actor)
             this.actor = actor;
@@ -77,7 +78,7 @@ export const DummyPipeline = class DummyPipeline {
             'changed::brightness', () => this.effect.brightness = this.settings.BRIGHTNESS
         );
         this._corner_radius_changed_id = this.settings.settings.connect(
-            'changed::corner-radius', () => this.effect.corner_radius = this.settings.CORNER_RADIUS
+            'changed::corner-radius', () => this.effect.unscaled_corner_radius = this.settings.CORNER_RADIUS
         );
     }
 

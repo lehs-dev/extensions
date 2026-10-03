@@ -128,22 +128,31 @@ export default class Preferences extends ExtensionPreferences {
     // builder.get_object("providers-group").visible = false;
 
     let settings = this.getSettings(schemaId);
-    let settingsKeys = SettingsKeys();
+    let settingsKeys = SettingsKeys((rgba) => new Gdk.RGBA(rgba));
     settingsKeys.connectBuilder(builder);
     settingsKeys.connectSettings(settings);
+    this._settings = settings;
+    this._settingsKeys = settingsKeys;
 
     this.addButtonEvents(window, builder, settings);
     this.addMenu(window, builder);
 
     this._monitorsConfig = new MonitorsConfig();
     this._monitorsConfig.connect('updated', () => this.updateMonitors());
+    window.connect('close-request', () => {
+      settingsKeys.disconnectSettings();
+      this._monitorsConfig.destroy();
+      return false;
+    });
 
     // shortcuts widget
     {
       let placeholder = builder.get_object('shortcut-search-placeholder');
+      const shortcutBuilder = new Gtk.Builder();
+      shortcutBuilder.add_from_file(`${UIFolderPath}/accelerator.ui`);
       placeholder.append(
         new ShortcutSettingWidget(
-          builder.get_object('accelerator'),
+          shortcutBuilder.get_object('accelerator'),
           settings,
           'shortcut-search',
           window
@@ -155,9 +164,11 @@ export default class Preferences extends ExtensionPreferences {
       let placeholder = builder.get_object(
         'secondary-shortcut-search-placeholder'
       );
+      const shortcutBuilder = new Gtk.Builder();
+      shortcutBuilder.add_from_file(`${UIFolderPath}/accelerator.ui`);
       placeholder.append(
         new ShortcutSettingWidget(
-          builder.get_object('accelerator'),
+          shortcutBuilder.get_object('accelerator'),
           settings,
           'secondary-shortcut-search',
           window
@@ -170,7 +181,7 @@ export default class Preferences extends ExtensionPreferences {
   }
 
   updateMonitors() {
-    let monitors = this._monitorsConfig.monitors;
+    let monitors = this._monitorsConfig.activeMonitors;
     let count = monitors.length;
     let list = new Gtk.StringList();
     list.append('Primary Monitor');
@@ -178,6 +189,14 @@ export default class Preferences extends ExtensionPreferences {
       let m = monitors[i];
       list.append(m.displayName);
     }
-    this._builder.get_object('preferred-monitor').set_model(list);
+    const widget = this._builder.get_object('preferred-monitor');
+    this._settingsKeys._updatingWidgets = true;
+    try {
+      widget.set_model(list);
+      const selected = this._settings.get_int('preferred-monitor');
+      widget.set_selected(selected <= count ? selected : 0);
+    } finally {
+      this._settingsKeys._updatingWidgets = false;
+    }
   }
 }

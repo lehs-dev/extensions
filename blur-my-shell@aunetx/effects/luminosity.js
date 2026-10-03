@@ -73,7 +73,7 @@ export const LuminosityEffect = utils.IS_IN_PREFERENCES ?
         }
 
         get brightness_shift() {
-            return this._brightness;
+            return this._brightness_shift;
         }
 
         set brightness_shift(value) {

@@ -51,9 +51,11 @@ const ANIM_INTERVAL = 15;
 const ANIM_INTERVAL_PAD = 15;
 
 export default class Dash2DockLiteExt extends Extension {
-  createDock() {
+  createDock(monitorIndex = Main.layoutManager.primaryIndex, config = null) {
     let d = new Dock({ extension: this });
     d.extension = this;
+    d._monitorIndex = monitorIndex;
+    d._config = config;
     d.opacity = 0; // animate
     d.dock();
     this.dock = d;
@@ -66,7 +68,9 @@ export default class Dash2DockLiteExt extends Extension {
   createTheDocks() {
     this.docks = this.docks ?? [];
 
-    if (this._config.docks) {
+    if (Array.isArray(this._config.docks)) {
+      // Topology changes destroy the old docks before scheduling startup.
+      if (this.docks.length) return;
       let count = this._config['docks'].length;
       if (count != this.docks.length) {
         this.destroyDocks();
@@ -76,15 +80,13 @@ export default class Dash2DockLiteExt extends Extension {
         let d_monitor = dc['monitor'] ?? {};
         for (let i = 0; i < Main.layoutManager.monitors.length; i++) {
           let m = Main.layoutManager.monitors[i];
-          if (m.x == dc_monitor['x'] && m.y == dc_monitor['y']) {
+          if (m.x == d_monitor['x'] && m.y == d_monitor['y']) {
             index = m.index;
             break;
           }
         }
         if (index != -1) {
-          let d = this.createDock();
-          d._monitorIndex = index;
-          d._config = dc;
+          this.createDock(index, dc);
         }
       });
       return;
@@ -112,10 +114,10 @@ export default class Dash2DockLiteExt extends Extension {
       if (count != this.docks.length) {
         this.destroyDocks();
       }
+      if (count == this.docks.length) return;
 
       for (let i = 0; i < count; i++) {
-        let d = this.createDock();
-        d._monitorIndex = i;
+        this.createDock(i);
       }
     }
   }
@@ -125,9 +127,13 @@ export default class Dash2DockLiteExt extends Extension {
       dock.undock();
       dock.cancelAnimations();
       dock.destroyDash();
+      dock.struts.destroy();
+      dock.dwell.destroy();
+      dock.destroy();
       this.dock = null;
     });
     this.docks = [];
+    this.listeners = this.services ? [this.services] : [];
   }
 
   recreateAllDocks(delay = 750) {
@@ -334,12 +340,9 @@ export default class Dash2DockLiteExt extends Extension {
       return currentMonitorIndex;
     }
 
-    let idx = this.preferred_monitor || 0;
-    if (idx == 0) {
-      idx = Main.layoutManager.primaryIndex;
-    } else if (idx == Main.layoutManager.primaryIndex) {
-      idx = 0;
-    }
+    let idx = this.preferred_monitor > 0
+      ? this.preferred_monitor - 1
+      : Main.layoutManager.primaryIndex;
 
     if (!Main.layoutManager.monitors[idx]) {
       idx = Main.layoutManager.primaryIndex;
@@ -349,15 +352,18 @@ export default class Dash2DockLiteExt extends Extension {
   }
 
   async _loadConfig() {
+    const generation = this._configLoadGeneration = (this._configLoadGeneration || 0) + 1;
     this._config = {};
     let fn_config = Gio.File.new_for_path('.config/d2da/config.json');
     if (fn_config.query_exists(null)) {
       try {
         const contents = await loadFile(fn_config);
+        if (generation !== this._configLoadGeneration) return;
         this._config = JSON.parse(contents);
       } catch (err) {
         console.log(err);
       }
+      if (generation !== this._configLoadGeneration) return;
 
       // precompute
       {
@@ -387,6 +393,7 @@ export default class Dash2DockLiteExt extends Extension {
     if (fn_icons.query_exists(null)) {
       try {
         const contents = await loadFile(fn_icons);
+        if (generation !== this._configLoadGeneration) return;
         let json = JSON.parse(contents);
         if (json['icons']) {
           this.icon_map = json['icons'];
@@ -421,6 +428,8 @@ export default class Dash2DockLiteExt extends Extension {
       }
     }
 
+    if (generation !== this._configLoadGeneration) return;
+
     let fn_style = Gio.File.new_for_path('.config/d2da/style.css');
     if (fn_style.query_exists(null)) {
       let ctx = St.ThemeContext.get_for_stage(global.stage);
@@ -430,6 +439,7 @@ export default class Dash2DockLiteExt extends Extension {
   }
 
   _unloadConfig() {
+    this._configLoadGeneration = (this._configLoadGeneration || 0) + 1;
     this.icon_map = {};
     this.icon_map_cache = {};
     this.app_map_cache = {};
@@ -970,7 +980,9 @@ export default class Dash2DockLiteExt extends Extension {
   _updateMultiMonitorPreference() {
     // console.log('update monitors');
     this.destroyDocks();
-    this._loTimer.runOnce(() => {
+    this._loTimer.cancel(this._monitorStartupSeq);
+    this._monitorStartupSeq = this._loTimer.runOnce(() => {
+      this._monitorStartupSeq = null;
       this.startUp();
     }, 500);
   }

@@ -83,7 +83,7 @@ class ResizingManager {
     }
     if (!verticalSide[0] && !horizontalSide[0]) return;
     const otherTiledWindows = getWindows().filter(
-      (otherWindow) => otherWindow && otherWindow.assignedTile && otherWindow !== window && !otherWindow.minimized
+      (otherWindow) => otherWindow && otherWindow.assignedTile && otherWindow !== window && !otherWindow.minimized && otherWindow.get_monitor() === window.get_monitor()
     );
     if (otherTiledWindows.length === 0) return;
     const verticalAdjacentWindows = verticalSide[0] ? this._findAdjacent(
@@ -253,10 +253,10 @@ class ResizingManager {
         }
         otherWindow.move_resize_frame(
           false,
-          Math.max(0, rect[0]),
-          Math.max(0, rect[1]),
-          Math.max(0, rect[2]),
-          Math.max(0, rect[3])
+          rect[0],
+          rect[1],
+          Math.max(1, rect[2]),
+          Math.max(1, rect[3])
         );
       }
     );

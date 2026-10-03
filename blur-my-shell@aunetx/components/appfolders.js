@@ -140,6 +140,9 @@ export const AppFoldersBlur = class AppFoldersBlur {
     }
 
     enable() {
+        if (this.enabled)
+            return;
+        this.enabled = true;
         this._log("blurring appfolders");
 
         brightness = this.settings.appfolder.BRIGHTNESS;
@@ -179,6 +182,9 @@ export const AppFoldersBlur = class AppFoldersBlur {
                 mode: Shell.BlurMode.BACKGROUND
             });
 
+            const old_effect = icon._dialog.get_effect("appfolder-blur");
+            if (old_effect)
+                Tweener.removeTweens(old_effect);
             icon._dialog.remove_effect_by_name("appfolder-blur");
             icon._dialog.add_effect(blur_effect);
 
@@ -230,6 +236,8 @@ export const AppFoldersBlur = class AppFoldersBlur {
     disable() {
         this._log("removing blur from appfolders");
 
+        this.enabled = false;
+        this.paint_signals.disconnect_all();
         let appDisplay = Main.overview._overview.controls._appDisplay;
 
         if (original_zoomAndFadeIn != null) {
@@ -248,6 +256,9 @@ export const AppFoldersBlur = class AppFoldersBlur {
 
         appDisplay._folderIcons.forEach(icon => {
             if (icon._dialog) {
+                const effect = icon._dialog.get_effect("appfolder-blur");
+                if (effect)
+                    Tweener.removeTweens(effect);
                 icon._dialog.remove_effect_by_name("appfolder-blur");
                 DIALOGS_STYLES.forEach(
                     s => icon._dialog._viewBox.remove_style_class_name(s)

@@ -103,7 +103,10 @@ export const PanelBlur = class PanelBlur {
         this._log("resetting...");
 
         this.disable();
-        setTimeout(_ => this.enable(), 1);
+        this._restartId = setTimeout(() => {
+            this._restartId = null;
+            this.enable();
+        }, 1);
     }
 
     /// Check for already existing panels and blur them if they are not already
@@ -138,8 +141,11 @@ export const PanelBlur = class PanelBlur {
         // This is crucial to ensure the panel actors have been allocated their
         // final size and position by the compositor, avoiding race conditions
         // during extension startup.
-        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-            if (!global.dashToPanel?.panels) {
+        if (this._dtpIdleId)
+            return;
+        this._dtpIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._dtpIdleId = null;
+            if (!this.enabled || !global.dashToPanel?.panels) {
                 return GLib.SOURCE_REMOVE;
             }
 
@@ -429,6 +435,8 @@ export const PanelBlur = class PanelBlur {
 
     /// Callback when a new window is added
     on_window_actor_added(container, meta_window_actor) {
+        if (this.window_signal_ids.has(meta_window_actor))
+            return;
         this.window_signal_ids.set(meta_window_actor, [
             meta_window_actor.connect('notify::allocation',
                 _ => this.update_visibility()
@@ -442,7 +450,7 @@ export const PanelBlur = class PanelBlur {
 
     /// Callback when a window is removed
     on_window_actor_removed(container, meta_window_actor) {
-        for (const signalId of this.window_signal_ids.get(meta_window_actor)) {
+        for (const signalId of this.window_signal_ids.get(meta_window_actor) || []) {
             meta_window_actor.disconnect(signalId);
         }
         this.window_signal_ids.delete(meta_window_actor);
@@ -484,6 +492,8 @@ export const PanelBlur = class PanelBlur {
             .filter(actors => !actors.is_dtp_panel)
             .forEach(actors => {
                 let panel = actors.widgets.panel;
+                if (!actors.monitor)
+                    return;
                 let panel_top = panel.get_transformed_position()[1];
                 let panel_bottom = panel_top + panel.get_height();
 
@@ -500,9 +510,9 @@ export const PanelBlur = class PanelBlur {
                     if (same_monitor
                         &&
                         // check if panel is on top
-                        ((panel_top === 0 && window_vertical_pos < panel_bottom + 5 * scale) ||
+                        ((panel_top <= actors.monitor.y + actors.monitor.height / 2 && window_vertical_pos < panel_bottom + 5 * scale) ||
                         // check if panel is at the bottom
-                        (panel_top > 0 && window_vertical_bottom > panel_top - 5 * scale))
+                        (panel_top > actors.monitor.y + actors.monitor.height / 2 && window_vertical_bottom > panel_top - 5 * scale))
                     )
                         window_overlap_panel = true;
                 });
@@ -577,6 +587,14 @@ export const PanelBlur = class PanelBlur {
     }
 
     disable() {
+        if (this._restartId) {
+            clearTimeout(this._restartId);
+            this._restartId = null;
+        }
+        if (this._dtpIdleId) {
+            GLib.source_remove(this._dtpIdleId);
+            this._dtpIdleId = null;
+        }
         if (!this.enabled) {
             this._log("blur already removed");
             return;

@@ -54,7 +54,9 @@ export class PipelinesManager {
             return;
         }
         const pipeline = this.pipelines[id];
-        this.create_pipeline(pipeline.name + " - duplicate", [...pipeline.effects]);
+        this.create_pipeline(pipeline.name + " - duplicate", pipeline.effects.map(effect => ({
+            ...effect, params: { ...effect.params }
+        })));
         this.settings.PIPELINES = this.pipelines;
     }
 
@@ -81,7 +83,7 @@ export class PipelinesManager {
         this.pipelines[id].effects = [...effects];
         this.settings.PIPELINES = this.pipelines;
         if (emit_update_signal)
-            this._emit(id + '::pipeline-updated');
+            this._emit(id + '::pipeline-updated', this.pipelines[id]);
     }
 
     rename_pipeline(id, name) {

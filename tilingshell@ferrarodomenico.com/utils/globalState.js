@@ -25,6 +25,8 @@ const _GlobalState = class _GlobalState extends GObject.Object {
   static destroy() {
     if (this._instance) {
       this._instance._signals.disconnect();
+      Gio.Settings.unbind(this._instance, "tilePreviewAnimationTime");
+      this._instance._selected_layouts.clear();
       this._instance._layouts = [];
       this._instance = null;
     }
@@ -96,8 +98,7 @@ const _GlobalState = class _GlobalState extends GObject.Object {
         }
         this._selected_layouts.set(
           newWs,
-          secondLastWsLayoutsId
-          // Main.layoutManager.monitors.map(() => layout.id),
+          [...secondLastWsLayoutsId]
         );
         const to_be_saved = [];
         for (let i = 0; i < n_workspaces; i++) {
@@ -156,7 +157,7 @@ const _GlobalState = class _GlobalState extends GObject.Object {
         if (this._layouts.findIndex(
           (lay) => lay.id === monitors_layouts[ind]
         ) === -1)
-          monitors_layouts[ind] = monitors_layouts[0];
+          monitors_layouts[ind] = this._layouts[0].id;
       });
       this._selected_layouts.set(ws, monitors_layouts);
     }
@@ -189,15 +190,16 @@ const _GlobalState = class _GlobalState extends GObject.Object {
     const layFoundIndex = this._layouts.findIndex(
       (lay) => lay.id === layoutToDelete.id
     );
-    if (layFoundIndex === -1) return;
+    if (layFoundIndex === -1 || this._layouts.length <= 1) return;
     this._layouts.splice(layFoundIndex, 1);
     this.layouts = this._layouts;
     this._selected_layouts.forEach((monitors_selected) => {
-      if (layoutToDelete.id === monitors_selected[Main.layoutManager.primaryIndex]) {
-        monitors_selected[Main.layoutManager.primaryIndex] = this._layouts[0].id;
-        this._save_selected_layouts();
-      }
+      monitors_selected.forEach((selectedId, monitorIndex) => {
+        if (selectedId === layoutToDelete.id)
+          monitors_selected[monitorIndex] = this._layouts[0].id;
+      });
     });
+    this._save_selected_layouts();
   }
 
   editLayout(newLay) {
@@ -226,7 +228,7 @@ const _GlobalState = class _GlobalState extends GObject.Object {
     const selectedLayouts = Settings.get_selected_layouts();
     if (workspaceIndex < 0 || workspaceIndex >= selectedLayouts.length)
       workspaceIndex = 0;
-    const monitors_selected = workspaceIndex < selectedLayouts.length ? selectedLayouts[workspaceIndex] : _GlobalState.get().layouts[0].id;
+    const monitors_selected = workspaceIndex < selectedLayouts.length ? selectedLayouts[workspaceIndex] : [this._layouts[0].id];
     if (monitorIndex < 0 || monitorIndex >= monitors_selected.length)
       monitorIndex = 0;
     return this._layouts.find(

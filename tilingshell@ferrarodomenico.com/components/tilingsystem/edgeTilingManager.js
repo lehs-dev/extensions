@@ -3,7 +3,7 @@ import {
   isPointInsideRect,
   clampPointInsideRect
 } from "../../utils/ui.js";
-import { GObject } from "../../gi/ext.js";
+import { GObject, Gio } from "../../gi/ext.js";
 import Settings from "../../settings/settings.js";
 import { EdgeTilingMode } from "../../settings/settings.js";
 import { registerGObjectClass } from "../../utils/gjs.js";
@@ -459,6 +459,12 @@ const _EdgeTilingManager = class _EdgeTilingManager extends GObject.Object {
 
   abortEdgeTiling() {
     this._activeEdgeTile = null;
+  }
+
+  destroy() {
+    Gio.Settings.unbind(this, "quarterActivationPercentage");
+    Gio.Settings.unbind(this, "edgeTilingOffset");
+    this.abortEdgeTiling();
   }
 
   _findClosestTileToPosition(pointerPos, candidateTiles) {

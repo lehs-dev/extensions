@@ -45,14 +45,15 @@ export let Animator = class {
   }
 
   disable() {
-    if (this._target) {
-      this._target.remove_all_children();
-    }
-    if (!this._renderers) {
-      this._renderers = [];
-      this._dots = [];
-      this._badges = [];
-    }
+    for (const actor of [
+      ...(this._renderers || []),
+      ...(this._dots || []),
+      ...(this._badges || []),
+    ]) actor.destroy();
+    this._renderers = [];
+    this._dots = [];
+    this._badges = [];
+    this._target = null;
   }
 
   _precreateResources(dock) {

@@ -96,9 +96,9 @@ export const DockItemList = GObject.registerClass(
 
     slideIn(target, list) {
       if (this._box) {
-        this.remove_child(this._box);
+        this._box.destroy();
         this._box = null;
-        this.remove_child(this._labels);
+        this._labels.destroy();
         this._labels = null;
       }
 
@@ -335,6 +335,10 @@ export const DockItemList = GObject.registerClass(
       // list.opacity = 255;
 
       let target = list._target;
+      if (!target?._icon) {
+        dock._destroyList();
+        return;
+      }
       let list_coef = 2;
 
       let speed = 3 * ANIM_POSITION_PER_SEC;
@@ -454,7 +458,7 @@ export const DockItemList = GObject.registerClass(
         dock._destroyList();
       }
 
-      target._label.hide();
+      target._label?.hide();
     }
   }
 );

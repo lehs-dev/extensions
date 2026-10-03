@@ -27,6 +27,7 @@
 import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
+import GLib from 'gi://GLib';
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -36,89 +37,107 @@ import { SettingsData } from './settings_data.js';
 
 const MINIMIZE_EFFECT_NAME = 'minimize-magic-lamp-effect';
 const UNMINIMIZE_EFFECT_NAME = 'unminimize-magic-lamp-effect';
+const nonZero = value => Math.abs(value) < 1e-6 ? 1e-6 : value;
 
 export default class CompizMagicLampEffectExtension extends Extension {
 
     enable() {
         this.settingsData = new SettingsData(this.getSettings());
+        this._activeEffects = new Set();
 
         // https://github.com/GNOME/gnome-shell/blob/master/js/ui/windowManager.js
 
-        Main.wm.original_minimizeMaximizeWindow_shouldAnimateActor = Main.wm._shouldAnimateActor;
-        Main.wm._shouldAnimateActor = function(actor, types) {
-            let stack = new Error().stack;
-            if (stack && (stack.indexOf("_minimizeWindow") !== -1 || stack.indexOf("_unminimizeWindow") !== -1)) {
-                return false;
+        const hooks = this._hooks = {
+            enabled: true,
+            shouldAnimate: Main.wm._shouldAnimateActor,
+            minimize: Main.wm._shellwm.completed_minimize,
+            unminimize: Main.wm._shellwm.completed_unminimize,
+        };
+        Main.wm.original_minimizeMaximizeWindow_shouldAnimateActor = hooks.shouldAnimate;
+        hooks.shouldAnimateWrapper = function(actor, types) {
+            if (hooks.enabled) {
+                let stack = new Error().stack;
+                if (stack && (stack.indexOf("_minimizeWindow") !== -1 || stack.indexOf("_unminimizeWindow") !== -1))
+                    return false;
             }
-            
-            return Main.wm.original_minimizeMaximizeWindow_shouldAnimateActor(actor, types);
+            return hooks.shouldAnimate.call(this, actor, types);
         };
+        Main.wm._shouldAnimateActor = hooks.shouldAnimateWrapper;
 
-        Main.wm._shellwm.original_completed_minimize = Main.wm._shellwm.completed_minimize;
-        Main.wm._shellwm.completed_minimize = function(actor) {
-            return;
+        Main.wm._shellwm.original_completed_minimize = hooks.minimize;
+        hooks.minimizeWrapper = function(actor) {
+            if (!hooks.enabled)
+                return hooks.minimize.call(this, actor);
         };
+        Main.wm._shellwm.completed_minimize = hooks.minimizeWrapper;
 
-        Main.wm._shellwm.original_completed_unminimize = Main.wm._shellwm.completed_unminimize;
-        Main.wm._shellwm.completed_unminimize = function(actor) {
-            return;
+        Main.wm._shellwm.original_completed_unminimize = hooks.unminimize;
+        hooks.unminimizeWrapper = function(actor) {
+            if (!hooks.enabled)
+                return hooks.unminimize.call(this, actor);
         };
+        Main.wm._shellwm.completed_unminimize = hooks.unminimizeWrapper;
 
         this.minimizeId = global.window_manager.connect("minimize", (e, actor) => {
+            this.destroyActorEffect(actor);
             if (Main.overview.visible) {
-                Main.wm._shellwm.original_completed_minimize(actor);
+                hooks.minimize.call(Main.wm._shellwm, actor);
                 return;
             }
 
-            let icon = this.getIcon(actor);
-
-            this.destroyActorEffect(actor);
-
-            actor.add_effect_with_name(MINIMIZE_EFFECT_NAME, new MagicLampMinimizeEffect({settingsData: this.settingsData, icon: icon}));
+            this.animate(actor, MagicLampMinimizeEffect, MINIMIZE_EFFECT_NAME);
         });
 
         this.unminimizeId = global.window_manager.connect("unminimize", (e, actor) => {
+            this.destroyActorEffect(actor);
             actor.show();
 
             if (Main.overview.visible) {
-                Main.wm._shellwm.original_completed_unminimize(actor);
+                hooks.unminimize.call(Main.wm._shellwm, actor);
                 return;
             }
 
-            let icon = this.getIcon(actor);
-
-            this.destroyActorEffect(actor);
-
-            actor.add_effect_with_name(UNMINIMIZE_EFFECT_NAME, new MagicLampUnminimizeEffect({settingsData: this.settingsData, icon: icon}));
+            this.animate(actor, MagicLampUnminimizeEffect, UNMINIMIZE_EFFECT_NAME);
         });
     }
 
     disable() {
+        const hooks = this._hooks;
+        if (hooks)
+            hooks.enabled = false;
         if (this.settingsData) {
             this.settingsData = null;
         }
         if (this.minimizeId) {
             global.window_manager.disconnect(this.minimizeId);
+            this.minimizeId = null;
         }
-        if (this.minimizeId) {
+        if (this.unminimizeId) {
             global.window_manager.disconnect(this.unminimizeId);
+            this.unminimizeId = null;
         }
     
         global.get_window_actors().forEach((actor) => {
             this.destroyActorEffect(actor);
         });
+        for (const effect of [...this._activeEffects])
+            effect.destroy();
+        this._activeEffects.clear();
         
-        if (Main.wm.original_minimizeMaximizeWindow_shouldAnimateActor) {
-            Main.wm._shouldAnimateActor = Main.wm.original_minimizeMaximizeWindow_shouldAnimateActor;
-            Main.wm.original_minimizeMaximizeWindow_shouldAnimateActor = null;
-        }
-        if (Main.wm._shellwm.original_completed_minimize) {
-            Main.wm._shellwm.completed_minimize = Main.wm._shellwm.original_completed_minimize;
-            Main.wm._shellwm.original_completed_minimize = null;
-        }
-        if (Main.wm._shellwm.original_completed_unminimize) {
-            Main.wm._shellwm.completed_unminimize = Main.wm._shellwm.original_completed_unminimize;    
-            Main.wm._shellwm.original_completed_unminimize = null;
+        if (hooks) {
+            if (Main.wm._shouldAnimateActor === hooks.shouldAnimateWrapper)
+                Main.wm._shouldAnimateActor = hooks.shouldAnimate;
+            if (Main.wm._shellwm.completed_minimize === hooks.minimizeWrapper)
+                Main.wm._shellwm.completed_minimize = hooks.minimize;
+            if (Main.wm._shellwm.completed_unminimize === hooks.unminimizeWrapper)
+                Main.wm._shellwm.completed_unminimize = hooks.unminimize;
+            if (Main.wm.original_minimizeMaximizeWindow_shouldAnimateActor === hooks.shouldAnimate)
+                Main.wm.original_minimizeMaximizeWindow_shouldAnimateActor = null;
+            if (Main.wm._shellwm.original_completed_minimize === hooks.minimize)
+                Main.wm._shellwm.original_completed_minimize = null;
+            if (Main.wm._shellwm.original_completed_unminimize === hooks.unminimize)
+                Main.wm._shellwm.original_completed_unminimize = null;
+            this._hooks = null;
         }
     }
 
@@ -130,8 +149,6 @@ export default class CompizMagicLampEffectExtension extends Extension {
     
         let monitor = Main.layoutManager.monitors[actor.meta_window.get_monitor()];
         if (monitor && Main.overview.dash) {
-            Main.overview.dash._redisplay();  
-
             let dashIcon = null;
             let transformed_position = null;
             let pids = null;
@@ -143,7 +160,7 @@ export default class CompizMagicLampEffectExtension extends Extension {
                         pids = dashElement.child._delegate.app.get_pids();
                         if (pids && pids.indexOf(pid) >= 0) {
                             transformed_position = dashElement.get_transformed_position();
-                            if (transformed_position && transformed_position[0]) {
+                            if (transformed_position && Number.isFinite(transformed_position[0])) {
                                 dashIcon = {x: transformed_position[0], y: monitor.y + monitor.height, width: 0, height: 0};
                                 return;
                             }
@@ -160,9 +177,69 @@ export default class CompizMagicLampEffectExtension extends Extension {
         return {x: 0, y: 0, width: 0, height: 0};    
     }
 
+    animate(actor, EffectClass, name) {
+        const complete = name === MINIMIZE_EFFECT_NAME ?
+            this._hooks?.minimize || Main.wm._shellwm.original_completed_minimize :
+            this._hooks?.unminimize || Main.wm._shellwm.original_completed_unminimize;
+        const icon = this.getIcon(actor);
+        const monitors = Main.layoutManager.monitors;
+        const windowMonitor = monitors[actor.meta_window.get_monitor()];
+        const targetMonitor = Number.isInteger(icon.monitorIndex) ? monitors[icon.monitorIndex] :
+            monitors.find(monitor => icon.x >= monitor.x && icon.x < monitor.x + monitor.width &&
+                icon.y >= monitor.y && icon.y <= monitor.y + monitor.height);
+        let animationActor = actor;
+        let snapshot = null;
+        let effect = null;
+        const originalOpacity = actor.opacity;
+        try {
+            if (windowMonitor && targetMonitor && targetMonitor !== windowMonitor) {
+                // Wayland surface actors belong to their original stage views.
+                // A texture snapshot can deform across outputs without those
+                // per-monitor surface visibility constraints.
+                // Capture the full actor so clipping does not crop the texture
+                // before it is stretched to the animation actor's dimensions.
+                const content = actor.paint_to_content(null);
+                if (!content)
+                    throw new Error('Window snapshot is unavailable');
+                snapshot = new St.Widget({
+                    content,
+                    x: actor.x, y: actor.y, width: actor.width, height: actor.height,
+                    reactive: false,
+                });
+                Main.uiGroup.insert_child_above(snapshot, global.window_group);
+                animationActor = snapshot;
+            }
+            effect = new EffectClass({
+                settingsData: this.settingsData, icon,
+                animationActor,
+                sourceActor: snapshot ? actor : null,
+                originalOpacity,
+                complete: complete.bind(Main.wm._shellwm),
+                onDestroy: completedEffect => this._activeEffects.delete(completedEffect),
+            });
+            this._activeEffects.add(effect);
+            if (snapshot)
+                actor.opacity = 0;
+            animationActor.add_effect_with_name(name, effect);
+        } catch (error) {
+            console.warn(`[Magic Lamp] Could not animate window: ${error}`);
+            if (effect)
+                effect.destroy();
+            else {
+                snapshot?.destroy();
+                actor.opacity = originalOpacity;
+                complete.call(Main.wm._shellwm, actor);
+            }
+        }
+    }
+
     destroyActorEffect(actor) {
         if (!actor) {
             return;
+        }
+        for (const effect of this._activeEffects || []) {
+            if (effect.sourceActor === actor)
+                effect.destroy();
         }
 
         let minimizeEffect = actor.get_effect(MINIMIZE_EFFECT_NAME);
@@ -186,6 +263,10 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
         super._init();
 
         this.settingsData = params.settingsData;
+        this.sourceActor = params.sourceActor || null;
+        this._animationActor = params.animationActor || null;
+        this._sourceOpacity = params.originalOpacity;
+        this._onDestroy = params.onDestroy;
 
         this.EPSILON = 40;
 
@@ -199,7 +280,7 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
         this.monitor = {x: 0, y: 0, width: 0, height: 0};
         this.iconMonitor = {x: 0, y: 0, width: 0, height: 0};
         this.window = {x: 0, y: 0, width: 0, height: 0, scale: 1};
-        this.icon = params.icon || {x: 0, y: 0, width: 0, height: 0};
+        this.icon = {...(params.icon || {x: 0, y: 0, width: 0, height: 0})};
         
         this.progress = 0;
         this.split = 0.3;
@@ -224,11 +305,14 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
         this.alignIcon = 'center';  // 'left-top'
 
         this.EFFECT = this.settingsData.EFFECT.get(); //'default' - 'sine'
-        this.DURATION = this.settingsData.DURATION.get();
-        this.X_TILES = this.settingsData.X_TILES.get();
-        this.Y_TILES = this.settingsData.Y_TILES.get();
+        const clampSetting = (value, minimum, maximum, fallback) =>
+            Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, Math.round(value))) : fallback;
+        this.DURATION = clampSetting(this.settingsData.DURATION.get(), 1, 10000, 400);
+        this.X_TILES = clampSetting(this.settingsData.X_TILES.get(), 1, 50, 10);
+        this.Y_TILES = clampSetting(this.settingsData.Y_TILES.get(), 1, 50, 10);
 
         this.initialized = false;
+        this._destroyed = false;
     }
 
     destroy_actor(actor) {}
@@ -236,18 +320,35 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
     on_tick_elapsed(timer, msecs) {}
 
     vfunc_set_actor(actor) {
+        if (!actor) {
+            // Removing an effect before its timeline completes must stop it.
+            this.destroy(true);
+            super.vfunc_set_actor(actor);
+            return;
+        }
         super.vfunc_set_actor(actor);
-
-        if (!this.actor || this.initialized) {
+        if (this.initialized || this._destroyed) {
             return;
         }
 
         this.initialized = true;
         
-        this.monitor = Main.layoutManager.monitors[actor.meta_window.get_monitor()];
+        const sourceActor = this.sourceActor || actor;
+        this.monitor = Main.layoutManager.monitors[sourceActor.meta_window.get_monitor()];
+        [this.window.width, this.window.height] = actor.get_size();
+        if (!this.monitor || !Number.isFinite(this.window.width) || !Number.isFinite(this.window.height) ||
+            this.window.width <= 0 || this.window.height <= 0) {
+            this.destroy();
+            return;
+        }
+        this._actorDestroyId = actor.connect('destroy', () => {
+            this._animationDestroyed = true;
+            this.destroy();
+        });
+        if (this.sourceActor)
+            this._sourceDestroyId = this.sourceActor.connect('destroy', () => this.destroy());
 
         [this.window.x, this.window.y] = [this.actor.get_x() - this.monitor.x, this.actor.get_y() - this.monitor.y];
-        [this.window.width, this.window.height] = actor.get_size();
         
         if (!this.icon || (this.icon.x == 0 && this.icon.y == 0 && this.icon.width == 0 && this.icon.height == 0)) {
             this.icon.x = this.monitor.x + this.monitor.width / 2;
@@ -260,20 +361,17 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
             this.iconMonitor = monitors[this.icon.monitorIndex] || this.monitor;
         } else {
             monitors.forEach((monitor, monitorIndex) => {
-                let scale = 1;
-                if (global.display && global.display.get_monitor_scale)
-                    scale = global.display.get_monitor_scale(monitorIndex);
-
-                if (this.icon.x >= monitor.x && this.icon.x <= monitor.x + monitor.width * scale &&
-                    this.icon.y >= monitor.y && this.icon.y <= monitor.y + monitor.height * scale)
+                // Both geometries already use stage coordinates; applying the
+                // monitor scale again makes adjacent monitors overlap.
+                if (this.icon.x >= monitor.x && this.icon.x <= monitor.x + monitor.width &&
+                    this.icon.y >= monitor.y && this.icon.y <= monitor.y + monitor.height)
                     this.iconMonitor = monitor;
             });
             if (this.iconMonitor.width === 0 || this.iconMonitor.height === 0)
                 this.iconMonitor = this.monitor;
         }
 
-        const crossMonitor = this.icon.monitorIndex !== undefined &&
-            this.iconMonitor !== this.monitor;
+        const crossMonitor = this.iconMonitor !== this.monitor;
         const dockSides = {
             bottom: St.Side.BOTTOM,
             left: St.Side.LEFT,
@@ -330,14 +428,27 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
 
         this.set_n_tiles(this.X_TILES, this.Y_TILES);
         
-        this.timerId = new Clutter.Timeline({ actor: this.actor, duration: this.DURATION + (this.monitor.width * this.monitor.height) / (this.window.width * this.window.height) });
+        const areaDelay = Math.min(1000, (this.monitor.width * this.monitor.height) / (this.window.width * this.window.height));
+        this.timerId = new Clutter.Timeline({ actor: this.actor, duration: Math.round(this.DURATION + areaDelay) });
         this.newFrameEvent = this.timerId.connect('new-frame', this.on_tick_elapsed.bind(this));
-        this.completedEvent = this.timerId.connect('completed', this.destroy.bind(this));
+        this.completedEvent = this.timerId.connect('completed', () => this.destroy());
         this.timerId.start();
     }
 
-    destroy() {
+    destroy(detaching = false) {
+        if (this._destroyed) {
+            // Disable or actor destruction drains an already queued detach
+            // cleanup before releasing extension ownership.
+            if (!detaching && this._cleanupId) {
+                GLib.source_remove(this._cleanupId);
+                this._cleanupId = null;
+                this._finishDestroy();
+            }
+            return;
+        }
+        this._destroyed = true;
         if (this.timerId) {
+            this.timerId.stop();
             if (this.newFrameEvent) {
                 this.timerId.disconnect(this.newFrameEvent);
                 this.newFrameEvent = null;
@@ -349,25 +460,60 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
             this.timerId = null;
         }
 
-        let actor = this.get_actor();
-        if (actor) {
-            if (this.paintEvent) {
-                actor.disconnect(this.paintEvent);
-                this.paintEvent = null;
-            }
+        let actor = this.get_actor() || this._animationActor;
+        if (actor && !detaching && this.get_actor() === actor)
             actor.remove_effect(this);
 
-            this.destroy_actor(actor);
+        this._finishDestroy = () => {
+            if (actor) {
+                if (this._actorDestroyId) {
+                    actor.disconnect(this._actorDestroyId);
+                    this._actorDestroyId = null;
+                }
+                if (this.paintEvent) {
+                    actor.disconnect(this.paintEvent);
+                    this.paintEvent = null;
+                }
+
+                const sourceActor = this.sourceActor || actor;
+                if (this.sourceActor) {
+                    if (this._sourceDestroyId)
+                        this.sourceActor.disconnect(this._sourceDestroyId);
+                    this._sourceDestroyId = null;
+                    this.sourceActor.opacity = this._sourceOpacity;
+                    this.sourceActor = null;
+                    if (!this._animationDestroyed)
+                        actor.destroy();
+                }
+                this.destroy_actor(sourceActor);
+            }
+            this._onDestroy?.(this);
+            this._onDestroy = null;
+            this._animationActor = null;
+            this._finishDestroy = null;
+        };
+        if (detaching) {
+            // Clutter calls set_actor(NULL) while the meta is still in its
+            // native effects list. Dispose only after native removal returns.
+            if (this.sourceActor)
+                actor.hide();
+            this._cleanupId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                this._cleanupId = null;
+                this._finishDestroy();
+                return GLib.SOURCE_REMOVE;
+            });
+        } else {
+            this._finishDestroy();
         }
     }
 
     vfunc_deform_vertex(w, h, v) {
-        if (this.initialized) {
+        if (this.initialized && !this._destroyed) {
             let propX = w / this.window.width;
             let propY = h / this.window.height;
 
             if (this.iconPosition == St.Side.LEFT) {
-                this.width = this.window.width - this.icon.width + (this.window.x - this.icon.x) * this.k;
+                this.width = nonZero(this.window.width - this.icon.width + (this.window.x - this.icon.x) * this.k);
 
                 this.x = (this.width - this.j * this.width) * v.tx;  
                 this.y = v.ty * this.window.height * (this.x + (this.width - this.x) * (1 - this.k)) / this.width + 
@@ -382,7 +528,7 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
                     this.effectY = Math.sin((0.5 - (this.width - this.x) / this.width) * 2 * Math.PI) * (this.window.y + this.window.height * v.ty - (this.icon.y + this.icon.height * v.ty)) / 7 * this.k;
                 }
             } else if (this.iconPosition == St.Side.TOP) {
-                this.height = this.window.height - this.icon.height + (this.window.y - this.icon.y) * this.k;
+                this.height = nonZero(this.window.height - this.icon.height + (this.window.y - this.icon.y) * this.k);
 
                 this.y = (this.height - this.j * this.height) * v.ty;
                 this.x = v.tx * this.window.width * (this.y + (this.height - this.y) * (1 - this.k)) / this.height + 
@@ -398,7 +544,7 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
                 }
             } else if (this.iconPosition == St.Side.RIGHT) {
                 this.expandWidth = (this.icon.x - this.icon.width - this.window.x - this.window.width);
-                this.fullWidth = (this.icon.x - this.icon.width - this.window.x) - this.expandWidth * (1 - this.k);
+                this.fullWidth = nonZero((this.icon.x - this.icon.width - this.window.x) - this.expandWidth * (1 - this.k));
                 this.width = this.fullWidth - this.j * this.fullWidth;
 
                 this.x = v.tx * this.width;
@@ -416,7 +562,7 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
                 }
             } else if (this.iconPosition == St.Side.BOTTOM) {
                 this.expandHeight = (this.icon.y - this.icon.height - this.window.y - this.window.height);
-                this.fullHeight = (this.icon.y - this.icon.height - this.window.y) - this.expandHeight * (1 - this.k);
+                this.fullHeight = nonZero((this.icon.y - this.icon.height - this.window.y) - this.expandHeight * (1 - this.k));
                 this.height = this.fullHeight - this.j * this.fullHeight;
                 
                 this.y = v.ty * this.height;
@@ -451,16 +597,22 @@ class MagicLampMinimizeEffect extends AbstractCommonMagicLampEffect {
         this.k = 0;
         this.j = 0;
         this.isMinimizeEffect = true;
+        this._complete = params.complete || Main.wm._shellwm.original_completed_minimize.bind(Main.wm._shellwm);
     
     }
 
     destroy_actor(actor) {
-        Main.wm._shellwm.original_completed_minimize(actor);
+        this._complete(actor);
     }
 
     on_tick_elapsed(timer, msecs) {
         if (Main.overview.visible) {
             this.destroy();
+            return;
+        }
+        if (!this.actor?.get_parent()) {
+            this.destroy();
+            return;
         }
 
         this.progress = timer.get_progress();
@@ -487,16 +639,22 @@ class MagicLampUnminimizeEffect extends AbstractCommonMagicLampEffect {
         this.k = 1;
         this.j = 1;
         this.isMinimizeEffect = false;
+        this._complete = params.complete || Main.wm._shellwm.original_completed_unminimize.bind(Main.wm._shellwm);
     }
     
     destroy_actor(actor) {
-        Main.wm._shellwm.original_completed_unminimize(actor);
+        this._complete(actor);
     }
 
     on_tick_elapsed(timer, msecs) {
         if (Main.overview.visible) {
             this.destroy();
+            return;
         }   
+        if (!this.actor?.get_parent()) {
+            this.destroy();
+            return;
+        }
 
         this.progress = timer.get_progress();
         this.k = 1 - (this.progress > (1 - this.split) ? (this.progress - (1 - this.split)) * (1 / 1 / (1 - (1 - this.split))) : 0);

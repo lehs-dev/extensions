@@ -104,6 +104,8 @@ export const Pipeline = class Pipeline {
 
     /// Attach a Pipeline object with `pipeline_id` already set to an actor.
     attach_pipeline_to_actor(actor) {
+        // Rebinding a pipeline also replaces its previous destroy handler.
+        this.remove_pipeline_from_actor();
         // set the actor
         if (actor)
             this.actor = actor;

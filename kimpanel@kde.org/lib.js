@@ -25,7 +25,11 @@ export class KimMenuItem extends PopupMenu.PopupBaseMenuItem {
 }
 
 export function parseProperty(str) {
+    if (typeof str !== 'string')
+        return null;
     let p = str.split(":");
+    if (p.length < 4 || !p[0])
+        return null;
     let property = {'key' : p[0], 'label' : p[1], 'icon' : p[2], 'text' : p[3]};
     if (p.length > 4 && p[4].length > 0) {
         property.hint = p[4].split(',');

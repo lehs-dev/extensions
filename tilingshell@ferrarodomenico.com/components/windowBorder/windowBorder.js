@@ -22,6 +22,8 @@ const _WindowBorder = class _WindowBorder extends St.DrawingArea {
   _timeout;
   _delayedSmartBorderRadius;
   _scaledBorderWidth;
+  _destroyed = false;
+  _radiusGeneration = 0;
   constructor(win, enableScaling) {
     super({
       style_class: "window-border"
@@ -44,22 +46,37 @@ const _WindowBorder = class _WindowBorder extends St.DrawingArea {
     global.windowGroup.add_child(this);
     this.trackWindow(win, true);
     this.connect("destroy", () => {
+      this._destroyed = true;
+      this._cancelComputeBorderRadius();
       this._bindings.forEach((b) => b.unbind());
       this._bindings = [];
       this._signals.disconnect();
-      if (this._timeout) clearTimeout(this._timeout);
-      this._timeout = void 0;
     });
   }
 
   trackWindow(win, force = false) {
     if (!force && this._window === win) return;
+    this._cancelComputeBorderRadius();
+    this._delayedSmartBorderRadius = false;
     this._bindings.forEach((b) => b.unbind());
     this._bindings = [];
     this._signals.disconnect();
     this._window = win;
+    this._windowMonitor = win.get_monitor();
+    this._borderRadiusValue = [DEFAULT_BORDER_RADIUS, DEFAULT_BORDER_RADIUS,
+      Settings.ENABLE_SMART_WINDOW_BORDER_RADIUS ? 0 : DEFAULT_BORDER_RADIUS,
+      Settings.ENABLE_SMART_WINDOW_BORDER_RADIUS ? 0 : DEFAULT_BORDER_RADIUS];
     this.close();
     const winActor = this._window.get_compositor_private();
+    if (!winActor) return;
+    this._signals.connect(winActor, "destroy", () => {
+      this._cancelComputeBorderRadius();
+      this._signals.disconnect();
+      this._bindings.forEach((binding) => binding.unbind());
+      this._bindings = [];
+      this._window = null;
+      this.close();
+    });
     this._bindings = [
       "scale-x",
       "scale-y",
@@ -144,35 +161,46 @@ const _WindowBorder = class _WindowBorder extends St.DrawingArea {
       this.open();
     });
     if (Settings.ENABLE_SMART_WINDOW_BORDER_RADIUS) {
-      const firstFrameId = winActor.connect_after("first-frame", () => {
+      const firstFrameId = this._signals.connect(winActor, "first-frame", () => {
+        this._signals.disconnect(winActor, firstFrameId);
         if (this._window.maximizedHorizontally || this._window.maximizedVertically || this._window.is_fullscreen()) {
           this._delayedSmartBorderRadius = true;
           return;
         }
         this._runComputeBorderRadiusTimeout(winActor);
-        winActor.disconnect(firstFrameId);
       });
     }
   }
 
-  _runComputeBorderRadiusTimeout(winActor) {
+  _cancelComputeBorderRadius() {
+    this._radiusGeneration++;
     if (this._timeout) clearTimeout(this._timeout);
     this._timeout = void 0;
+  }
+
+  _runComputeBorderRadiusTimeout(winActor) {
+    this._cancelComputeBorderRadius();
+    const generation = this._radiusGeneration;
+    const window = this._window;
     this._timeout = setTimeout(() => {
-      this._computeBorderRadius(winActor).then(() => this.updateStyle());
-      if (this._timeout) clearTimeout(this._timeout);
       this._timeout = void 0;
+      this._computeBorderRadius(winActor, window, generation).then(() => {
+        if (!this._destroyed && generation === this._radiusGeneration)
+          this.updateStyle();
+      }).catch((error) => console.error(`Tiling Shell: failed to compute window border radius: ${error}`));
     }, SMART_BORDER_RADIUS_FIRST_FRAME_DELAY);
   }
 
-  async _computeBorderRadius(winActor) {
+  async _computeBorderRadius(winActor, window, generation) {
+    if (this._destroyed || !window || generation !== this._radiusGeneration || window.get_compositor_private() !== winActor)
+      return;
     const width = 3;
-    const height = winActor.metaWindow.get_frame_rect().height;
+    const height = window.get_frame_rect().height;
     if (height <= 0) return;
     const content = winActor.paint_to_content(
       buildRectangle({
-        x: winActor.metaWindow.get_frame_rect().x,
-        y: winActor.metaWindow.get_frame_rect().y,
+        x: window.get_frame_rect().x,
+        y: window.get_frame_rect().y,
         height,
         width
       })
@@ -182,19 +210,26 @@ const _WindowBorder = class _WindowBorder extends St.DrawingArea {
     const stream = Gio.MemoryOutputStream.new_resizable();
     const x = 0;
     const y = 0;
-    const pixbuf = await Shell.Screenshot.composite_to_stream(
-      texture,
-      x,
-      y,
-      width,
-      height,
-      1,
-      null,
-      0,
-      0,
-      1,
-      stream
-    );
+    let pixbuf;
+    try {
+      pixbuf = await Shell.Screenshot.composite_to_stream(
+        texture,
+        x,
+        y,
+        width,
+        height,
+        1,
+        null,
+        0,
+        0,
+        1,
+        stream
+      );
+    } finally {
+      stream.close(null);
+    }
+    if (this._destroyed || this._window !== window || generation !== this._radiusGeneration)
+      return;
     const pixels = pixbuf.get_pixels();
     const alphaThreshold = 240;
     for (let i = 0; i < height; i++) {
@@ -211,7 +246,6 @@ const _WindowBorder = class _WindowBorder extends St.DrawingArea {
         break;
       }
     }
-    stream.close(null);
     const cached_radius = [
       DEFAULT_BORDER_RADIUS,
       DEFAULT_BORDER_RADIUS,
@@ -222,10 +256,11 @@ const _WindowBorder = class _WindowBorder extends St.DrawingArea {
     cached_radius[St.Corner.TOPRIGHT] = this._borderRadiusValue[St.Corner.TOPRIGHT];
     cached_radius[St.Corner.BOTTOMLEFT] = this._borderRadiusValue[St.Corner.BOTTOMLEFT];
     cached_radius[St.Corner.BOTTOMRIGHT] = this._borderRadiusValue[St.Corner.BOTTOMRIGHT];
-    this._window.__ts_cached_radius = cached_radius;
+    window.__ts_cached_radius = cached_radius;
   }
 
   updateStyle() {
+    if (this._destroyed || !this._window) return;
     const monitorScalingFactor = this._enableScaling ? getMonitorScalingFactor(this._window.get_monitor()) : void 0;
     enableScalingFactorSupport(this, monitorScalingFactor);
     const [alreadyScaled, scalingFactor] = getScalingFactorOf(this);
@@ -246,7 +281,10 @@ const _WindowBorder = class _WindowBorder extends St.DrawingArea {
     const cr = this.get_context();
     const themeNode = this.get_theme_node();
     const [width, height] = this.get_surface_size();
-    if (!width || !height) return;
+    if (!width || !height || !this._window) {
+      cr.$dispose();
+      return;
+    }
     const borderWidth = this._scaledBorderWidth;
     const borderColor = themeNode.get_border_color(null);
     const radius = [0, 0, 0, 0];

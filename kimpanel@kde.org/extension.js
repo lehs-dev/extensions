@@ -107,6 +107,8 @@ class Kimpanel extends GObject.Object {
             () => this.inputpanel.updateFont(this.getTextStyle()));
 
         this.addToShell();
+        this.monitorsSignal = Main.layoutManager.connect(
+            'monitors-changed', () => this.inputpanel.updatePosition());
         this.dbusSignal = this.conn.signal_subscribe(
             null, "org.kde.kimpanel.inputmethod", null, null, null,
             Gio.DBusSignalFlags.NONE, this._parseSignal.bind(this));
@@ -172,7 +174,7 @@ class Kimpanel extends GObject.Object {
             this.table = value[1];
             break;
         case 'UpdateLookupTableCursor':
-            if (this.pos != value[0])
+            if (this.cursor != value[0])
                 changed = true;
             this.cursor = value[0];
             break;
@@ -229,6 +231,8 @@ class Kimpanel extends GObject.Object {
     }
 
     imExit(conn, name) {
+        if (this._isDestroyed)
+            return;
         if (this.current_service == name) {
             this.current_service = '';
             if (this.watch_id != 0) {
@@ -237,7 +241,7 @@ class Kimpanel extends GObject.Object {
             }
 
             this.resetData();
-            this.indicator._updateProperties({});
+            this.indicator._updateProperties([]);
             this.updateInputPanel();
         }
     }
@@ -268,6 +272,7 @@ class Kimpanel extends GObject.Object {
         }
         this.settings.disconnect(this.verticalSignal);
         this.settings.disconnect(this.fontSignal);
+        Main.layoutManager.disconnect(this.monitorsSignal);
         this.settings = null;
         this.conn.signal_unsubscribe(this.dbusSignal);
         this.conn = null;
@@ -318,6 +323,9 @@ class Kimpanel extends GObject.Object {
                                GLib.Variant.new('(i)', [ arg ]));
     }
     setRect(x, y, w, h, relative, scale) {
+        // A D-Bus client can send zero/invalid scale; never divide by it.
+        if (!Number.isFinite(scale) || scale <= 0)
+            scale = 1;
         if (this.x == x && this.y == y && this.w == w && this.h == h &&
             this.relative == relative && this.scale == scale) {
             return;

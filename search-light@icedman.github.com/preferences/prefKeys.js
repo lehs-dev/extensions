@@ -1,9 +1,9 @@
-import Gdk from 'gi://Gdk';
 import GLib from 'gi://GLib';
 
 export let PrefKeys = class {
-  constructor() {
+  constructor(toRGBA) {
     this._keys = {};
+    this._toRGBA = toRGBA;
   }
 
   setKeys(keys) {
@@ -95,6 +95,7 @@ export let PrefKeys = class {
   }
 
   connectSettings(settings, callback) {
+    this.disconnectSettings();
     this._settingsListeners = [];
 
     this._settings = settings;
@@ -139,7 +140,7 @@ export let PrefKeys = class {
           try {
             if (key.object) {
               key.object.set_rgba(
-                new Gdk.RGBA({
+                this._toRGBA({
                   red: key.value[0],
                   green: key.value[1],
                   blue: key.value[2],
@@ -206,10 +207,11 @@ export let PrefKeys = class {
   }
 
   disconnectSettings() {
-    this._settingsListeners.forEach((id) => {
+    (this._settingsListeners || []).forEach((id) => {
       this._settings.disconnect(id);
     });
     this._settingsListeners = [];
+    this._settings = null;
   }
 
   connectBuilder(builder) {
@@ -244,7 +246,9 @@ export let PrefKeys = class {
         }
         case 'dropdown': {
           signal_id = key.object.connect('notify::selected-item', (w) => {
+            if (self._updatingWidgets) return;
             let index = w.get_selected();
+            if (index === 0xffffffff) return;
             let value = key.maps && index in key.maps ? key.maps[index] : index;
             self.setValue(name, value);
           });

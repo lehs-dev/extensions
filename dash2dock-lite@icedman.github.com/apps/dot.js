@@ -48,13 +48,16 @@ const DotCanvas = GObject.registerClass(
     }
 
     set_state(s) {
+      const equal = (a, b) => a === b ||
+        (Array.isArray(a) && Array.isArray(b) && a.length === b.length &&
+          a.every((value, i) => value === b[i]));
       if (
         !this.state ||
         this.state.count != s.count ||
-        this.state.color != s.color ||
+        !equal(this.state.color, s.color) ||
         this.state.style != s.style ||
         this.state.rotate != s.rotate ||
-        this.state.translate != s.translate ||
+        !equal(this.state.translate, s.translate) ||
         this.state.scale != s.scale ||
         this.state.size != s.size
       ) {
@@ -74,7 +77,10 @@ const DotCanvas = GObject.registerClass(
 
       let size = width;
 
-      if (!this.state || !this.state.color || !this.state.count) return;
+      if (!this.state || !this.state.color || !this.state.count) {
+        ctx.$dispose();
+        return;
+      }
 
       const dot_color = this.state.color;
 

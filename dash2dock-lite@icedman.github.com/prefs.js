@@ -196,6 +196,7 @@ export default class Preferences extends ExtensionPreferences {
     });
     settingsKeys.connectBuilder(builder);
     settingsKeys.connectSettings(settings);
+    this._settingsKeys = settingsKeys;
 
     this._settings = settings;
 
@@ -225,6 +226,11 @@ export default class Preferences extends ExtensionPreferences {
 
     this._monitorsConfig = new MonitorsConfig();
     this._monitorsConfig.connect('updated', () => this.updateMonitors());
+    window.connect('close-request', () => {
+      settingsKeys.disconnectSettings();
+      this._monitorsConfig.destroy();
+      return false;
+    });
     // settings.connect('changed::preferred-monitor', () => this.updateMonitors());
 
     this._themed_presets = [];
@@ -250,19 +256,22 @@ export default class Preferences extends ExtensionPreferences {
     );
 
     let themed_presets = [];
-    let f = iter.next_file(null);
-    while (f) {
-      let fn = Gio.File.new_for_path(`${themes_path}/${f.get_name()}`);
-      if (fn.query_exists(null)) {
-        const [success, contents] = fn.load_contents(null);
-        const decoder = new TextDecoder();
-        let contentsString = decoder.decode(contents);
-        let json = JSON.parse(contentsString);
-        if (json && json['meta'] && json['meta']['title']) {
-          themed_presets.push(json);
+    try {
+      let f;
+      while ((f = iter.next_file(null))) {
+        if (f.get_file_type() !== Gio.FileType.REGULAR) continue;
+        try {
+          const fn = dir.get_child(f.get_name());
+          const [success, contents] = fn.load_contents(null);
+          if (!success) continue;
+          const json = JSON.parse(new TextDecoder().decode(contents));
+          if (json?.meta?.title) themed_presets.push(json);
+        } catch (err) {
+          console.log(err);
         }
       }
-      f = iter.next_file(null);
+    } finally {
+      iter.close(null);
     }
     this._themed_presets = [...this._themed_presets, ...themed_presets];
   }
@@ -292,8 +301,7 @@ export default class Preferences extends ExtensionPreferences {
   }
 
   loadPreset(i) {
-    let settingsKeys = SettingsKeys();
-    settingsKeys.connectSettings(this._settings);
+    let settingsKeys = this._settingsKeys;
     if (i == this._themed_presets.length - 1) {
       // export
       let keys = settingsKeys.keys();
@@ -357,7 +365,7 @@ export default class Preferences extends ExtensionPreferences {
   }
 
   updateMonitors() {
-    let monitors = this._monitorsConfig.monitors;
+    let monitors = this._monitorsConfig.activeMonitors;
     let count = monitors.length;
     let list = new Gtk.StringList();
     list.append('Primary Monitor');
@@ -366,6 +374,14 @@ export default class Preferences extends ExtensionPreferences {
       if (!m.active) continue;
       list.append(m.displayName);
     }
-    this._builder.get_object('preferred-monitor').set_model(list);
+    const widget = this._builder.get_object('preferred-monitor');
+    this._settingsKeys._updatingWidgets = true;
+    try {
+      widget.set_model(list);
+      const selected = this._settings.get_int('preferred-monitor');
+      widget.set_selected(selected <= count ? selected : 0);
+    } finally {
+      this._settingsKeys._updatingWidgets = false;
+    }
   }
 }

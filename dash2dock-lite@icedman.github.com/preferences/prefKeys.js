@@ -113,6 +113,7 @@ export let PrefKeys = class {
   }
 
   connectSettings(settings, callback) {
+    this.disconnectSettings();
     this._settingsListeners = [];
 
     this._settings = settings;
@@ -222,10 +223,11 @@ export let PrefKeys = class {
   }
 
   disconnectSettings() {
-    this._settingsListeners.forEach((id) => {
+    (this._settingsListeners || []).forEach((id) => {
       this._settings.disconnect(id);
     });
     this._settingsListeners = [];
+    this._settings = null;
   }
 
   connectBuilder(builder) {
@@ -260,7 +262,9 @@ export let PrefKeys = class {
         }
         case 'dropdown': {
           signal_id = key.object.connect('notify::selected-item', (w) => {
+            if (self._updatingWidgets) return;
             let index = w.get_selected();
+            if (index === 0xffffffff) return;
             let value = key.maps && index in key.maps ? key.maps[index] : index;
             self.setValue(name, value);
           });

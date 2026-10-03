@@ -67,6 +67,7 @@ class TilingManager {
   _snapAssistingInfo;
   _movingWindowTimerId = null;
   _signals;
+  _grabSignals;
   _debug;
   /**
    * Constructs a new TilingManager instance.
@@ -80,6 +81,7 @@ class TilingManager {
     this._enableScaling = enableScaling;
     this._monitor = monitor;
     this._signals = new SignalHandling();
+    this._grabSignals = new SignalHandling();
     this._debug = logger(`TilingManager ${monitor.index}`);
     this._workArea = Main.layoutManager.getWorkAreaForMonitor(
       this._monitor.index
@@ -369,14 +371,11 @@ class TilingManager {
    * Destroys the tiling manager and cleans up resources.
    */
   destroy() {
-    if (this._movingWindowTimerId) {
-      GLib.Source.remove(this._movingWindowTimerId);
-      this._movingWindowTimerId = null;
-    }
+    this._stopWindowGrab();
     this._signals.disconnect();
     this._isGrabbingWindow = false;
     this._snapAssistingInfo.update(void 0);
-    this._edgeTilingManager.abortEdgeTiling();
+    this._edgeTilingManager.destroy();
     this._workspaceTilingLayout.forEach((tl) => tl.destroy());
     this._workspaceTilingLayout.clear();
     this._snapAssist.destroy();
@@ -400,7 +399,7 @@ class TilingManager {
   _onWindowGrabBegin(window, grabOp) {
     if (this._isGrabbingWindow) return;
     TouchPointer.get().updateWindowPosition(window.get_frame_rect());
-    this._signals.connect(
+    this._grabSignals.connect(
       global.stage,
       "touch-event",
       (_source, event) => {
@@ -408,7 +407,7 @@ class TilingManager {
         TouchPointer.get().onTouchEvent(x, y);
       }
     );
-    this._signals.connect(
+    this._grabSignals.connect(
       global.stage,
       "captured-event",
       (_source, event) => {
@@ -427,7 +426,7 @@ class TilingManager {
       }
     );
     if (Settings.ENABLE_BLUR_SNAP_ASSISTANT || Settings.ENABLE_BLUR_SELECTED_TILEPREVIEW) {
-      this._signals.connect(window, "position-changed", () => {
+      this._grabSignals.connect(window, "position-changed", () => {
         if (Settings.ENABLE_BLUR_SELECTED_TILEPREVIEW) {
           this._selectedTilesPreview.get_effect("blur")?.queue_repaint();
         }
@@ -436,13 +435,22 @@ class TilingManager {
         }
       });
     }
+    this._grabSignals.connect(window, "unmanaged", () => {
+      this._stopWindowGrab();
+      this._workspaceTilingLayout.forEach((layout) => layout.close());
+      this._selectedTilesPreview.close();
+      this._snapAssist.close();
+      this._snapAssistingInfo.update(void 0);
+      this._edgeTilingManager.abortEdgeTiling();
+    });
     this._isGrabbingWindow = true;
-    this._movingWindowTimerId = GLib.timeout_add(
-      GLib.PRIORITY_DEFAULT_IDLE,
-      this._movingWindowTimerDuration,
-      this._onMovingWindow.bind(this, window, grabOp)
-    );
-    this._onMovingWindow(window, grabOp);
+    if (this._onMovingWindow(window, grabOp) === GLib.SOURCE_CONTINUE && this._isGrabbingWindow && !this._movingWindowTimerId) {
+      this._movingWindowTimerId = GLib.timeout_add(
+        GLib.PRIORITY_DEFAULT_IDLE,
+        this._movingWindowTimerDuration,
+        this._onMovingWindow.bind(this, window, grabOp)
+      );
+    }
   }
 
   _activationKeyStatus(modifier, key) {
@@ -469,7 +477,10 @@ class TilingManager {
     }
     const currentWs = window.get_workspace();
     const tilingLayout = this._workspaceTilingLayout.get(currentWs);
-    if (!tilingLayout) return GLib.SOURCE_REMOVE;
+    if (!tilingLayout) {
+      this._movingWindowTimerId = null;
+      return GLib.SOURCE_REMOVE;
+    }
     this._edgeTilingManager.workspaceIndex = currentWs.index();
     if (!window.allows_resize() || !window.allows_move() || !this._isPointerInsideThisMonitor(window)) {
       tilingLayout.close();
@@ -600,11 +611,20 @@ class TilingManager {
     return GLib.SOURCE_CONTINUE;
   }
 
-  _onWindowGrabEnd(window) {
+  _stopWindowGrab() {
     this._isGrabbingWindow = false;
     this._grabStartPosition = null;
-    this._signals.disconnect(window);
+    this._lastCursorPos = null;
+    if (this._movingWindowTimerId) {
+      GLib.Source.remove(this._movingWindowTimerId);
+      this._movingWindowTimerId = null;
+    }
+    this._grabSignals.disconnect();
     TouchPointer.get().reset();
+  }
+
+  _onWindowGrabEnd(window) {
+    this._stopWindowGrab();
     const currentWs = window.get_workspace();
     const tilingLayout = this._workspaceTilingLayout.get(currentWs);
     if (tilingLayout) tilingLayout.close();
@@ -703,6 +723,7 @@ class TilingManager {
 
   _easeWindowRect(window, destRect, user_op = false, force = false) {
     const windowActor = window.get_compositor_private();
+    if (!windowActor) return;
     const beforeRect = window.get_frame_rect();
     if (destRect.x === beforeRect.x && destRect.y === beforeRect.y && destRect.width === beforeRect.width && destRect.height === beforeRect.height)
       return;
@@ -900,18 +921,20 @@ class TilingManager {
   }
 
   _autoTile(window, windowCreated) {
-    if (window.get_monitor() !== this._monitor.index) return;
-    if (window === null || window.windowType !== Meta.WindowType.NORMAL || window.get_transient_for() !== null || window.is_attached_dialog() || window.minimized || window.maximizedHorizontally || window.maximizedVertically)
+    if (!window || window.get_monitor() !== this._monitor.index) return;
+    if (window.windowType !== Meta.WindowType.NORMAL || window.get_transient_for() !== null || window.is_attached_dialog() || window.minimized || window.maximizedHorizontally || window.maximizedVertically)
       return;
     window.assignedTile = void 0;
     const vacantTile = this._findEmptyTile(window);
     if (!vacantTile) return;
     if (windowCreated) {
       const windowActor = window.get_compositor_private();
-      const id = windowActor.connect("first-frame", () => {
-        if (!window.minimized && !window.maximizedHorizontally && !window.maximizedVertically && window.get_transient_for() === null && !window.is_attached_dialog())
+      if (!windowActor) return;
+      this._signals.connect(windowActor, "destroy", () => this._signals.disconnect(windowActor));
+      this._signals.connect(windowActor, "first-frame", () => {
+        this._signals.disconnect(windowActor);
+        if (Settings.ENABLE_AUTO_TILING && window.get_monitor() === this._monitor.index && !window.minimized && !window.maximizedHorizontally && !window.maximizedVertically && window.get_transient_for() === null && !window.is_attached_dialog())
           this._easeWindowRectFromTile(vacantTile, window, true);
-        windowActor.disconnect(id);
       });
     } else {
       this._easeWindowRectFromTile(vacantTile, window, true);
@@ -939,7 +962,7 @@ class TilingManager {
     vacantTiles.sort((a, b) => a.x - b.x);
     let bestTileIndex = 0;
     let bestDistance = Math.abs(
-      0.5 - vacantTiles[bestTileIndex].x + vacantTiles[bestTileIndex].width / 2
+      0.5 - (vacantTiles[bestTileIndex].x + vacantTiles[bestTileIndex].width / 2)
     );
     for (let index = 1; index < vacantTiles.length; index++) {
       const distance = Math.abs(

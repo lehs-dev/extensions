@@ -79,7 +79,7 @@ export const isOverlapRect = (r1, r2) => {
   return false;
 };
 
-export const isInRect = (r, p, pad) => {
+export const isInRect = (r, p, pad = 0) => {
   let [x1, y1, w, h] = r;
   let x2 = x1 + w;
   let y2 = y1 + h;
@@ -105,13 +105,17 @@ export const loadFile = function (fn) {
     }
     if (fn.query_exists(null)) {
       fn.load_contents_async(null, (f, res) => {
-        let [ok, contents] = f.load_contents_finish(res);
-        if (!ok) {
-          reject('unable to load file');
+        try {
+          let [ok, contents] = f.load_contents_finish(res);
+          if (!ok) {
+            reject(new Error('unable to load file'));
+            return;
+          }
+          const decoder = new TextDecoder();
+          resolve(decoder.decode(contents));
+        } catch (err) {
+          reject(err);
         }
-        const decoder = new TextDecoder();
-        let contentsString = decoder.decode(contents);
-        resolve(contentsString);
       });
     } else {
       reject('file not found');

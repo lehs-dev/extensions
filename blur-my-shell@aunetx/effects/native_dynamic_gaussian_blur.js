@@ -39,10 +39,21 @@ export const NativeDynamicBlurEffect = utils.IS_IN_PREFERENCES ?
             );
 
             utils.setup_params(this, params);
+            // The public corner_radius parameter is in logical pixels, just
+            // like unscaled_radius. Keep that value for later scale changes.
+            this.unscaled_corner_radius = this.corner_radius;
         }
 
         static get default_params() {
             return DEFAULT_PARAMS;
+        }
+
+        set(params) {
+            const { corner_radius, ...other_params } = params;
+            super.set(other_params);
+            // EffectsManager uses set() when checking out a pooled effect.
+            if ('corner_radius' in params)
+                this.unscaled_corner_radius = corner_radius;
         }
 
         get unscaled_radius() {

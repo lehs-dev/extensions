@@ -54,7 +54,10 @@ const _SuggestedWindowPreview = class _SuggestedWindowPreview extends Shell.Wind
     this._overlayShown = false;
     const tracker = Shell.WindowTracker.get_default();
     const app = tracker.get_window_app(this._metaWindow);
-    this._icon = app.create_icon_texture(ICON_SIZE);
+    this._icon = app ? app.create_icon_texture(ICON_SIZE) : new St.Icon({
+      icon_name: "application-x-executable-symbolic",
+      icon_size: ICON_SIZE
+    });
     this._icon.add_style_class_name("window-icon");
     this._icon.add_style_class_name("icon-dropshadow");
     this._icon.set({
@@ -130,7 +133,7 @@ const _SuggestedWindowPreview = class _SuggestedWindowPreview extends Shell.Wind
     if (this._metaWindow.title) return this._metaWindow.title;
     const tracker = Shell.WindowTracker.get_default();
     const app = tracker.get_window_app(this._metaWindow);
-    return app.get_name();
+    return app?.get_name() ?? "";
   }
 
   showOverlay(animate) {
@@ -154,7 +157,7 @@ const _SuggestedWindowPreview = class _SuggestedWindowPreview extends Shell.Wind
     );
     const activeExtraSize = WINDOW_ACTIVE_SIZE_INC * 2 * scaleFactor;
     const origSize = Math.max(width, height);
-    const scale = (origSize + activeExtraSize) / origSize;
+    const scale = origSize > 0 ? (origSize + activeExtraSize) / origSize : 1;
     this._previewContainer.ease({
       scaleX: scale,
       scaleY: scale,
