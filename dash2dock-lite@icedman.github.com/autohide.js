@@ -2,16 +2,10 @@
 
 import Meta from 'gi://Meta';
 
-import { DockPosition } from './dock.js';
-import {
-  get_distance_sqr,
-  get_distance,
-  isInRect,
-  isOverlapRect,
-} from './utils.js';
+import { isInRect, isOverlapRect } from './utils.js';
 
 const DEBOUNCE_HIDE_TIMEOUT = 120;
-const PRESSURE_SENSE_DISTANCE = 40;
+const REVEAL_DELAY = 200;
 
 // some codes lifted from dash-to-dock intellihide
 const handledWindowTypes = [
@@ -43,6 +37,7 @@ export let AutoHide = class {
     this.extension._loTimer?.cancel(this._debounceCheckSeq);
     this._debounceCheckSeq = null;
 
+    this._cancelReveal();
     this.show();
 
     this._enabled = false;
@@ -58,72 +53,46 @@ export let AutoHide = class {
     return scaleFactor;
   }
 
+  _cancelReveal() {
+    this.extension._loTimer?.cancel(this._revealSeq);
+    this._revealSeq = null;
+  }
+
+  _isAtRevealEdge(pointer) {
+    const monitor = this.dock._monitor;
+    const dwell = this.dock.dwell;
+    if (!monitor || !dwell || monitor.inFullscreen) return false;
+    const [x, y] = pointer;
+    if (x < monitor.x || x >= monitor.x + monitor.width ||
+        y < monitor.y || y >= monitor.y + monitor.height) return false;
+    const [edgeX, edgeY] = dwell.get_transformed_position();
+    return isInRect([edgeX, edgeY, dwell.width, dwell.height], pointer);
+  }
+
   _onMotionEvent() {
-    if (this.extension.pressure_sense && !this._shown) {
-      let monitor = this.dock._monitor;
-      let pointer = global.get_pointer();
-      if (this.extension.simulated_pointer) {
-        pointer = [...this.extension.simulated_pointer];
-      }
-
-      let sw = monitor.width;
-      let sh = monitor.height;
-      let scale = this._getScaleFactor();
-      let area = scale * (PRESSURE_SENSE_DISTANCE * PRESSURE_SENSE_DISTANCE);
-      let dx = 0;
-      let dy = 0;
-
-      if (this.last_pointer) {
-        dx = pointer[0] - this.last_pointer[0];
-        dx = dx * dx;
-        dy = pointer[1] - this.last_pointer[1];
-        dy = dy * dy;
-      }
-
-      let dwell_count =
-        80 - 60 * (this.extension.pressure_sense_sensitivity || 0);
-
-      if (this.dock.isVertical()) {
-        if (
-          // right
-          (this.dock._position == DockPosition.RIGHT &&
-            dy < area &&
-            pointer[0] > monitor.x + sw - 4) ||
-          // left
-          (this.dock._position == DockPosition.LEFT &&
-            dy < area &&
-            pointer[0] < monitor.x + 4)
-        ) {
-          this._dwell++;
-        } else {
-          this._dwell = 0;
-          this.last_pointer = pointer;
-        }
-      } else {
-        // bottom
-        if (dx < area && pointer[1] + 4 > monitor.y + sh) {
-          this._dwell++;
-        } else {
-          this._dwell = 0;
-          this.last_pointer = pointer;
-        }
-      }
-
-      // console.log(`${this._dwell} ${dwell_count} ${this.extension.pressure_sense_sensitivity}`);
-
-      if (this._dwell > dwell_count) {
-        this.show();
-      }
+    if (!this._enabled || this._shown) return;
+    const pointer = global.get_pointer();
+    if (!this._isAtRevealEdge(pointer)) {
+      this._cancelReveal();
+      return;
     }
+    if (this._revealSeq || !this.extension._loTimer) return;
+    const sensitivity = Number.isFinite(this.extension.pressure_sense_sensitivity) ?
+      Math.max(0, Math.min(1, this.extension.pressure_sense_sensitivity)) : 0;
+    const delay = this.extension.pressure_sense ? 650 - 400 * sensitivity : REVEAL_DELAY;
+    this._revealSeq = this.extension._loTimer.runOnce(() => {
+      this._revealSeq = null;
+      if (this._enabled && !this._shown && this._isAtRevealEdge(global.get_pointer()))
+        this.show();
+    }, delay, 'dockReveal');
   }
 
   _onEnterEvent() {
-    if (!this.extension.pressure_sense) {
-      this.show();
-    }
+    this._onMotionEvent();
   }
 
   _onLeaveEvent() {
+    this._cancelReveal();
     if (this._shown) {
       this._dwell = 0;
       this._debounceCheckHide();
@@ -139,6 +108,7 @@ export let AutoHide = class {
   }
 
   show() {
+    this._cancelReveal();
     if (!this.dock._monitor || this.dock._monitor.inFullscreen) {
       return;
     }
@@ -149,6 +119,7 @@ export let AutoHide = class {
   }
 
   hide() {
+    this._cancelReveal();
     this._dwell = 0;
     this.frameDelay = 10;
     this._shown = false;
@@ -219,7 +190,8 @@ export let AutoHide = class {
 
     // console.log("checking pointer location...");
 
-    if (this.dock._isWithinDash(pointer) || isInRect(arect, pointer)) {
+    if (this._shown !== false &&
+        (this.dock._isWithinDash(pointer) || isInRect(arect, pointer))) {
       return false;
     }
 
