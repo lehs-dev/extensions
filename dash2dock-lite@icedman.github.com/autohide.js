@@ -5,7 +5,7 @@ import Meta from 'gi://Meta';
 import { isInRect, isOverlapRect } from './utils.js';
 
 const DEBOUNCE_HIDE_TIMEOUT = 120;
-const REVEAL_DELAY = 200;
+const REVEAL_DELAY = 100;
 
 // some codes lifted from dash-to-dock intellihide
 const handledWindowTypes = [
@@ -54,7 +54,7 @@ export let AutoHide = class {
   }
 
   _cancelReveal() {
-    this.extension._loTimer?.cancel(this._revealSeq);
+    this.extension._hiTimer?.cancel(this._revealSeq);
     this._revealSeq = null;
   }
 
@@ -66,7 +66,16 @@ export let AutoHide = class {
     if (x < monitor.x || x >= monitor.x + monitor.width ||
         y < monitor.y || y >= monitor.y + monitor.height) return false;
     const [edgeX, edgeY] = dwell.get_transformed_position();
-    return isInRect([edgeX, edgeY, dwell.width, dwell.height], pointer);
+    if (!isInRect([edgeX, edgeY, dwell.width, dwell.height], pointer)) return false;
+    // The reactive strip is two pixels thick, but only the outermost pixel
+    // should summon the dock. The inner pixel remains safe to hover.
+    switch (this.dock._position) {
+      case 'left': return x < monitor.x + 1;
+      case 'right': return x >= monitor.x + monitor.width - 1;
+      case 'top': return y < monitor.y + 1;
+      case 'bottom': return y >= monitor.y + monitor.height - 1;
+      default: return false;
+    }
   }
 
   _onMotionEvent() {
@@ -76,15 +85,12 @@ export let AutoHide = class {
       this._cancelReveal();
       return;
     }
-    if (this._revealSeq || !this.extension._loTimer) return;
-    const sensitivity = Number.isFinite(this.extension.pressure_sense_sensitivity) ?
-      Math.max(0, Math.min(1, this.extension.pressure_sense_sensitivity)) : 0;
-    const delay = this.extension.pressure_sense ? 650 - 400 * sensitivity : REVEAL_DELAY;
-    this._revealSeq = this.extension._loTimer.runOnce(() => {
+    if (this._revealSeq || !this.extension._hiTimer) return;
+    this._revealSeq = this.extension._hiTimer.runOnce(() => {
       this._revealSeq = null;
       if (this._enabled && !this._shown && this._isAtRevealEdge(global.get_pointer()))
         this.show();
-    }, delay, 'dockReveal');
+    }, REVEAL_DELAY, 'dockReveal');
   }
 
   _onEnterEvent() {
