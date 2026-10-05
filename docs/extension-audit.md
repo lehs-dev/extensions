@@ -6,8 +6,10 @@ primary sang laptop. Kích thước này theo thông tin người dùng, chưa �
 
 `/workspaces/extensions` được bind mount trực tiếp từ
 `/home/lehoangson/.local/share/gnome-shell/extensions`. Mốc ban đầu là commit
-`8b4f467`. Các bản sửa đang là diff chưa commit. Không bật/tắt extension, đổi
-GSettings, reload Shell hay đăng xuất phiên host trong quá trình rà soát.
+`8b4f467`. Khi tiếp tục kiểm chứng ngày 05/10/2026, các bản sửa đã có trong
+commit `d441311`; phần bổ sung kiểm thử và báo cáo vẫn là diff chưa commit.
+Không bật/tắt extension, đổi GSettings, reload Shell hay đăng xuất phiên host
+trong quá trình rà soát.
 Thư mục `.devcontainer/` có sẵn và không được sửa.
 
 ## Phạm vi và kết quả
@@ -18,7 +20,7 @@ nhị phân không được coi là mã đã kiểm tra bằng runtime.
 
 | Extension | Bản cài | JavaScript | Thay đổi chính |
 | --- | --- | ---: | --- |
-| Blur my Shell | 72 | 50 | Ngắt observer khi tái sử dụng effect/pipeline; tránh theo dõi cửa sổ lặp; hủy timer/idle khi disable; cleanup screenshot theo từng màn hình; guard monitor/actor đã mất; sửa shader chia cho 0. |
+| Blur my Shell | 72 | 50 | Ngắt observer khi tái sử dụng effect/pipeline; tránh theo dõi cửa sổ lặp; hủy timer/idle khi disable; cleanup screenshot theo từng màn hình; guard monitor/actor đã mất; sửa shader chia cho 0; giữ bán kính logic qua đổi scale và phục hồi pipeline hỏng bằng default đã giải mã. |
 | Compiz alike magic lamp effect | 24 | 3 | Dừng timeline khi bị ngắt; cleanup effect một lần; bảo vệ kích thước và mẫu số; bỏ redisplay dock mỗi lần minimize; snapshot tạm khi animation đi qua màn hình khác; giữ wrapper của extension khác và vô hiệu hóa wrapper cũ sau disable. |
 | Dash2Dock Animated | 92 | 28 | Sửa biến monitor không tồn tại, tạo dock lặp, lựa chọn monitor và cleanup actor/listener/timer; theo dõi cửa sổ riêng cho từng dock; đọc Downloads bất đồng bộ và hủy được. |
 | Just Perfection | 37 | 7 | Sửa ID signal cũ bị ngắt lại; cân bằng block/unblock phím Super; giữ handler attention của Shell; khôi phục startup state; guard lúc không có màn hình. |
@@ -101,8 +103,8 @@ Kiểm thử dùng mock signal, timer, actor và D-Bus để tái hiện đườ
 khởi chạy GNOME Shell. Schema XML được parse riêng bằng Python; schema và
 `gschemas.compiled` không được sửa nên không cần biên dịch lại.
 
-Kết quả cuối: **81/81 kiểm thử qua** trên bản đã sửa; trên commit ban đầu
-trong `/tmp`, **80/81 kiểm thử thất bại**, 1 kiểm thử vẫn qua. Kiểm tra cú
+Kết quả cuối ngày 05/10/2026: **87/87 kiểm thử qua** trên bản đã sửa; trên
+commit ban đầu trong `/tmp`, **86/87 kiểm thử thất bại**, 1 kiểm thử vẫn qua. Kiểm tra cú
 pháp 175 file và cây import 10 extension đều qua. Parse thành công 33 file
 schema/UI XML có sẵn trong repository; `git diff --check` sạch.
 
