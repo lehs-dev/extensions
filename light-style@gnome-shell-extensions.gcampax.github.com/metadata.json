@@ -5,7 +5,8 @@
   "name": "Light Style",
   "settings-schema": "org.gnome.shell.extensions.light-style",
   "shell-version": [
-    "50"
+    "50",
+    "51"
   ],
   "url": "https://gitlab.gnome.org/GNOME/gnome-shell-extensions",
   "uuid": "light-style@gnome-shell-extensions.gcampax.github.com",

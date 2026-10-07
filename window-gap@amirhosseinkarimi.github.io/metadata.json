@@ -4,7 +4,8 @@
   "name": "Window Gap",
   "settings-schema": "org.gnome.shell.extensions.window-gap",
   "shell-version": [
-    "50"
+    "50",
+    "51"
   ],
   "url": "https://github.com/AmirHosseinKarimi/gnome-maximized-window-gap",
   "uuid": "window-gap@amirhosseinkarimi.github.io",
