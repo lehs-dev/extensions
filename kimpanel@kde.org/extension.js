@@ -10,8 +10,6 @@ import {KimIndicator} from './indicator.js';
 import {KimMenu} from './menu.js';
 import * as Lib from './lib.js';
 
-var kimpanel = null;
-
 const KimpanelIface = '<node> \
 <interface name="org.kde.impanel"> \
 <signal name="MovePreeditCaret"> \
@@ -284,12 +282,32 @@ class Kimpanel extends GObject.Object {
         this._impl2 = null;
         this._helperImpl.unexport();
         this._helperImpl = null;
+        // Remove from Shell before destroying actors to avoid callbacks
+        // into JSAPI during GC sweep (destroy from C while handlers live).
+        try {
+            if (this.menu && this.menu.actor.get_parent())
+                this.menu.actor.get_parent().remove_child(this.menu.actor);
+        } catch (e) {
+            // already removed/disposed
+        }
         // Menu need to be destroyed before indicator.
-        this.menu.destroy();
+        try {
+            this.menu.destroy();
+        } catch (e) {
+            // already disposed from C
+        }
         this.menu = null;
-        this.indicator.destroy();
+        try {
+            this.indicator.destroy();
+        } catch (e) {
+            // PanelMenu.Button handles status-area removal; ignore double destroy
+        }
         this.indicator = null;
-        this.inputpanel.destroy();
+        try {
+            this.inputpanel.destroy();
+        } catch (e) {
+            // already disposed from C
+        }
         this.inputpanel = null;
     }
 
@@ -357,19 +375,19 @@ class Kimpanel extends GObject.Object {
 export default class KimpanelExtension extends Extension {
     constructor(...args) {
         super(...args);
-        this._settings = this.getSettings();
+        this.kimpanel = null;
     }
 
     enable() {
-        if (!kimpanel) {
-            kimpanel = new Kimpanel(this._settings);
+        if (!this.kimpanel) {
+            this.kimpanel = new Kimpanel(this.getSettings());
         }
     }
 
     disable() {
-        if (kimpanel) {
-            kimpanel.destroy();
-            kimpanel = null;
+        if (this.kimpanel) {
+            this.kimpanel.destroy();
+            this.kimpanel = null;
         }
     }
 }

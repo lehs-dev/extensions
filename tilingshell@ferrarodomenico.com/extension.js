@@ -170,8 +170,14 @@ class TilingShellExtension extends Extension {
     if (!this._signals) return;
     this._signals.connect(Main.layoutManager, "monitors-changed", () => {
       GlobalState.get().validate_selected_layouts();
-      this._createTilingManagers();
-      this._windowBorderManager?.updateStyle();
+      // GNOME 51+: `experimental-features` key was removed from
+      // org.gnome.mutter, so scale-factor changes no longer emit
+      // `changed::experimental-features`. Re-evaluate here instead.
+      // _refreshFractionalScaling already rebuilds on change, skip duplicate.
+      const rebuilt = this._refreshFractionalScaling();
+      if (!rebuilt)
+        this._createTilingManagers();
+      this._windowBorderManager?.updateStyle?.();
     });
     this._signals.connect(global.display, "workareas-changed", () => {
       const allMonitors = getMonitors();
@@ -184,27 +190,18 @@ class TilingShellExtension extends Extension {
         });
       }
     });
-    this._signals.connect(
-      new Gio.Settings({ schema: "org.gnome.mutter" }),
-      "changed::experimental-features",
-      (_mutterSettings) => {
-        if (!_mutterSettings) return;
-        const fractionalScalingEnabled = this._isFractionalScalingEnabled(_mutterSettings);
-        if (this._fractionalScalingEnabled === fractionalScalingEnabled)
-          return;
-        this._fractionalScalingEnabled = fractionalScalingEnabled;
-        this._createTilingManagers();
-        if (this._indicator) {
-          this._indicator.enableScaling = !this._fractionalScalingEnabled;
+    const mutterSettings = new Gio.Settings({ schema: "org.gnome.mutter" });
+    if (this._hasExperimentalFeaturesKey(mutterSettings)) {
+      this._signals.connect(
+        mutterSettings,
+        "changed::experimental-features",
+        (_settings) => {
+          if (!_settings) return;
+          const fractionalScalingEnabled = this._isFractionalScalingEnabled(_settings);
+          this._applyFractionalScaling(fractionalScalingEnabled);
         }
-        if (this._windowBorderManager)
-          this._windowBorderManager.destroy();
-        this._windowBorderManager = new WindowBorderManager(
-          !this._fractionalScalingEnabled
-        );
-        this._windowBorderManager.enable();
-      }
-    );
+      );
+    }
     if (this._keybindings) {
       this._signals.connect(
         this._keybindings,
@@ -565,10 +562,70 @@ class TilingShellExtension extends Extension {
     monitorTilingManager.onUntileWindow(focus_window, true);
   }
 
+  _hasExperimentalFeaturesKey(_mutterSettings) {
+    try {
+      if (!_mutterSettings || typeof _mutterSettings.list_keys !== "function")
+        return false;
+      return _mutterSettings.list_keys().includes("experimental-features");
+    } catch (e) {
+      return false;
+    }
+  }
+
+  _isFractionalScaleInUse() {
+    // GNOME 51+: `experimental-features` was removed (fractional scaling is
+    // stable). Fall back to detecting an actual fractional monitor scale.
+    try {
+      if (!global.display || typeof global.display.get_n_monitors !== "function")
+        return false;
+      const n = global.display.get_n_monitors();
+      for (let i = 0; i < n; i++) {
+        const scale = global.display.get_monitor_scale(i);
+        if (Math.abs(scale - Math.round(scale)) > 0.001)
+          return true;
+      }
+    } catch (e) {
+      // ignore, assume no fractional scaling
+    }
+    return false;
+  }
+
   _isFractionalScalingEnabled(_mutterSettings) {
-    return _mutterSettings.get_strv("experimental-features").find(
-      (feat) => feat === "scale-monitor-framebuffer" || feat === "x11-randr-fractional-scaling"
-    ) !== void 0;
+    try {
+      if (!_mutterSettings || !this._hasExperimentalFeaturesKey(_mutterSettings))
+        return this._isFractionalScaleInUse();
+      return _mutterSettings.get_strv("experimental-features").find(
+        (feat) => feat === "scale-monitor-framebuffer" || feat === "x11-randr-fractional-scaling"
+      ) !== void 0;
+    } catch (e) {
+      return this._isFractionalScaleInUse();
+    }
+  }
+
+  _applyFractionalScaling(fractionalScalingEnabled) {
+    if (this._fractionalScalingEnabled === fractionalScalingEnabled)
+      return false;
+    this._fractionalScalingEnabled = fractionalScalingEnabled;
+    this._createTilingManagers();
+    if (this._indicator) {
+      this._indicator.enableScaling = !this._fractionalScalingEnabled;
+    }
+    if (this._windowBorderManager)
+      this._windowBorderManager.destroy();
+    this._windowBorderManager = new WindowBorderManager(
+      !this._fractionalScalingEnabled
+    );
+    this._windowBorderManager.enable();
+    return true;
+  }
+
+  _refreshFractionalScaling() {
+    try {
+      return this._applyFractionalScaling(this._isFractionalScalingEnabled(null));
+    } catch (e) {
+      // keep current value on unexpected error
+      return false;
+    }
   }
 
   disable() {

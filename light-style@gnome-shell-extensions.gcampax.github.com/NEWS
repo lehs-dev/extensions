@@ -1,4 +1,4 @@
-50.4
+51.0
 ====
 * window-list: Fix reappearing after unfullscreening [Jing; !469]
 
@@ -6,22 +6,30 @@ Contributors:
   Jing Wang
 
 Translators:
-  Jean-Marc TISSIERES [fr]
+  Kjartan Maraas [nb]
 
-50.3
-====
+51.rc
+=====
+* Port to event controllers [Florian; !467]
+
+Contributors:
+  Florian Müllner
+
+Translators:
+  Jordi Mas [ca]
+
+51.alpha
+========
+* Include project version in metadata [Florian; !451]
 * auto-move-windows: Make workspace cleanup more robust [Christian; !455]
 * window-list: Only perform allowed window actions [Florian; !462]
+* Misc. bug fixes and cleanups [Florian; !458, !461, !463]
 
 Contributors:
   Christian Lauinger, Florian Müllner
 
-50.2
-====
-* Include project version in metadata [Florian; !451]
-
-Contributors:
-  Florian Müllner
+Translators:
+  Julien Humbert [fr]
 
 50.1
 ====

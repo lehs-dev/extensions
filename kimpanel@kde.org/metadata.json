@@ -7,12 +7,10 @@
   "name": "Input Method Panel",
   "settings-schema": "org.gnome.shell.extensions.kimpanel",
   "shell-version": [
-    "48",
-    "49",
     "50",
     "51"
   ],
   "url": "https://github.com/wengxt/gnome-shell-extension-kimpanel",
   "uuid": "kimpanel@kde.org",
-  "version": 92
+  "version": 94
 }

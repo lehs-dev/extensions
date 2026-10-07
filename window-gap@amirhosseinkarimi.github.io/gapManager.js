@@ -11,6 +11,18 @@ export class GapManager {
     }
 
     rebuild() {
+        // Guard against calls during shutdown/reload when layoutManager
+        // or monitors are gone. Note: when Tiling Shell is also enabled
+        // with outer gaps > 0, both extensions shrink the work area
+        // (Window Gap via struts, Tiling Shell via its own outer gaps),
+        // so the visible margin doubles. Disable outer gaps in one of
+        // the two extensions if that is not wanted.
+        try {
+            if (!Main.layoutManager || !Main.layoutManager.monitors)
+                return;
+        } catch (e) {
+            return;
+        }
         const margins = this._getMargins();
         const edges = [];
 
@@ -51,18 +63,57 @@ export class GapManager {
 
         // Updating actors preserves Shell's chrome tracking and avoids destroying
         // and recreating four actors per monitor for every preferences change.
+        const replaceActor = (index, x, y, width, height) => {
+            const old = this._actors[index];
+            if (old) {
+                try {
+                    Main.layoutManager.removeChrome(old);
+                } catch (e) {
+                    // layoutManager gone during shutdown
+                }
+                try {
+                    if (typeof old.is_destroyed !== 'function' || !old.is_destroyed())
+                        old.destroy();
+                } catch (e) {
+                    // already disposed from C
+                }
+            }
+            this._actors[index] = this._createEdge(x, y, width, height);
+        };
         edges.forEach(([x, y, width, height], index) => {
-            const actor = this._actors[index];
+            let actor = this._actors[index];
+            try {
+                if (actor && typeof actor.is_destroyed === 'function' && actor.is_destroyed()) {
+                    actor = null;
+                }
+            } catch (e) {
+                actor = null;
+            }
             if (actor) {
-                actor.set_position(x, y);
-                actor.set_size(width, height);
+                try {
+                    actor.set_position(x, y);
+                    actor.set_size(width, height);
+                } catch (e) {
+                    // Actor disposed from C during shutdown; replace in place
+                    replaceActor(index, x, y, width, height);
+                }
             } else {
-                this._addEdge(x, y, width, height);
+                replaceActor(index, x, y, width, height);
             }
         });
         for (const actor of this._actors.splice(edges.length)) {
-            Main.layoutManager.removeChrome(actor);
-            actor.destroy();
+            if (!actor)
+                continue;
+            try {
+                Main.layoutManager.removeChrome(actor);
+            } catch (e) {
+                // layoutManager gone during shutdown
+            }
+            try {
+                actor.destroy();
+            } catch (e) {
+                // already disposed from C
+            }
         }
     }
 
@@ -85,28 +136,48 @@ export class GapManager {
         };
     }
 
+    _createEdge(x, y, width, height) {
+        try {
+            const actor = new Clutter.Actor({
+                reactive: false,
+                width,
+                height,
+                x,
+                y,
+                opacity: 0,
+            });
+
+            // GNOME 50 removed affectsInputRegion from addChrome params
+            Main.layoutManager.addChrome(actor, {
+                affectsStruts: true,
+            });
+
+            return actor;
+        } catch (e) {
+            return null;
+        }
+    }
+
     _addEdge(x, y, width, height) {
-        const actor = new Clutter.Actor({
-            reactive: false,
-            width,
-            height,
-            x,
-            y,
-            opacity: 0,
-        });
-
-        // GNOME 50 removed affectsInputRegion from addChrome params
-        Main.layoutManager.addChrome(actor, {
-            affectsStruts: true,
-        });
-
-        this._actors.push(actor);
+        const actor = this._createEdge(x, y, width, height);
+        if (actor)
+            this._actors.push(actor);
     }
 
     _destroyActors() {
         for (const actor of this._actors) {
-            Main.layoutManager.removeChrome(actor);
-            actor.destroy();
+            if (!actor)
+                continue;
+            try {
+                Main.layoutManager.removeChrome(actor);
+            } catch (e) {
+                // layoutManager gone during shutdown
+            }
+            try {
+                actor.destroy();
+            } catch (e) {
+                // already disposed from C
+            }
         }
         this._actors = [];
     }

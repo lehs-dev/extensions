@@ -18,8 +18,9 @@ let failures = 0;
 let sources = 0;
 for (const folder of folders) {
     const metadata = JSON.parse(readFileSync(join(folder, 'metadata.json'), 'utf8'));
-    if (metadata.uuid !== relative(root, folder) || !metadata['shell-version'].includes('50')) {
-        console.error(`Invalid GNOME 50 metadata: ${relative(root, folder)}`);
+    const versions = metadata['shell-version'] || [];
+    if (metadata.uuid !== relative(root, folder) || !versions.includes('50') || !versions.includes('51')) {
+        console.error(`Invalid GNOME 50+51 metadata: ${relative(root, folder)}`);
         failures++;
     }
     for (const path of walk(folder).filter(path => path.endsWith('.js'))) {

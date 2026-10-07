@@ -45,7 +45,7 @@ class KimpanelPrefsWidget extends Adw.PreferencesPage {
 
 
 export default class KimpanelExtensionPreferences extends ExtensionPreferences {
-    getPreferencesWidget() {
-        return new KimpanelPrefsWidget(this.getSettings());
+    fillPreferencesWindow(window) {
+        window.add(new KimpanelPrefsWidget(this.getSettings()));
     }
 }

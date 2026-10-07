@@ -987,13 +987,27 @@ export let Dock = GObject.registerClass(
     }
 
     layout() {
-      if (!this.dash || !this.dash.last_child) return;
-      if (this.extension.apps_icon_front) {
-        this.dash.last_child.text_direction = 2; // RTL
-        this.dash._box.text_direction = 1; // LTR
-      } else {
-        this.dash.last_child.text_direction = 1; // LTR
-        this.dash._box.text_direction = 1; // LTR
+      let dashBox;
+      let lastChild;
+      try {
+        if (!this.dash) return false;
+        lastChild = this.dash.last_child;
+        dashBox = this.dash._box;
+        if (!lastChild || !dashBox) return false;
+      } catch (e) {
+        // Dash already disposed from C during shutdown/reload
+        return false;
+      }
+      try {
+        if (this.extension.apps_icon_front) {
+          lastChild.text_direction = 2; // RTL
+          dashBox.text_direction = 1; // LTR
+        } else {
+          lastChild.text_direction = 1; // LTR
+          dashBox.text_direction = 1; // LTR
+        }
+      } catch (e) {
+        return false;
       }
 
       const locations = [
