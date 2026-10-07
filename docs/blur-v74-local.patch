@@ -1,0 +1,442 @@
+--- a/blur-my-shell@aunetx/components/appfolders.js
++++ b/blur-my-shell@aunetx/components/appfolders.js
+@@ -150,6 +150,9 @@
+     }
+ 
+     enable() {
++        if (this.enabled)
++            return;
++        this.enabled = true;
+         this._log("blurring appfolders");
+ 
+         brightness = this.settings.appfolder.BRIGHTNESS;
+@@ -253,6 +256,7 @@
+     }
+ 
+     disable() {
++        this.enabled = false;
+         this._log("removing blur from appfolders");
+ 
+         let appDisplay = Main.overview._overview.controls._appDisplay;
+--- a/blur-my-shell@aunetx/components/applications.js
++++ b/blur-my-shell@aunetx/components/applications.js
+@@ -63,6 +63,7 @@
+ 
+         // stores every blurred meta window
+         this.meta_window_map = new Map();
++        this.enabled = false;
+ 
+         // cache for compiled patterns to avoid recompilation
+         this._whitelist_pattern_cache = new Map();
+@@ -87,6 +88,9 @@
+     }
+ 
+     enable() {
++        if (this.enabled)
++            return;
++        this.enabled = true;
+         this._log("blurring applications...");
+ 
+         // export dbus service for preferences
+@@ -97,6 +101,9 @@
+ 
+         // blur already existing windows
+         this.update_all_windows();
++        this.connections.connect(Main.layoutManager, 'monitors-changed',
++            () => this.update_all_windows()
++        );
+ 
+         // blur every new window
+         this.connections.connect(
+@@ -172,7 +179,7 @@
+         // remove all previously blurred windows, in the case where the
+         // whitelist was changed
+         this.meta_window_map.forEach(((_meta_window, pid) => {
+-            this.remove_blur(pid);
++            this.untrack_meta_window(pid);
+         }));
+ 
+         for (
+@@ -191,6 +198,9 @@
+     /// needed.
+     /// Accepts only untracked meta windows (i.e no `bms_pid` set)
+     track_new(meta_window) {
++        // Sticky windows occur in more than one workspace's window list.
++        if (this.meta_window_map.get(meta_window.bms_pid) === meta_window)
++            return;
+         // create a pid that will follow the window during its whole life
+         const pid = ("" + Math.random()).slice(2, 16);
+         meta_window.bms_pid = pid;
+@@ -248,9 +258,13 @@
+             if (blur_actor) {
+                 if (this.settings.applications.STATIC_BLUR) {
+                     const bg_manager = meta_window.bg_manager;
++                    if (!bg_manager?.backgroundActor)
++                        return;
+                     const bg_actor_monitor_index = bg_manager.backgroundActor.monitor;
+                     const window_monitor_index = meta_window.get_monitor();
+                     const monitor = Main.layoutManager.monitors[window_monitor_index];
++                    if (!monitor)
++                        return;
+ 
+                     if (bg_actor_monitor_index !== window_monitor_index) {
+                         this._log(`application (pid ${pid}) switching to monitor: ${window_monitor_index}`);
+@@ -331,6 +345,8 @@
+     create_blur_effect(meta_window) {
+         const pid = meta_window.bms_pid;
+         const window_actor = meta_window.get_compositor_private();
++        if (!window_actor || !Main.layoutManager.monitors[meta_window.get_monitor()])
++            return;
+ 
+         let blur_actor;
+ 
+@@ -529,7 +545,7 @@
+         const monitor_index = meta_window.get_monitor();
+         // check if the window is using wayland, or xwayland/xorg for rendering
+         return !scale_monitor_framebuffer && is_wayland && meta_window.get_client_type() == 0
+-            ? Main.layoutManager.monitors[monitor_index].geometry_scale
++            ? (Main.layoutManager.monitors[monitor_index]?.geometry_scale || 1)
+             : 1;
+     }
+ 
+@@ -553,7 +569,10 @@
+         this._log("resetting...");
+ 
+         this.disable();
+-        setTimeout(_ => this.enable(), 1);
++        this._restartId = setTimeout(() => {
++            this._restartId = null;
++            this.enable();
++        }, 1);
+     }
+ 
+     change_pipeline() {
+@@ -609,6 +628,11 @@
+     }
+ 
+     disable() {
++        if (this._restartId) {
++            clearTimeout(this._restartId);
++            this._restartId = null;
++        }
++        this.enabled = false;
+         this._log("removing blur from applications...");
+ 
+         this.service?.unexport();
+--- a/blur-my-shell@aunetx/components/lockscreen.js
++++ b/blur-my-shell@aunetx/components/lockscreen.js
+@@ -56,7 +56,7 @@
+ 
+     _updateBackgrounds() {
+         for (let i = 0; i < this._bgManagers.length; i++) {
+-            this._bgManagers[i]._bms_pipeline.destroy();
++            this._bgManagers[i]._bms_pipeline?.destroy();
+             this._bgManagers[i].destroy();
+         }
+ 
+--- a/blur-my-shell@aunetx/components/overview.js
++++ b/blur-my-shell@aunetx/components/overview.js
+@@ -200,6 +200,7 @@
+     remove_background_actors() {
+         this.overview_background_group.remove_all_children();
+         this.animation_background_group.remove_all_children();
++        this.animation_background_group.get_parent()?.remove_child(this.animation_background_group);
+ 
+         this.connections.disconnect_all_for(Main.layoutManager.overviewGroup);
+         if (this.overview_background_group.get_parent())
+@@ -228,6 +229,7 @@
+ 
+         this.connections.disconnect_all();
+         this.enabled = false;
++        this.restore_patched_proto();
+     }
+ 
+     restore_patched_proto() {
+--- a/blur-my-shell@aunetx/components/panel.js
++++ b/blur-my-shell@aunetx/components/panel.js
+@@ -29,7 +29,7 @@
+         this.settings = settings;
+         this.effects_manager = effects_manager;
+         this.actors_list = [];
+-        this.queued_updates = new Set();
++        this.queued_updates = new Map();
+         this.enabled = false;
+         this._first_boot = true;
+     }
+@@ -116,7 +116,10 @@
+         this._log("resetting...");
+ 
+         this.disable();
+-        setTimeout(_ => this.enable(), 1);
++        this._restartId = setTimeout(() => {
++            this._restartId = null;
++            this.enable();
++        }, 1);
+     }
+ 
+     /// Check for already existing panels and blur them if they are not already
+@@ -147,8 +150,11 @@
+         // This is crucial to ensure the panel actors have been allocated their
+         // final size and position by the compositor, avoiding race conditions
+         // during extension startup.
+-        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+-            if (!global.dashToPanel?.panels) {
++        if (this._dtpIdleId)
++            return;
++        this._dtpIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
++            this._dtpIdleId = null;
++            if (!this.enabled || !global.dashToPanel?.panels) {
+                 return GLib.SOURCE_REMOVE;
+             }
+ 
+@@ -346,8 +352,7 @@
+         if (this.queued_updates.has(actors))
+             return;
+ 
+-        this.queued_updates.add(actors);
+-        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
++        const source_id = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+             this.queued_updates.delete(actors);
+ 
+             if (!this.enabled || !this.actors_list.includes(actors))
+@@ -356,6 +361,7 @@
+             this.update_size(actors);
+             return GLib.SOURCE_REMOVE;
+         });
++        this.queued_updates.set(actors, source_id);
+     }
+ 
+     update_size(actors) {
+@@ -367,7 +373,8 @@
+         let [geometry_width, geometry_height] = geometry_actor.get_size();
+ 
+         if (!width || !height || !geometry_width || !geometry_height) {
+-            this.queue_update_size(actors);
++            // Wait for the next allocation notification instead of spinning
++            // idle callbacks while an actor is unmapped or has no size.
+             return;
+         }
+ 
+@@ -375,7 +382,6 @@
+         if (actors.static_blur) {
+             let monitor = Main.layoutManager.findMonitorForActor(geometry_actor);
+             if (!monitor) {
+-                this.queue_update_size(actors);
+                 return;
+             }
+ 
+@@ -562,6 +568,8 @@
+ 
+     /// Callback when a new window is added
+     on_window_actor_added(container, meta_window_actor) {
++        if (this.window_signal_ids.has(meta_window_actor))
++            return;
+         this.window_signal_ids.set(meta_window_actor, [
+             meta_window_actor.connect('notify::allocation',
+                 _ => this.update_visibility()
+@@ -575,7 +583,7 @@
+ 
+     /// Callback when a window is removed
+     on_window_actor_removed(container, meta_window_actor) {
+-        for (const signalId of this.window_signal_ids.get(meta_window_actor)) {
++        for (const signalId of this.window_signal_ids.get(meta_window_actor) || []) {
+             meta_window_actor.disconnect(signalId);
+         }
+         this.window_signal_ids.delete(meta_window_actor);
+@@ -622,6 +630,8 @@
+             // can be done from its preferences anyway
+             .filter(actors => !actors.is_dtp_panel)
+             .forEach(actors => {
++                if (!actors.monitor)
++                    return;
+                 let panel = actors.widgets.panel;
+                 let panel_top = panel.get_transformed_position()[1];
+                 let panel_bottom = panel_top + panel.get_height();
+@@ -774,6 +784,10 @@
+ 
+     // IMPORTANT: do never call this in a mutable `this.actors_list.forEach`
+     destroy_blur(actors) {
++        const source_id = this.queued_updates.get(actors);
++        if (source_id)
++            GLib.source_remove(source_id);
++        this.queued_updates.delete(actors);
+         this.set_should_override_panel(actors, false);
+ 
+         if (actors.bg_manager) {
+@@ -797,12 +811,24 @@
+     }
+ 
+     disable() {
++        if (this._restartId) {
++            clearTimeout(this._restartId);
++            this._restartId = null;
++        }
++        if (this._dtpIdleId) {
++            GLib.source_remove(this._dtpIdleId);
++            this._dtpIdleId = null;
++        }
++        for (const source_id of this.queued_updates.values())
++            GLib.source_remove(source_id);
++        this.queued_updates.clear();
+         if (!this.enabled) {
+             this._log("blur already removed");
+             return;
+         }
+ 
+         this._log("removing blur from top panel");
++        this.enabled = false;
+ 
+         this.disconnect_from_windows_and_overview();
+ 
+--- a/blur-my-shell@aunetx/components/screenshot.js
++++ b/blur-my-shell@aunetx/components/screenshot.js
+@@ -7,10 +7,14 @@
+         this.connections = connections;
+         this.settings = settings;
+         this.screenshot_background_managers = [];
++        this._selectorSignals = [];
+         this.effects_manager = effects_manager;
+     }
+ 
+     enable() {
++        if (this.enabled)
++            return;
++        this.enabled = true;
+         this._log("blurring screenshot's window selector");
+ 
+         // connect to monitors change
+@@ -28,6 +32,8 @@
+         // create new backgrounds for the screenshot window selector
+         for (let i = 0; i < Main.screenshotUI._windowSelectors.length; i++) {
+             const window_selector = Main.screenshotUI._windowSelectors[i];
++            if (!Main.layoutManager.monitors[window_selector._monitorIndex])
++                continue;
+             const pipeline = new Pipeline(
+                 this.effects_manager,
+                 global.blur_my_shell._pipelines_manager,
+@@ -39,28 +45,24 @@
+             );
+ 
+             // prevent old `BackgroundActor` from being accessed, which creates a whole bug of logs
+-            this.connections.connect(window_selector.get_parent(), 'destroy', _ => {
+-                this.screenshot_background_managers.forEach(background_manager => {
+-                    if (background_manager.backgroundActor) {
+-                        let widget = background_manager.backgroundActor.get_parent();
+-                        let parent = widget?.get_parent();
+-
+-                        if (parent == window_selector) {
+-                            background_manager._bms_pipeline.destroy();
+-                            parent.remove_child(widget);
+-                        }
+-                    }
++            const background_manager = this.screenshot_background_managers.at(-1);
++            const parent = window_selector.get_parent();
++            if (!parent)
++                continue;
++            const id = this.connections.connect(parent, 'destroy', () => {
++                const index = this.screenshot_background_managers.indexOf(background_manager);
++                if (index >= 0) {
++                    const widget = background_manager.backgroundActor?.get_parent();
++                    background_manager._bms_pipeline.destroy();
++                    widget?.get_parent()?.remove_child(widget);
+                     background_manager.destroy();
+-                });
+-
+-                window_selector.get_children().forEach(child => {
+-                    if (child.get_name() == 'bms-screenshot-blurred-widget')
+-                        window_selector.remove_child(child);
+-                });
+-
+-                let index = this.screenshot_background_managers.indexOf(window_selector);
+-                this.screenshot_background_managers.splice(index, 1);
++                    widget?.destroy();
++                    this.screenshot_background_managers.splice(index, 1);
++                }
++                this._selectorSignals = this._selectorSignals.filter(signal => signal.id !== id);
++                this.connections.disconnect(parent, id);
+             });
++            this._selectorSignals.push({parent, id});
+         }
+     }
+ 
+@@ -73,13 +75,17 @@
+     }
+ 
+     remove_background_actors() {
++        for (const {parent, id} of this._selectorSignals)
++            this.connections.disconnect(parent, id);
++        this._selectorSignals = [];
+         this.screenshot_background_managers.forEach(background_manager => {
+             background_manager._bms_pipeline.destroy();
++            const widget = background_manager.backgroundActor?.get_parent();
+             if (background_manager.backgroundActor) {
+-                let widget = background_manager.backgroundActor.get_parent();
+                 widget?.get_parent()?.remove_child(widget);
+             }
+             background_manager.destroy();
++            widget?.destroy();
+         });
+ 
+         Main.screenshotUI._windowSelectors.forEach(window_selector =>
+@@ -93,6 +99,7 @@
+     }
+ 
+     disable() {
++        this.enabled = false;
+         this._log("removing blur from screenshot's window selector");
+ 
+         this.remove_background_actors();
+--- a/blur-my-shell@aunetx/conveniences/dummy_pipeline.js
++++ b/blur-my-shell@aunetx/conveniences/dummy_pipeline.js
+@@ -34,6 +34,7 @@
+     };
+ 
+     attach_effect_to_actor(actor) {
++        this.remove_pipeline_from_actor();
+         // set the actor
+         if (actor)
+             this.actor = actor;
+--- a/blur-my-shell@aunetx/conveniences/paint_signals.js
++++ b/blur-my-shell@aunetx/conveniences/paint_signals.js
+@@ -57,7 +57,7 @@
+         }
+ 
+         vfunc_paint(node, paint_context, paint_flags) {
+-            this._callback();
++            this._callback?.();
+             super.vfunc_paint(node, paint_context, paint_flags);
+         }
+     }
+--- a/blur-my-shell@aunetx/conveniences/pipelines_manager.js
++++ b/blur-my-shell@aunetx/conveniences/pipelines_manager.js
+@@ -99,7 +99,7 @@
+         this.pipelines[id].effects = [...effects];
+         this.settings.PIPELINES = this.pipelines;
+         if (emit_update_signal)
+-            this._emit(id + '::pipeline-updated');
++            this._emit(id + '::pipeline-updated', this.pipelines[id]);
+     }
+ 
+     rename_pipeline(id, name) {
+--- a/blur-my-shell@aunetx/effects/downscale.js
++++ b/blur-my-shell@aunetx/effects/downscale.js
+@@ -78,7 +78,7 @@
+         }
+ 
+         set divider(value) {
+-            const v = Math.max(1, value || 1);
++            const v = Number.isFinite(value) ? Math.max(1, Math.min(64, Math.round(value))) : DEFAULT_PARAMS.divider;
+             if (this._divider !== v) {
+                 this._divider = v;
+ 
+--- a/blur-my-shell@aunetx/effects/upscale.js
++++ b/blur-my-shell@aunetx/effects/upscale.js
+@@ -70,7 +70,7 @@
+         }
+ 
+         set factor(value) {
+-            const v = Math.max(1, value || 1);
++            const v = Number.isFinite(value) ? Math.max(1, Math.min(64, Math.round(value))) : DEFAULT_PARAMS.factor;
+             if (this._factor !== v) {
+                 this._factor = v;
+ 

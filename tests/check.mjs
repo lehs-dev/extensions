@@ -41,7 +41,11 @@ for (const folder of folders) {
             return;
         visited.add(path);
         const source = readFileSync(path, 'utf8');
-        for (const match of source.matchAll(/^import\s+(?:[^'";]*?from\s+)?['"]([^'"]+)['"];?[\t ]*$/gm)) {
+        const imports = [
+            ...source.matchAll(/^import\s+(?:[^'";]*?from\s+)?['"]([^'"]+)['"];?[\t ]*$/gm),
+            ...source.matchAll(/^export\s+(?:\*|\{[^}]*\})\s+from\s+['"]([^'"]+)['"];?[\t ]*$/gm),
+        ];
+        for (const match of imports) {
             const specifier = match[1];
             if (/^gi:\/\/(Gtk|Gdk|Adw)(?:\?|$)/.test(specifier)) {
                 console.error(`Shell imports forbidden GUI library ${specifier}: ${relative(root, path)}`);

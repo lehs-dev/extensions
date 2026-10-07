@@ -1,5 +1,9 @@
 # Rà soát extension GNOME
 
+Đối chiếu cập nhật Blur my Shell 74 ngày 07/10/2026 và patch bổ sung được ghi
+riêng trong [blur-v74-review.md](blur-v74-review.md). Các số liệu bên dưới là
+kết quả của lần rà soát ban đầu, trước cập nhật này.
+
 Môi trường xác nhận ngày 03/10/2026: GNOME 50.x, Wayland; màn hình rời
 1900×1080 là primary, laptop 1900×1200; cả hai scale 100%. Rút HDMI sẽ chuyển
 primary sang laptop. Kích thước này theo thông tin người dùng, chưa đo từ host.

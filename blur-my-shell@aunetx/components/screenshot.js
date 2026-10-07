@@ -7,6 +7,7 @@ export const ScreenshotBlur = class ScreenshotBlur {
         this.connections = connections;
         this.settings = settings;
         this.screenshot_background_managers = [];
+        this._selectorSignals = [];
         this.effects_manager = effects_manager;
     }
 
@@ -31,6 +32,8 @@ export const ScreenshotBlur = class ScreenshotBlur {
         // create new backgrounds for the screenshot window selector
         for (let i = 0; i < Main.screenshotUI._windowSelectors.length; i++) {
             const window_selector = Main.screenshotUI._windowSelectors[i];
+            if (!Main.layoutManager.monitors[window_selector._monitorIndex])
+                continue;
             const pipeline = new Pipeline(
                 this.effects_manager,
                 global.blur_my_shell._pipelines_manager,
@@ -41,16 +44,25 @@ export const ScreenshotBlur = class ScreenshotBlur {
                 window_selector, 'bms-screenshot-blurred-widget', false
             );
 
+            // prevent old `BackgroundActor` from being accessed, which creates a whole bug of logs
             const background_manager = this.screenshot_background_managers.at(-1);
-            background_manager._bms_window_selector = window_selector;
-            // A selector owns only its own monitor's background.
-            this.connections.connect(window_selector, 'destroy', _ => {
-                background_manager._bms_pipeline.destroy();
-                background_manager.destroy();
+            const parent = window_selector.get_parent();
+            if (!parent)
+                continue;
+            const id = this.connections.connect(parent, 'destroy', () => {
                 const index = this.screenshot_background_managers.indexOf(background_manager);
-                if (index >= 0)
+                if (index >= 0) {
+                    const widget = background_manager.backgroundActor?.get_parent();
+                    background_manager._bms_pipeline.destroy();
+                    widget?.get_parent()?.remove_child(widget);
+                    background_manager.destroy();
+                    widget?.destroy();
                     this.screenshot_background_managers.splice(index, 1);
+                }
+                this._selectorSignals = this._selectorSignals.filter(signal => signal.id !== id);
+                this.connections.disconnect(parent, id);
             });
+            this._selectorSignals.push({parent, id});
         }
     }
 
@@ -63,14 +75,17 @@ export const ScreenshotBlur = class ScreenshotBlur {
     }
 
     remove_background_actors() {
+        for (const {parent, id} of this._selectorSignals)
+            this.connections.disconnect(parent, id);
+        this._selectorSignals = [];
         this.screenshot_background_managers.forEach(background_manager => {
-            this.connections.disconnect_all_for(background_manager._bms_window_selector);
             background_manager._bms_pipeline.destroy();
+            const widget = background_manager.backgroundActor?.get_parent();
             if (background_manager.backgroundActor) {
-                let widget = background_manager.backgroundActor.get_parent();
                 widget?.get_parent()?.remove_child(widget);
             }
             background_manager.destroy();
+            widget?.destroy();
         });
 
         Main.screenshotUI._windowSelectors.forEach(window_selector =>
@@ -84,11 +99,11 @@ export const ScreenshotBlur = class ScreenshotBlur {
     }
 
     disable() {
+        this.enabled = false;
         this._log("removing blur from screenshot's window selector");
 
         this.remove_background_actors();
         this.connections.disconnect_all();
-        this.enabled = false;
     }
 
     _log(str) {

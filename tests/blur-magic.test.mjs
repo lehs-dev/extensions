@@ -4,17 +4,20 @@ import {execFileSync} from 'node:child_process';
 import vm from 'node:vm';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
+import {join} from 'node:path';
 
 const blur = 'blur-my-shell@aunetx/';
 const magic = 'compiz-alike-magic-lamp-effect@hermes83.github.com/';
 const baseline = process.env.AUDIT_BASELINE === '1';
 const repositoryRoot = new URL('../', import.meta.url);
 function source(path) {
+    if (process.env.BLUR_AUDIT_ROOT && path.startsWith(blur))
+        return readFileSync(join(process.env.BLUR_AUDIT_ROOT, path), 'utf8');
     return baseline ? execFileSync('git', ['show', `HEAD:${path}`], {encoding: 'utf8', cwd: fileURLToPath(repositoryRoot)}) : readFileSync(new URL(path, repositoryRoot), 'utf8');
 }
 function load(path, names, globals = {}) {
     const code = source(path)
-        .replace(/^import .*;\s*$/gm, '')
+        .replace(/^import\b[\s\S]*?;\s*$/gm, '')
         .replace(/^const \w+ = await .*;\s*$/gm, '')
         .replace(/export default class /g, 'class ')
         .replace(/export /g, '')
@@ -45,6 +48,7 @@ class Signals {
     }
 }
 class Actor extends Signals {
+    static $gtype = Actor;
     constructor(params = {}) {
         super();
         Object.assign(this, {x: 0, y: 0, width: 400, height: 300, opacity: 255}, params);
@@ -97,16 +101,19 @@ class Effect extends Signals {
     get_actor() { return this._actor; }
     vfunc_set_actor(actor) { this._actor = actor; this.emit('notify::actor'); }
     set(params) { Object.assign(this, params); }
+    queue_repaint() {}
     static get default_params() { return {}; }
 }
 const GObject = {
     Object: Signals,
-    signal_lookup: (_signal, object) => object instanceof Actor ? 1 : 0,
+    signal_lookup: (_signal, type) => type === Actor ? 1 : 0,
+    signal_handler_is_connected: (object, id) => object.handlers?.has(id) ?? false,
     registerClass: function (...args) { return args.at(-1); },
     ParamSpec: new Proxy({}, {get: () => () => ({})}),
     ParamFlags: {READWRITE: 1},
 };
 const {Connections} = load(blur + 'conveniences/connections.js', ['Connections'], {GObject});
+const uniforms = load(blur + 'conveniences/shader_uniforms.js', ['set_uniform', 'mark_dirty'], {GObject});
 
 test('pooled blur effects keep one observer and disconnect actors on release', () => {
     const connections = new Connections();
@@ -127,7 +134,7 @@ test('pooled blur effects keep one observer and disconnect actors on release', (
         assert.equal(second.count('destroy'), 1);
         manager.remove(effect);
         assert.equal(second.count('destroy'), 0);
-        assert.equal(connections.buffer.length, 0);
+        assert.equal(connections.records.size, 1, 'one observer is owned for the pooled effect');
         reused = effect;
     }
 });
@@ -136,10 +143,11 @@ test('pipeline rebind replaces destroy handlers and parameter listeners', () => 
     const pipelines = new Signals();
     pipelines.pipelines = {pipeline_default: {effects: [{type: 'test', id: 'a', params: {}}]}};
     const effects = {
+        SUPPORTED_EFFECTS: {test: {class: Effect}},
         new_test_effect: () => new Effect(),
         remove: effect => effect.get_actor()?.remove_effect(effect),
     };
-    const {Pipeline} = load(blur + 'conveniences/pipeline.js', ['Pipeline']);
+    const {Pipeline} = load(blur + 'conveniences/pipeline.js', ['Pipeline'], {uniforms});
     const actor = new Actor();
     const pipeline = new Pipeline(effects, pipelines, 'pipeline_default', actor);
     for (let i = 0; i < 20; i++) pipeline.change_pipeline_to('pipeline_default');
@@ -210,9 +218,10 @@ test('top panels detect nearby windows on monitors above and below the primary',
         const {PanelBlur} = load(blur + 'components/panel.js', ['PanelBlur'], {
             Main: {panel, sessionMode: {hasWindows: true}, layoutManager: {primaryMonitor: {}}},
             global: {stage: {}, workspace_manager: {get_active_workspace: () => ({list_windows: () => [window]})}},
-            Meta: {WindowType: {DESKTOP: 99}}, St: {ThemeContext: {get_for_stage: () => ({scale_factor: 1})}},
+            Meta: {WindowType: {NORMAL: 0, DIALOG: 1, MODAL_DIALOG: 2, DESKTOP: 99}},
+            St: {ThemeContext: {get_for_stage: () => ({scale_factor: 1})}},
         });
-        const component = new PanelBlur(new Connections(), {}, {});
+        const component = new PanelBlur(new Connections(), {panel: {}}, {});
         component.actors_list = [{widgets: {panel: secondaryPanel}, monitor, is_dtp_panel: false}];
         let transparent;
         component.set_should_override_panel = (_, override) => transparent = override;
@@ -221,22 +230,29 @@ test('top panels detect nearby windows on monitors above and below the primary',
     }
 });
 
-test('resampling factors remain finite and positive when external settings supply zero or NaN', () => {
+test('resampling factors remain finite integers within shader bounds for invalid settings', () => {
     class ShaderEffect extends Effect {
         set_uniform_value(name, value) { this.uniforms ??= {}; this.uniforms[name] = value; }
     }
-    const utils = {IS_IN_PREFERENCES: false, get_shader_source: () => null, setup_params: (effect, params) => Object.assign(effect, params)};
+    const utils = {IS_IN_PREFERENCES: false, get_shader_source: () => null, setup_params: (effect, params) => Object.assign(effect, params),
+        initialize_shader_effect() {}, register_shader_effect: (_meta, Type) => Type};
     for (const [file, name, param] of [
         ['effects/upscale.js', 'UpscaleEffect', 'factor'],
         ['effects/downscale.js', 'DownscaleEffect', 'divider'],
     ]) {
-        const Type = load(blur + file, [name], {GObject, Clutter: {ShaderEffect}, utils, Shell: {}})[name];
+        const Type = load(blur + file, [name], {GObject, Clutter: {ShaderEffect}, utils, uniforms, Shell: {}})[name];
         const effect = new Type({[param]: 0});
-        assert.equal(effect.uniforms[param], 1);
+        assert.equal(effect._bms_uniforms.get(param), 1);
         effect[param] = NaN;
-        assert.equal(effect.uniforms[param], 8);
+        assert.ok(Number.isInteger(effect._bms_uniforms.get(param)));
+        assert.ok(effect._bms_uniforms.get(param) >= 1 && effect._bms_uniforms.get(param) <= 64);
         effect[param] = 1000;
-        assert.equal(effect.uniforms[param], 64);
+        assert.equal(effect._bms_uniforms.get(param), 64);
+        effect[param] = Infinity;
+        assert.ok(Number.isInteger(effect._bms_uniforms.get(param)));
+        assert.ok(effect._bms_uniforms.get(param) >= 1 && effect._bms_uniforms.get(param) <= 64);
+        effect[param] = 2.8;
+        assert.equal(effect._bms_uniforms.get(param), 3);
     }
 });
 
@@ -248,7 +264,9 @@ test('duplicate pipeline does not replace the source effect IDs or parameter obj
     const imports = {signals: {addSignalMethods(proto) {
         for (const name of ['connect', 'disconnect', 'emit']) proto[name] = Signals.prototype[name];
     }}};
-    const {PipelinesManager} = load(blur + 'conveniences/pipelines_manager.js', ['PipelinesManager'], {imports});
+    const {PipelinesManager} = load(blur + 'conveniences/pipelines_manager.js', ['PipelinesManager'], {
+        imports, GLib: {uuid_string_random: () => String(nextId++)},
+    });
     const manager = new PipelinesManager(settings);
     const original = manager.pipelines.pipeline_default.effects[0];
     manager.duplicate_pipeline('pipeline_default');
@@ -312,7 +330,7 @@ test('destroying one screenshot selector preserves the other monitor background'
         }
         destroy() {}
     }
-    const Main = {screenshotUI: {_windowSelectors: selectors}};
+    const Main = {screenshotUI: {_windowSelectors: selectors}, layoutManager: {monitors: [{}, {}]}};
     const global = {blur_my_shell: {_pipelines_manager: {}}};
     const {ScreenshotBlur} = load(blur + 'components/screenshot.js', ['ScreenshotBlur'], {Main, global, Pipeline});
     const component = new ScreenshotBlur(new Connections(), {screenshot: {}}, {});
@@ -346,6 +364,193 @@ test('panel and application restarts are cancelled when disabled before their ti
         for (const callback of pending.values()) callback();
         assert.equal(enabled, 0);
     }
+});
+
+test('panel idle updates stop at zero allocation and are cancelled on disable', () => {
+    const pending = new Map();
+    const GLib = {
+        PRIORITY_DEFAULT_IDLE: 0, SOURCE_REMOVE: false,
+        idle_add(_priority, callback) {const id = nextId++; pending.set(id, callback); return id;},
+        source_remove(id) {assert.ok(pending.delete(id));},
+    };
+    const {PanelBlur} = load(blur + 'components/panel.js', ['PanelBlur'], {GLib});
+    const component = new PanelBlur(new Connections(), {}, {});
+    component.enabled = true;
+    const zeroSize = {get_size: () => [0, 0]};
+    const actors = {widgets: {geometry_actor: zeroSize, panel_box: zeroSize}};
+    component.actors_list.push(actors);
+    component.queue_update_size(actors);
+    component.queue_update_size(actors);
+    assert.equal(pending.size, 1);
+    const [id, callback] = [...pending][0];
+    pending.delete(id);
+    callback();
+    assert.equal(pending.size, 0, 'unmapped actors must not spin idle callbacks');
+    component.queue_update_size(actors);
+    component.actors_list = [];
+    component.disconnect_from_windows_and_overview = () => {};
+    component.update_light_text_classname = () => {};
+    component.disable();
+    assert.equal(pending.size, 0, 'disable removes pending native sources');
+});
+
+test('Dash to Panel discovery idle is cancelled before it can recreate disabled blur', () => {
+    const pending = new Map();
+    const GLib = {
+        PRIORITY_DEFAULT_IDLE: 0, SOURCE_REMOVE: false,
+        idle_add(_priority, callback) {const id = nextId++; pending.set(id, callback); return id;},
+        source_remove(id) {assert.ok(pending.delete(id));},
+    };
+    const {PanelBlur} = load(blur + 'components/panel.js', ['PanelBlur'], {
+        GLib, global: {dashToPanel: {panels: []}},
+    });
+    const component = new PanelBlur(new Connections(), {}, {});
+    component.enabled = true;
+    component.disconnect_from_windows_and_overview = () => {};
+    component.update_light_text_classname = () => {};
+    component.blur_dtp_panels();
+    component.blur_dtp_panels();
+    assert.equal(pending.size, 1);
+    component.disable();
+    assert.equal(pending.size, 0);
+});
+
+test('window retracking releases real signal handlers instead of growing on every settings update', () => {
+    const window = new Signals();
+    const workspace = {list_windows: () => [window]};
+    const {ApplicationsBlur} = load(blur + 'components/applications.js', ['ApplicationsBlur'], {
+        global: {workspace_manager: {get_n_workspaces: () => 2, get_workspace_by_index: () => workspace}},
+        PaintSignals: class {},
+    });
+    const component = new ApplicationsBlur(new Connections(), {applications: {WHITELIST: [], BLACKLIST: []}}, {});
+    component.check_blur = () => {};
+    component.remove_blur = () => {};
+    for (let i = 0; i < 30; i++) {
+        component.update_all_windows();
+        assert.equal(component.meta_window_map.size, 1);
+        assert.equal(window.handlers.size, 3);
+    }
+});
+
+test('application blur tolerates an absent monitor or missing compositor actor during hotplug', () => {
+    const {ApplicationsBlur} = load(blur + 'components/applications.js', ['ApplicationsBlur'], {
+        Main: {layoutManager: {monitors: []}}, PaintSignals: class {},
+    });
+    const component = new ApplicationsBlur(new Connections(), {applications: {STATIC_BLUR: true}}, {});
+    const window = {
+        bms_pid: 'window', get_monitor: () => 1,
+        blur_actor: {}, bg_manager: {backgroundActor: {monitor: 0}},
+        get_compositor_private: () => null,
+    };
+    component.meta_window_map.set('window', window);
+    assert.doesNotThrow(() => component.update_size('window'));
+    assert.doesNotThrow(() => component.create_blur_effect(window));
+});
+
+test('screenshot background rebuilds do not accumulate selector-parent destroy handlers', () => {
+    const selector = new Actor({_monitorIndex: 0});
+    const parent = new Actor();
+    parent.insert_child_at_index(selector, 0);
+    class Pipeline {
+        create_background_with_effects(_index, managers, group, name) {
+            const widget = new Actor({name});
+            group.insert_child_at_index(widget, 0);
+            managers.push({_bms_pipeline: this, backgroundActor: {get_parent: () => widget}, destroy() {}});
+        }
+        destroy() {}
+    }
+    const {ScreenshotBlur} = load(blur + 'components/screenshot.js', ['ScreenshotBlur'], {
+        Main: {screenshotUI: {_windowSelectors: [selector]}, layoutManager: {monitors: [{}]}},
+        global: {blur_my_shell: {_pipelines_manager: {}}}, Pipeline,
+    });
+    const component = new ScreenshotBlur(new Connections(), {screenshot: {}}, {});
+    for (let i = 0; i < 30; i++) {
+        component.update_backgrounds();
+        assert.equal(parent.count('destroy'), 2);
+        assert.equal(selector.get_children().length, 1);
+    }
+    component.disable();
+    assert.equal(parent.count('destroy'), 0);
+    assert.equal(selector.get_children().length, 0);
+});
+
+test('paint callback safely forwards after its repaint callback has been cleared', () => {
+    let paints = 0;
+    const {PaintCallbackEffect} = load(blur + 'conveniences/paint_signals.js', ['PaintCallbackEffect'], {
+        GObject, Clutter: {Effect: class {vfunc_paint() {paints++;}}},
+    });
+    const effect = new PaintCallbackEffect();
+    effect.set_callback(null);
+    assert.doesNotThrow(() => effect.vfunc_paint({}, {}, 0));
+    assert.equal(paints, 1);
+});
+
+test('upstream popup blur cancels redraw, follow-up and reset callbacks when disabled', () => {
+    const laters = new Map();
+    const idles = new Map();
+    const {PopupBlur} = load(blur + 'components/popup/index.js', ['PopupBlur'], {
+        Meta: {LaterType: {BEFORE_REDRAW: 0}},
+        GLib: {
+            PRIORITY_DEFAULT_IDLE: 0, SOURCE_REMOVE: false,
+            idle_add(_priority, callback) {const id = nextId++; idles.set(id, callback); return id;},
+            source_remove(id) {assert.ok(idles.delete(id));},
+        },
+        Gio: {Settings: class {}},
+        POPUP_BACKGROUND_STYLES: [], POPUP_SURFACE_STYLES: [],
+        PopupBlurTargets: class {}, PopupBlurMessageStacks: class {disable() {}},
+        Main: {uiGroup: {remove_style_class_name() {}}},
+        global: {compositor: {get_laters: () => ({
+            add(_type, callback) {const id = nextId++; laters.set(id, callback); return id;},
+            remove(id) {assert.ok(laters.delete(id));},
+        })}},
+    });
+    const component = new PopupBlur(new Connections(), {popup: {BLUR: true}}, {});
+    component.enabled = true;
+    component._get_keyboard_actors = () => [];
+    const actor = new Actor();
+    component.queue_try_blur(actor);
+    component.queue_follow_up_blurs([actor]);
+    assert.equal(laters.size, 1);
+    assert.equal(idles.size, 1);
+    component.reset();
+    assert.equal(laters.size, 0);
+    assert.equal(idles.size, 1, 'only the reset idle remains');
+    component.disable();
+    assert.equal(idles.size, 0);
+    assert.equal(component.connections.records.size, 0);
+});
+
+test('overview component disable restores workspace hooks and detaches its animation background', () => {
+    class BackgroundGroup extends Actor {
+        constructor(params) {super({...params, parent: null});}
+        remove_all_children() {for (const child of [...this.children]) this.remove_child(child);}
+    }
+    const uiGroup = new Actor();
+    uiGroup.remove_style_class_name = () => {};
+    const overviewGroup = new Actor();
+    class WorkspaceAnimationController {}
+    let prepares = 0;
+    const originalPrepare = () => prepares++;
+    const originalFinish = () => {};
+    const {OverviewBlur} = load(blur + 'components/overview.js', ['OverviewBlur'], {
+        Meta: {BackgroundGroup}, WorkspaceAnimationController,
+        Main: {uiGroup, layoutManager: {overviewGroup}},
+    });
+    const component = new OverviewBlur(new Connections(), {}, {});
+    component.enabled = true;
+    component.proto_patched = true;
+    component._original_PrepareSwitch = originalPrepare;
+    component._original_FinishSwitch = originalFinish;
+    WorkspaceAnimationController.prototype._prepareWorkspaceSwitch = () => assert.fail('disabled extension hook still active');
+    WorkspaceAnimationController.prototype._finishWorkspaceSwitch = () => assert.fail('disabled extension hook still active');
+    uiGroup.insert_child_at_index(component.animation_background_group, 0);
+    overviewGroup.insert_child_at_index(component.overview_background_group, 0);
+    component.disable();
+    WorkspaceAnimationController.prototype._prepareWorkspaceSwitch();
+    assert.equal(prepares, 1);
+    assert.equal(WorkspaceAnimationController.prototype._finishWorkspaceSwitch, originalFinish);
+    assert.equal(component.animation_background_group.get_parent(), null);
+    assert.equal(component.overview_background_group.get_parent(), null);
 });
 
 class Timeline extends Signals {
