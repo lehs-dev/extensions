@@ -1,0 +1,8 @@
+{
+  "name": "gnome-extension-regressions",
+  "private": true,
+  "scripts": {
+    "test": "node --experimental-vm-modules --test tests/*.test.mjs && node scripts/test-native.mjs",
+    "check": "node scripts/check.mjs"
+  }
+}

@@ -25,6 +25,7 @@ import KeybindingHandler from './src/extension/keybindingHandler.js';
 import LayoutsManager from './src/extension/layoutsManager.js';
 import AltTabOverride from './src/extension/altTab.js';
 import FocusHintManager from './src/extension/focusHint.js';
+import RoundedCornersManager from './src/extension/roundedCornersManager.js';
 import { Rect, Util } from './src/extension/utility.js';
 
 Gio._promisify(Gio.File.prototype, 'load_contents_async');
@@ -183,6 +184,7 @@ export default class TilingAssistantExtension extends Extension {
         this._keybindingHandler = new KeybindingHandler();
         this._layoutsManager = new LayoutsManager();
         this._focusHintManager = new FocusHintManager();
+        this._roundedCornersManager = new RoundedCornersManager();
         this._altTabOverride = new AltTabOverride();
 
         // Disable native tiling.
@@ -222,7 +224,7 @@ export default class TilingAssistantExtension extends Extension {
 
         // Include tiled windows when dragging from the top panel.
         this._getDraggableWindowForPosition = Main.panel._getDraggableWindowForPosition;
-        Main.panel._getDraggableWindowForPosition = function (stageX) {
+        this._draggableWindowOverride = function (stageX) {
             const workspaceManager = global.workspace_manager;
             const windows = workspaceManager.get_active_workspace().list_windows();
             const allWindowsByStacking = global.display.sort_windows_by_stacking(windows).reverse();
@@ -237,9 +239,12 @@ export default class TilingAssistantExtension extends Extension {
                     stageX > rect.x && stageX < rect.x + rect.width;
             });
         };
+        Main.panel._getDraggableWindowForPosition = this._draggableWindowOverride;
 
         // Restore tiled window properties after session was unlocked.
         await this._loadAfterSessionLock(cancellable);
+        if (cancellable.is_cancelled())
+            return;
 
         // Setting used for detection of a fresh install and do compatibility
         // changes if necessary...
@@ -266,6 +271,8 @@ export default class TilingAssistantExtension extends Extension {
         this._layoutsManager = null;
         this._focusHintManager?.destroy();
         this._focusHintManager = null;
+        this._roundedCornersManager?.destroy();
+        this._roundedCornersManager = null;
 
         this._altTabOverride?.destroy();
         this._altTabOverride = null;
@@ -279,7 +286,10 @@ export default class TilingAssistantExtension extends Extension {
         this.settings = null;
 
         // Restore old functions.
-        Main.panel._getDraggableWindowForPosition = this._getDraggableWindowForPosition;
+        if (this._draggableWindowOverride &&
+            Main.panel._getDraggableWindowForPosition === this._draggableWindowOverride)
+            Main.panel._getDraggableWindowForPosition = this._getDraggableWindowForPosition;
+        this._draggableWindowOverride = null;
         this._getDraggableWindowForPosition = null;
 
         // Delete custom tiling properties.
@@ -360,7 +370,7 @@ export default class TilingAssistantExtension extends Extension {
             return;
         }
 
-        if (!contents.length)
+        if (cancellable.is_cancelled() || !contents.length)
             return;
 
         const states = JSON.parse(new TextDecoder().decode(contents));

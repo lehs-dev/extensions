@@ -12,10 +12,7 @@
 import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAnimation.js';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import Clutter from 'gi://Clutter';
 import Meta from 'gi://Meta';
-
-import { computeBounceParams } from './bounce.js';
 
 function _createStaticBackground(monitor) {
   const container = new Meta.BackgroundGroup();
@@ -29,22 +26,11 @@ function _createStaticBackground(monitor) {
   return {container, bgManager};
 }
 
-function _bounceTranslation(group, overshoot) {
-  if (global.workspace_manager.layout_rows === -1)
-    return {x: 0, y: -overshoot};
-  if (group.get_text_direction() === Clutter.TextDirection.RTL)
-    return {x: overshoot, y: 0};
-  return {x: -overshoot, y: 0};
-}
-
 let _origMonitorInit = null;
-let _origEaseProperty = null;
 let _childAddedId = null;
 const _groups = new Map();
-const _animations = new Map();
 const _hiddenBackgrounds = new Map();
 let _monitorInitOverride = null;
-let _easePropertyOverride = null;
 let _generation = 0;
 
 function _restoreHiddenBackgrounds() {
@@ -60,9 +46,7 @@ function _releaseGroup(group, destroyed = false) {
   if (!record)
     return;
   _groups.delete(group);
-  if (destroyed) {
-    _animations.delete(group);
-  } else {
+  if (!destroyed) {
     group.disconnect(record.destroyId);
     group.set_style(record.style);
     for (const [background, opacity] of record.backgrounds)
@@ -109,72 +93,9 @@ export default class Extension {
     };
     WorkspaceAnimation.MonitorGroup.prototype._init = _monitorInitOverride;
 
-    _origEaseProperty = WorkspaceAnimation.MonitorGroup.prototype.ease_property;
-    const originalEaseProperty = _origEaseProperty;
-    _easePropertyOverride = function(property, value, params = {}) {
-      if (generation !== _generation) {
-        originalEaseProperty.call(this, property, value, params);
-        return;
-      }
-      const bounce = property === 'progress'
-        ? computeBounceParams({
-            duration: params.duration,
-            target: value,
-            current: this.progress,
-          })
-        : null;
-
-      // Overshoot in translation_x/y keeps progress in [0,1]; outside it the
-      // adjustment binding yields NaN. Reset so an interrupted one doesn't offset.
-      if (property === 'progress') {
-        _animations.delete(this);
-        this._container.remove_transition('translation_x');
-        this._container.remove_transition('translation_y');
-        this._container.translation_x = 0;
-        this._container.translation_y = 0;
-      }
-
-      if (bounce) {
-        const animation = {target: value, params};
-        _animations.set(this, animation);
-        originalEaseProperty.call(this, property, bounce.target, {
-          ...params,
-          duration: bounce.slideDuration,
-          mode: Clutter.AnimationMode.EASE_OUT_SINE,
-          onStopped: undefined,
-          onComplete: () => {
-            if (_animations.get(this) !== animation || this.get_stage() === null)
-              return;
-            const {x, y} = _bounceTranslation(this, bounce.overshootPx);
-            this._container.translation_x = x;
-            this._container.translation_y = y;
-            this._container.ease({
-              translation_x: 0,
-              translation_y: 0,
-              duration: bounce.returnDuration,
-              mode: Clutter.AnimationMode.EASE_IN_OUT_CUBIC,
-              onComplete: () => {
-                if (_animations.get(this) !== animation)
-                  return;
-                _animations.delete(this);
-                params.onComplete?.();
-              },
-              onStopped: finished => {
-                if (_animations.get(this) !== animation)
-                  return;
-                if (!finished)
-                  _animations.delete(this);
-                params.onStopped?.(finished);
-              },
-            });
-          },
-        });
-        return;
-      }
-
-      originalEaseProperty.call(this, property, value, params);
-    };
-    WorkspaceAnimation.MonitorGroup.prototype.ease_property = _easePropertyOverride;
+    // Shell owns progress, cancellation and completion of workspace gestures.
+    // A second animation on _container survives remove_all_transitions() on
+    // MonitorGroup and keeps moving windows after a new swipe has begun.
 
     // Hide wallpaper panels other extensions add while a switch runs.
     _childAddedId = Main.uiGroup.connect('child-added', (_, actor) => {
@@ -204,36 +125,9 @@ export default class Extension {
       _monitorInitOverride = null;
     }
 
-    if (_origEaseProperty) {
-      if (WorkspaceAnimation.MonitorGroup.prototype.ease_property === _easePropertyOverride)
-        WorkspaceAnimation.MonitorGroup.prototype.ease_property = _origEaseProperty;
-      _origEaseProperty = null;
-      _easePropertyOverride = null;
-    }
-
-    // Finish Shell's switch callback so its modal grab and compositor inhibit
-    // are released, even when disabled during either phase of the bounce.
-    const animations = [..._animations];
-    _animations.clear();
     for (const group of [..._groups.keys()])
       _releaseGroup(group);
     _restoreHiddenBackgrounds();
-    const completions = [];
-    for (const [group, animation] of animations) {
-      if (group.get_stage() === null)
-        continue;
-      group.remove_transition('progress');
-      group._container.remove_transition('translation_x');
-      group._container.remove_transition('translation_y');
-      group._container.translation_x = 0;
-      group._container.translation_y = 0;
-      group.progress = animation.target;
-      completions.push(animation.params);
-    }
-    for (const params of completions) {
-      params.onStopped?.(true);
-      params.onComplete?.();
-    }
 
     console.log(`[static-workspace-background] disabled`);
   }

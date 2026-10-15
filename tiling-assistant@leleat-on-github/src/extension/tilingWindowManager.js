@@ -213,11 +213,6 @@ export class TilingWindowManager {
 
         const { x, y, width, height } = newRect.addGaps(workArea, monitor);
 
-        const verticalMaximize =
-            !maximize && y === workArea.y && height === workArea.height;
-        const horizontalMaximize =
-            !maximize && x === workArea.x && width === workArea.width;
-
         // Animations
         const wActor = window.get_compositor_private();
         if (
@@ -237,19 +232,14 @@ export class TilingWindowManager {
             );
         }
 
-        if (!verticalMaximize && !horizontalMaximize && !maximize &&
-                window.override_constraints) {
-            const leftConstraint = newRect.x === workArea.x
-                ? Meta.WindowConstraint.MONITOR : Meta.WindowConstraint.WINDOW;
-            const rightConstraint = newRect.x2 === workArea.x2
-                ? Meta.WindowConstraint.MONITOR : Meta.WindowConstraint.WINDOW;
-            const topConstraint = newRect.y === workArea.y
-                ? Meta.WindowConstraint.MONITOR : Meta.WindowConstraint.WINDOW;
-            const bottomConstraint = newRect.y2 === workArea.y2
-                ? Meta.WindowConstraint.MONITOR : Meta.WindowConstraint.WINDOW;
-
-            window.override_constraints(topConstraint, leftConstraint,
-                rightConstraint, bottomConstraint);
+        // GTK/libadwaita remove rounded corners for tiled edges and partial
+        // maximization. Keep tiles as normal windows and let our tiledRect,
+        // tile groups and resize handler manage the layout. Clear any edge
+        // constraints left by an earlier tile on Mutter builds supporting it.
+        if (window.override_constraints) {
+            window.override_constraints(Meta.WindowConstraint.NONE,
+                Meta.WindowConstraint.NONE, Meta.WindowConstraint.NONE,
+                Meta.WindowConstraint.NONE);
         }
 
         // See issue #137.
@@ -269,18 +259,6 @@ export class TilingWindowManager {
         window.move_to_monitor(monitor);
         window.move_frame(true, x, y);
         window.move_resize_frame(true, x, y, width, height);
-
-        if (verticalMaximize) {
-            if (window.set_maximize_flags)
-                window.set_maximize_flags(Meta.MaximizeFlags.VERTICAL);
-            else
-                Util.maximizeWindow(window, Meta.MaximizeFlags.VERTICAL);
-        } else if (horizontalMaximize) {
-            if (window.set_maximize_flags)
-                window.set_maximize_flags(Meta.MaximizeFlags.HORIZONTAL);
-            else
-                Util.maximizeWindow(window, Meta.MaximizeFlags.HORIZONTAL);
-        }
 
         // Maximized with gaps
         if (maximize) {

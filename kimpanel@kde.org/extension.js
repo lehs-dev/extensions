@@ -170,7 +170,7 @@ class Kimpanel extends GObject.Object {
             this.table = value[1];
             break;
         case 'UpdateLookupTableCursor':
-            if (this.pos != value[0])
+            if (this.cursor != value[0])
                 changed = true;
             this.cursor = value[0];
             break;

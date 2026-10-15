@@ -5,8 +5,8 @@
 
 import Shell from 'gi://Shell';
 import GLib from 'gi://GLib';
-import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
+import { registerShaderEffect } from './shader.js';
 
 const getMonochromeShaderSource = (extensionDir) => {
   const SHADER_PATH = GLib.build_filenamev([
@@ -32,8 +32,7 @@ const getMonochromeShaderSource = (extensionDir) => {
 ///
 /// GJS Doc:
 /// https://gjs-docs.gnome.org/clutter10~10_api/clutter.shadereffect
-export const MonochromeEffect = GObject.registerClass(
-  {},
+export const MonochromeEffect = registerShaderEffect(
   class D2DAMonochromeEffect extends Clutter.ShaderEffect {
     _init(params) {
       this._red = null;
@@ -57,7 +56,8 @@ export const MonochromeEffect = GObject.registerClass(
     preload(path) {
       // set shader source
       this._source = getMonochromeShaderSource(path);
-      if (this._source) this.set_shader_source(this._source);
+      if (this._source && this.set_shader_source)
+        this.set_shader_source(this._source);
 
       this.update_enabled();
     }
@@ -135,7 +135,7 @@ export const MonochromeEffect = GObject.registerClass(
     }
 
     update_enabled() {
-      this.set_enabled(this.blend > 0 && this._static);
+      this.set_enabled(Boolean(this._source) && this.blend > 0 && this._static);
     }
 
     vfunc_paint_target(paint_node = null, paint_context = null) {

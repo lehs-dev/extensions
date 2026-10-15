@@ -2,8 +2,8 @@
 
 import Shell from 'gi://Shell';
 import GLib from 'gi://GLib';
-import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
+import { registerShaderEffect } from './shader.js';
 
 const getBlurShaderSource = (extensionDir) => {
   const SHADER_PATH = GLib.build_filenamev([
@@ -20,8 +20,7 @@ const getBlurShaderSource = (extensionDir) => {
   }
 };
 
-export const BlurEffect = GObject.registerClass(
-  {},
+export const BlurEffect = registerShaderEffect(
   class D2DABlurEffect extends Clutter.ShaderEffect {
     _init(params) {
       this._red = null;
@@ -46,7 +45,8 @@ export const BlurEffect = GObject.registerClass(
     preload(path) {
       // set shader source
       this._source = getBlurShaderSource(path);
-      if (this._source) this.set_shader_source(this._source);
+      if (this._source && this.set_shader_source)
+        this.set_shader_source(this._source);
 
       this.update_enabled();
     }
@@ -124,7 +124,7 @@ export const BlurEffect = GObject.registerClass(
     }
 
     update_enabled() {
-      this.set_enabled(this.blend > 0 && this._static);
+      this.set_enabled(Boolean(this._source) && this.blend > 0 && this._static);
     }
 
     vfunc_paint_target(paint_node = null, paint_context = null) {

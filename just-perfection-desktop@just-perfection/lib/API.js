@@ -384,8 +384,7 @@ export class API
         // removing after can cause `st_theme_node_lookup_shadow` crash
         this.UIStyleClassRemove(classname);
 
-        let overview = this._main.overview;
-        let searchEntryParent = overview.searchEntry.get_parent();
+        let searchEntryParent = this.#getSearchEntryParent();
         let panelBox = this._main.layoutManager.panelBox;
 
         panelBox.translation_y = 0;
@@ -406,7 +405,7 @@ export class API
             delete(this._hidePanelHeightSignal);
         }
 
-        searchEntryParent.set_style(`margin-top: 0;`);
+        searchEntryParent?.set_style(`margin-top: 0;`);
 
         // hide and show can fix windows going under panel
         panelBox.hide();
@@ -431,8 +430,7 @@ export class API
         this._panelVisibility = false;
         this._panelHideMode = mode;
 
-        let overview = this._main.overview;
-        let searchEntryParent = overview.searchEntry.get_parent();
+        let searchEntryParent = this.#getSearchEntryParent();
         let panelBox = this._main.layoutManager.panelBox;
         let panelHeight = this._main.panel.height;
         let panelPosition = this.panelGetPosition();
@@ -453,9 +451,9 @@ export class API
             // the original non-scaled value as initial value
             const scaleFactor = this._st.ThemeContext.get_for_stage(global.stage).scale_factor;
             let marginTop = (mode === PANEL_HIDE_MODE.ALL) ? 15 : Math.round(panelHeight / scaleFactor);
-            searchEntryParent.set_style(`margin-top: ${marginTop}px;`);
+            searchEntryParent?.set_style(`margin-top: ${marginTop}px;`);
         } else {
-            searchEntryParent.set_style(`margin-top: 0;`);
+            searchEntryParent?.set_style(`margin-top: 0;`);
         }
 
         // hide and show can fix windows going under panel
@@ -671,6 +669,18 @@ export class API
     }
 
     /**
+     * Keep overview spacing independent of extensions that reparent its entry.
+     *
+     * @returns {St.Widget|null}
+     */
+    #getSearchEntryParent()
+    {
+        let overview = this._main.overview;
+        return overview._overview.controls._searchEntryBin ??
+            overview.searchEntry.get_parent();
+    }
+
+    /**
      * show search
      *
      * @param {boolean} fake true means it just needs to do the job but
@@ -689,20 +699,22 @@ export class API
         this.UIStyleClassRemove(classname);
 
         let searchEntry = this._main.overview.searchEntry;
-        let searchEntryParent = searchEntry.get_parent();
+        let searchEntryParent = this.#getSearchEntryParent();
 
-        searchEntryParent.ease({
+        searchEntryParent?.ease({
             height: searchEntry.height,
             opacity: 255,
             mode: this._clutter.AnimationMode.EASE,
             duration: 110,
             onComplete: () => {
                 searchEntryParent.height = -1;
-                searchEntry.ease({
-                    opacity: 255,
-                    mode: this._clutter.AnimationMode.EASE,
-                    duration: 700,
-                });
+                if (searchEntry.get_parent() === searchEntryParent) {
+                    searchEntry.ease({
+                        opacity: 255,
+                        mode: this._clutter.AnimationMode.EASE,
+                        duration: 700,
+                    });
+                }
             },
         });
 
@@ -726,15 +738,17 @@ export class API
         this.UIStyleClassAdd(this.#getAPIClassname('no-search'));
 
         let searchEntry = this._main.overview.searchEntry;
-        let searchEntryParent = searchEntry.get_parent();
+        let searchEntryParent = this.#getSearchEntryParent();
 
-        searchEntry.ease({
-            opacity: 0,
-            mode: this._clutter.AnimationMode.EASE,
-            duration: 50,
-        });
+        if (searchEntryParent && searchEntry.get_parent() === searchEntryParent) {
+            searchEntry.ease({
+                opacity: 0,
+                mode: this._clutter.AnimationMode.EASE,
+                duration: 50,
+            });
+        }
 
-        searchEntryParent.ease({
+        searchEntryParent?.ease({
             height: 0,
             opacity: 0,
             mode: this._clutter.AnimationMode.EASE,
@@ -1076,7 +1090,7 @@ export class API
     chromeAdd(element)
     {
         this._main.layoutManager.addChrome(element, {
-            affectsInputRegion : true,
+            ...(this.#shellVersion < 50 ? {affectsInputRegion: true} : {}),
             affectsStruts : false,
             trackFullscreen : true,
         });
@@ -1673,7 +1687,7 @@ export class API
             'window-demands-attention',
             wah._onWindowDemandsAttention.bind(wah)
         );
-        wah._windowDemandsAttentionId = display.connect(
+        wah._windowMarkedUrgentId = display.connect(
             'window-marked-urgent',
             wah._onWindowDemandsAttention.bind(wah)
         );

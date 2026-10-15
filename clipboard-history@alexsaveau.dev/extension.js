@@ -96,6 +96,7 @@ class ClipboardIndicator extends PanelMenu.Button {
   }
 
   destroy() {
+    this._destroyed = true;
     this._disconnectSettings();
     this._unbindShortcuts();
     this._disconnectSelectionListener();
@@ -108,6 +109,7 @@ class ClipboardIndicator extends PanelMenu.Button {
       GLib.Source.remove(this._pasteHackCallbackId);
       this._pasteHackCallbackId = undefined;
     }
+    this._notifSource?.destroy();
 
     super.destroy();
   }
@@ -132,6 +134,10 @@ class ClipboardIndicator extends PanelMenu.Button {
     this.menu.addMenuItem(entryItem);
 
     this.menu.connect('open-state-changed', (self, open) => {
+      if (this._searchFocusHackCallbackId) {
+        GLib.Source.remove(this._searchFocusHackCallbackId);
+        this._searchFocusHackCallbackId = undefined;
+      }
       if (open) {
         this._setMenuWidth();
         this.searchEntry.set_text('');
@@ -250,6 +256,8 @@ class ClipboardIndicator extends PanelMenu.Button {
 
     Store.buildClipboardStateFromLog(
       (entries, favoriteEntries, nextId, nextDiskId) => {
+        if (this._destroyed)
+          return;
         /**
          * This field stores the number of items in the historySection to avoid calling _getMenuItems
          * since that method is slow.
@@ -295,12 +303,12 @@ class ClipboardIndicator extends PanelMenu.Button {
   }
 
   _setMenuWidth() {
-    const display = global.display;
-    const screen_width = display.get_monitor_geometry(
-      display.get_primary_monitor(),
-    ).width;
+    const monitor = Main.layoutManager.findMonitorForActor(this) ??
+      Main.layoutManager.primaryMonitor;
+    if (!monitor)
+      return;
 
-    this.menu.actor.width = screen_width * (WINDOW_WIDTH_PERCENTAGE / 100);
+    this.menu.actor.width = monitor.width * (WINDOW_WIDTH_PERCENTAGE / 100);
   }
 
   _handleGlobalKeyEvent(event) {
@@ -915,7 +923,7 @@ class ClipboardIndicator extends PanelMenu.Button {
   }
 
   _queryClipboard() {
-    if (this._shouldAbortClipboardQuery(St.Clipboard.CLIPBOARD)) {
+    if (this._shouldAbortClipboardQuery(St.ClipboardType.CLIPBOARD)) {
       return;
     }
 
@@ -925,11 +933,13 @@ class ClipboardIndicator extends PanelMenu.Button {
   }
 
   _queryPrimaryClipboard() {
-    if (this._shouldAbortClipboardQuery(St.Clipboard.PRIMARY)) {
+    if (this._shouldAbortClipboardQuery(St.ClipboardType.PRIMARY)) {
       return;
     }
 
     Clipboard.get_text(St.ClipboardType.PRIMARY, (_, text) => {
+      if (this._destroyed || PRIVATE_MODE)
+        return;
       const last = this.entries.last();
       text = this._processClipboardContent(text, false);
       if (
@@ -947,6 +957,8 @@ class ClipboardIndicator extends PanelMenu.Button {
   }
 
   _processClipboardContent(text, selectEntry) {
+    if (this._destroyed || PRIVATE_MODE)
+      return;
     if (this._debouncing > 0) {
       this._debouncing--;
       return;
@@ -1329,13 +1341,13 @@ class ClipboardIndicator extends PanelMenu.Button {
 
   _previousEntry() {
     this._selectNextPrevEntry(
-      this.currentlySelectedEntry.nextCyclic() || this.entries.head,
+      this.currentlySelectedEntry?.nextCyclic() || this.entries?.head,
     );
   }
 
   _nextEntry() {
     this._selectNextPrevEntry(
-      this.currentlySelectedEntry.prevCyclic() || this.entries.last(),
+      this.currentlySelectedEntry?.prevCyclic() || this.entries?.last(),
     );
   }
 

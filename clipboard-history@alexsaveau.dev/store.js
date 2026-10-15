@@ -262,7 +262,7 @@ function _readAndConsumeOldFormat(callback) {
 
       let registry = [];
       try {
-        registry = JSON.parse(GLib.ByteArray.toString(contents));
+        registry = JSON.parse(new TextDecoder().decode(contents));
       } catch (e) {
         console.error(e);
       }

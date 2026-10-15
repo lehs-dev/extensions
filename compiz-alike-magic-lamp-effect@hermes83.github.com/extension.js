@@ -82,7 +82,7 @@ export default class CompizMagicLampEffectExtension extends Extension {
 
         this.minimizeId = global.window_manager.connect("minimize", (e, actor) => {
             this.destroyActorEffect(actor);
-            if (Main.overview.visible) {
+            if (!this._shouldAnimate()) {
                 hooks.minimize.call(Main.wm._shellwm, actor);
                 return;
             }
@@ -94,7 +94,7 @@ export default class CompizMagicLampEffectExtension extends Extension {
             this.destroyActorEffect(actor);
             actor.show();
 
-            if (Main.overview.visible) {
+            if (!this._shouldAnimate()) {
                 hooks.unminimize.call(Main.wm._shellwm, actor);
                 return;
             }
@@ -141,6 +141,13 @@ export default class CompizMagicLampEffectExtension extends Extension {
                 Main.wm._shellwm.original_completed_unminimize = null;
             this._hooks = null;
         }
+    }
+
+    _shouldAnimate() {
+        const settings = St.Settings.get();
+        return settings.enable_animations &&
+            !(St.ReducedMotion && settings.reducedMotion === St.ReducedMotion.REDUCE) &&
+            !Main.overview.visible && !Main.wm._workspaceAnimation?.gestureActive;
     }
 
     getIcon(actor) {

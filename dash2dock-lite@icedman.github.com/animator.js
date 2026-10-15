@@ -30,7 +30,6 @@ const ANIM_SIZE_PER_SEC = 250 / 1000;
 const ANIM_ICON_RAISE = 0.5;
 const ANIM_ICON_SCALE = 1.5;
 const ANIM_ICON_HIT_AREA = 2.5;
-const ANIMATE_CACHE_LOOKUP = 4;
 
 const DOT_CANVAS_SIZE = 96;
 
@@ -224,12 +223,15 @@ export let Animator = class {
       icon._prev = prevIcon;
       icon._next = null;
       if (prevIcon) {
-        icon._next = icon;
+        prevIcon._next = icon;
       }
       prevIcon = icon;
     });
 
-    let noAnimation = !dock.extension.animate_icons_unmute;
+    const settings = St.Settings.get();
+    let noAnimation = !dock.extension.animate_icons_unmute ||
+      !settings.enable_animations ||
+      (St.ReducedMotion && settings.reducedMotion === St.ReducedMotion.REDUCE);
     if (dock._dragging) {
       noAnimation = true;
       isWithin = true;
@@ -272,12 +274,6 @@ export let Animator = class {
     let lastIcon = null;
     let iconTable = [];
 
-    let scaleAtMin = 1;
-    let scaleAtMax = 1;
-    if (magnify != 0) {
-      scaleAtMax = 1 + magnify;
-    }
-
     let Ease = QuadraticEaseOut;
     if (dock.extension.animation_rise_curve == 1) {
       Ease = CubicEaseOut;
@@ -319,8 +315,7 @@ export let Animator = class {
         // affect scale;
         if (magnify != 0) {
           // scale += fp;
-          scale = scaleAtMax * Ease(hoverProgress);
-          if (scale < 1) scale = 1;
+          scale = Math.min(2, 1 + magnify * Ease(hoverProgress));
         }
 
         // affect rise
@@ -336,22 +331,10 @@ export let Animator = class {
       icon._scale = scale;
       icon._targetScale = scale;
 
-      //! what is the difference between set_size and set_icon_size? and effects
-      // set_icon_size resizes the image... avoid changing per frame
-      // set_size resizes the widget
-      // icon._icon.set_size(iconSize * scale, iconSize * scale);
-
-      //! png image makes this extremely slow -- this may be the cause of "lag" experienced by some users
-      //! some themes or apps use PNG instead of SVG... set_scale is apparently resource hog
-      if (
-        icon._icon.gicon &&
-        icon._icon.gicon.file != null &&
-        !icon._icon.gicon.file?.get_path()?.toLowerCase().endsWith('svg')
-      ) {
-        // skip scaling image files!... too costly
-      } else {
-        icon._icon.set_scale(scale, scale);
-      }
+      // Only the renderer scales. The invisible source supplies stable layout
+      // and hit geometry, including for PNG icons and drag placeholders.
+      if (icon._icon.scaleX !== 1 || icon._icon.scaleY !== 1)
+        icon._icon.set_scale(1, 1);
 
       if (!icon._pos) {
         return;
@@ -378,11 +361,9 @@ export let Animator = class {
       // }
 
       let scale = icon._scale;
-      if (scale > 1.1) {
+      if (scale > 1) {
         // affect spread
-        let offset = Math.floor(
-          1.25 * (scale - 1) * iconSize * scaleFactor * spread * 0.5
-        );
+        let offset = 1.25 * (scale - 1) * iconSize * scaleFactor * spread * 0.5;
         // left
         for (let j = i - 1; j >= 0; j--) {
           let left = iconTable[j];
@@ -398,21 +379,13 @@ export let Animator = class {
       }
     }
 
-    // re-center to hovered icon
+    // Keep expansion centred without changing the target when the nearest
+    // icon changes at the midpoint between two hit areas.
     dock._hoveredIcon = hoveredIcon;
-    let TRANSLATE_COEF = 24;
-    if (nearestIcon) {
-      nearestIcon._targetScale += 0.1;
-      let adjust = nearestIcon._translate / 2;
-      animateIcons.forEach((icon) => {
-        if (!icon._icon) return;
-        if (icon._scale > 1) {
-          let o = -adjust * (2 - icon._scale);
-          let nt = icon._translate - o;
-          icon._translate =
-            (icon._translate * TRANSLATE_COEF + nt) / (TRANSLATE_COEF + 1);
-        }
-      });
+    if (iconTable.length > 0) {
+      const adjust = (iconTable[0]._translate + iconTable[iconTable.length - 1]._translate) / 2;
+      for (const icon of iconTable)
+        icon._translate -= adjust;
     }
 
     //-------------------
@@ -428,17 +401,8 @@ export let Animator = class {
       slowDown = 0.5;
     }
 
-    let lockPosition =
-      didScale && first && last && first._hoverProgress == 0 && last._hoverProgress == 0;
-
-    if (dock._preview) {
-      lockPosition = false;
-    }
-
     animateIcons.forEach((icon) => {
       if (!icon._icon) return;
-      // this fixes jittery hovered icon
-      if (icon._targetScale > 1.9) icon._targetScale = 2;
 
       icon._scale = icon._targetScale;
 
@@ -482,45 +446,6 @@ export let Animator = class {
         translationX = appliedVector.x;
         translationY = appliedVector.y;
         icon._deltaVector = appliedVector;
-      }
-
-      // fix jitterness
-      if (lockPosition && icon._hoverProgress == 0) {
-        icon._positionCache = icon._positionCache || [];
-        var lockThreshold = 48;
-        if (
-          (icon._prev && icon._prev._locked) ||
-          (icon._next && icon._next._locked)
-        ) {
-          lockThreshold = 32;
-        }
-        if (icon._positionCache.length > lockThreshold) {
-          [translationX, translationY] =
-            icon._positionCache[icon._positionCache.length - 1];
-          icon._locked = true;
-        } else {
-          icon._positionCache.push([translationX, translationY]);
-
-          let edgeItems = ANIMATE_CACHE_LOOKUP;
-          if (icon._positionCache.length > edgeItems) {
-            let tx = 0; //translationX;
-            let ty = 0; //translationY;
-            for (let i = 0; i < edgeItems; i++) {
-              tx +=
-                icon._positionCache[
-                  icon._positionCache.length - edgeItems + i
-                ][0];
-              ty +=
-                icon._positionCache[
-                  icon._positionCache.length - edgeItems + i
-                ][1];
-            }
-            translationX = tx / edgeItems;
-            translationY = ty / edgeItems;
-          }
-        }
-      } else {
-        icon._positionCache = null;
       }
 
       if (dock.animation_fps > 0) {
@@ -635,7 +560,7 @@ export let Animator = class {
           let appliedSize = deltaSize;
           appliedSize += accel;
           if (Math.abs(appliedSize) > mag) {
-            appliedSize = dst * 0.5;
+            appliedSize = dst;
           }
           targetSize = currentSize + appliedSize;
           icon._deltaSize = appliedSize;
