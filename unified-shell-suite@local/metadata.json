@@ -1,0 +1,16 @@
+{
+  "uuid": "unified-shell-suite@local",
+  "name": "Unified Shell Suite",
+  "description": "High-performance modular GNOME 51 suite integrating window management, tiling, dock, GPU compositing effects, spotlight launcher, and utilities.",
+  "shell-version": [
+    "48",
+    "49",
+    "50",
+    "51"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.unified-suite",
+  "gettext-domain": "unified-shell-suite",
+  "url": "https://github.com/local/unified-shell-suite",
+  "version": 1
+}
+

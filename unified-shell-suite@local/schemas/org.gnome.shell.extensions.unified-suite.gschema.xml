@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="unified-shell-suite">
+  <schema id="org.gnome.shell.extensions.unified-suite" path="/org/gnome/shell/extensions/unified-suite/">
+    
+    <!-- Compositing / Appearance -->
+    <key name="blur-enabled" type="b">
+      <default>true</default>
+      <summary>Enable blur effect</summary>
+      <description>Applies optimized dual-pass Gaussian blur to Shell UI components without repaint loops.</description>
+    </key>
+    <key name="blur-sigma" type="i">
+      <default>30</default>
+      <summary>Blur radius sigma</summary>
+      <description>Standard deviation for blur kernel.</description>
+    </key>
+    <key name="blur-panel" type="b">
+      <default>true</default>
+      <summary>Blur top bar panel</summary>
+    </key>
+    <key name="blur-overview" type="b">
+      <default>true</default>
+      <summary>Blur overview background</summary>
+    </key>
+    <key name="magic-lamp-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Magic Lamp effect</summary>
+      <description>Compiz-style genie lamp minimize/unminimize animation with try/finally safety and optimized rendering.</description>
+    </key>
+    <key name="magic-lamp-duration" type="i">
+      <default>300</default>
+      <summary>Magic Lamp animation duration in ms</summary>
+    </key>
+    <key name="color-scheme" type="s">
+      <default>'default'</default>
+      <summary>Color scheme preference</summary>
+      <description>'default', 'prefer-dark', or 'prefer-light'</description>
+    </key>
+    <key name="static-background-enabled" type="b">
+      <default>true</default>
+      <summary>Static Workspace Background</summary>
+      <description>Keeps the wallpaper fixed during workspace switches without breaking 1:1 touchpad gestures.</description>
+    </key>
+
+    <!-- Dock & Desktop Tweaks -->
+    <key name="dock-enabled" type="b">
+      <default>true</default>
+      <summary>Enable dock</summary>
+      <description>Smooth, VSync frame-clock synchronized dock without out-of-sync timers or blocking disk I/O.</description>
+    </key>
+    <key name="dock-position" type="s">
+      <default>'bottom'</default>
+      <summary>Dock position on monitor</summary>
+      <description>'bottom', 'left', 'right', 'top'</description>
+    </key>
+    <key name="dock-autohide" type="b">
+      <default>true</default>
+      <summary>Autohide dock</summary>
+    </key>
+    <key name="dock-icon-size" type="i">
+      <default>48</default>
+      <summary>Icon size in pixels</summary>
+    </key>
+    <key name="tweak-panel-visible" type="b">
+      <default>true</default>
+      <summary>Show top panel</summary>
+    </key>
+    <key name="tweak-show-activities" type="b">
+      <default>true</default>
+      <summary>Show Activities button</summary>
+    </key>
+
+    <!-- Window Management & Tiling -->
+    <key name="tiling-enabled" type="b">
+      <default>true</default>
+      <summary>Enable adaptive window tiling</summary>
+      <description>Advanced window tiling, snap assistance and layout management.</description>
+    </key>
+    <key name="window-gap-size" type="i">
+      <default>8</default>
+      <summary>Inner gap between windows in pixels</summary>
+    </key>
+    <key name="screen-gap-size" type="i">
+      <default>8</default>
+      <summary>Outer screen edge margin in pixels</summary>
+    </key>
+    <key name="tiling-preview" type="b">
+      <default>true</default>
+      <summary>Show tiling preview overlay</summary>
+    </key>
+
+    <!-- Overlays & Utilities -->
+    <key name="spotlight-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Spotlight Search</summary>
+      <description>Standalone macOS-style spotlight search popup using Shell SearchProvider without stealing Overview actors.</description>
+    </key>
+    <key name="clipboard-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Clipboard History</summary>
+      <description>Asynchronous clipboard manager with correct St.ClipboardType enums and memory leak prevention.</description>
+    </key>
+    <key name="clipboard-max-items" type="i">
+      <default>50</default>
+      <summary>Maximum stored clipboard items</summary>
+    </key>
+    <key name="kimpanel-enabled" type="b">
+      <default>true</default>
+      <summary>Enable Kimpanel Input Method Helper</summary>
+      <description>DBus bridge for Fcitx/IBus with accurate Mtk.Rectangle geometry calculations.</description>
+    </key>
+
+  </schema>
+</schemalist>
+

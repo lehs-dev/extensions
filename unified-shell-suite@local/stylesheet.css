@@ -1,0 +1,47 @@
+/* Unified Shell Suite - Global Stylesheet */
+
+/* Tiling snap preview rectangle */
+.unified-tiling-preview {
+    background-color: rgba(53, 132, 228, 0.22);
+    border: 2px solid rgba(53, 132, 228, 0.85);
+    border-radius: 12px;
+}
+
+/* Floating Dock */
+.unified-dock-box {
+    background-color: rgba(24, 24, 28, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    padding: 6px 10px;
+}
+
+.unified-dock-app-button {
+    padding: 6px;
+    border-radius: 12px;
+    transition-duration: 150ms;
+}
+
+.unified-dock-app-button:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Spotlight Search */
+#unified-spotlight-popup {
+    background-color: rgba(30, 30, 36, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 18px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+.unified-spotlight-result-row {
+    padding: 8px 12px;
+    border-radius: 10px;
+    transition-duration: 120ms;
+}
+
+.unified-spotlight-result-row:hover,
+.unified-spotlight-result-row:focus {
+    background-color: rgba(53, 132, 228, 0.35);
+}
+
