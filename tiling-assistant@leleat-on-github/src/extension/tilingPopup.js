@@ -215,15 +215,17 @@ export const TilingSwitcherPopup = GObject.registerClass({
     }
 
     vfunc_button_press_event(buttonEvent) {
-        const btn = buttonEvent.get_button();
-        if (btn === Clutter.BUTTON_MIDDLE || btn === Clutter.BUTTON_SECONDARY) {
-            this._finish(global.get_current_time());
+            const btn = buttonEvent.get_button();
+            if (btn === Clutter.BUTTON_MIDDLE || btn === Clutter.BUTTON_SECONDARY) {
+                this._finish(global.get_current_time());
+                return Clutter.EVENT_PROPAGATE;
+            }
+        
+            if (MajorShellVersion < 49)
+                return super.vfunc_button_press_event(buttonEvent);
+        
             return Clutter.EVENT_PROPAGATE;
         }
-
-        if (MajorShellVersion < 49)
-            return super.vfunc_button_press_event(buttonEvent);
-    }
 
     _keyPressHandler(keysym) {
         const moveUp = Util.isDirection(keysym, Direction.N);

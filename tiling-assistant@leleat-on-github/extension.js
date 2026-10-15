@@ -151,11 +151,18 @@ export default class TilingAssistantExtension extends Extension {
     async enable() {
         const cancellable = new Gio.Cancellable();
         this._cancellable = cancellable;
-        this.settings = (await import('./src/common.js')).Settings;
+
+        const commonModule = await import('./src/common.js');
+        if (cancellable.is_cancelled())
+            return;
+
+        this.settings = commonModule.Settings;
         this.settings.initialize(this.getSettings(), this);
         this._settingsOverrider = new SettingsOverrider(this.settings);
 
         const twmModule = await import('./src/extension/tilingWindowManager.js');
+        if (cancellable.is_cancelled())
+            return;
 
         this._twm = twmModule.TilingWindowManager;
         this._twm.initialize();
@@ -165,10 +172,12 @@ export default class TilingAssistantExtension extends Extension {
         } catch (e) {
             if (e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                 return;
-
             throw e;
         }
 
+        if (cancellable.is_cancelled())
+            return;
+        // ... Giữ nguyên phần khởi tạo các Handler bên dưới
         this._moveHandler = new MoveHandler();
         this._resizeHandler = new ResizeHandler();
         this._keybindingHandler = new KeybindingHandler();
@@ -191,22 +200,22 @@ export default class TilingAssistantExtension extends Extension {
         const emptyStrvVariant = new GLib.Variant('as', []);
 
         if (gnomeDesktopKeybindings.get_strv('maximize').includes('<Super>Up') &&
-                this.settings.getStrv('tile-maximize').includes('<Super>Up')) {
+            this.settings.getStrv('tile-maximize').includes('<Super>Up')) {
             this._settingsOverrider.add(gnomeDesktopKeybindings,
                 'maximize', emptyStrvVariant);
         }
         if (gnomeDesktopKeybindings.get_strv('unmaximize').includes('<Super>Down') &&
-                this.settings.getStrv('restore-window').includes('<Super>Down')) {
+            this.settings.getStrv('restore-window').includes('<Super>Down')) {
             this._settingsOverrider.add(gnomeDesktopKeybindings,
                 'unmaximize', emptyStrvVariant);
         }
         if (gnomeMutterKeybindings.get_strv('toggle-tiled-left').includes('<Super>Left') &&
-                this.settings.getStrv('tile-left-half').includes('<Super>Left')) {
+            this.settings.getStrv('tile-left-half').includes('<Super>Left')) {
             this._settingsOverrider.add(gnomeMutterKeybindings,
                 'toggle-tiled-left', emptyStrvVariant);
         }
         if (gnomeMutterKeybindings.get_strv('toggle-tiled-right').includes('<Super>Right') &&
-                this.settings.getStrv('tile-right-half').includes('<Super>Right')) {
+            this.settings.getStrv('tile-right-half').includes('<Super>Right')) {
             this._settingsOverrider.add(gnomeMutterKeybindings,
                 'toggle-tiled-right', emptyStrvVariant);
         }
@@ -222,10 +231,10 @@ export default class TilingAssistantExtension extends Extension {
                 const rect = w.get_frame_rect();
                 const workArea = w.get_work_area_current_monitor();
                 return w.is_on_primary_monitor() &&
-                        w.showing_on_its_workspace() &&
-                        w.get_window_type() !== Meta.WindowType.DESKTOP &&
-                        (w.maximized_vertically || w.tiledRect?.y === workArea.y) &&
-                        stageX > rect.x && stageX < rect.x + rect.width;
+                    w.showing_on_its_workspace() &&
+                    w.get_window_type() !== Meta.WindowType.DESKTOP &&
+                    (w.maximized_vertically || w.tiledRect?.y === workArea.y) &&
+                    stageX > rect.x && stageX < rect.x + rect.width;
             });
         };
 
@@ -287,7 +296,7 @@ export default class TilingAssistantExtension extends Extension {
      * properties of windows before locking the screen.
      */
     _saveBeforeSessionLock() {
-        if (!Main.sessionMode.isLocked)
+        if (!Main.sessionMode.isLocked || !this._twm)
             return;
 
         this._wasLocked = true;

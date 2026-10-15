@@ -1,4 +1,4 @@
-import { Gdk, Gio, GLib, Gtk } from './src/dependencies/prefs/gi.js';
+import { Adw, Gdk, Gio, GLib, Gtk } from './src/dependencies/prefs/gi.js';
 import { ExtensionPreferences } from './src/dependencies/prefs.js';
 
 import LayoutPrefs from './src/prefs/layoutsPrefs.js';
@@ -237,21 +237,22 @@ export default class Prefs extends ExtensionPreferences {
         });
     }
 
-    _addHeaderBarInfoButton(window, settings, builder) {
-        // Add headerBar button for menu
-        // TODO: is this a 'reliable' method to access the headerbar?
-        const page = builder.get_object('general');
-        const gtkStack = page
-            .get_parent()
-            .get_parent()
-            .get_parent();
-        const adwHeaderBar = gtkStack
-            .get_next_sibling()
-            .get_first_child()
-            .get_first_child()
-            .get_first_child();
+    _findHeaderBar(widget) {
+        if (widget instanceof Adw.HeaderBar)
+            return widget;
 
-        adwHeaderBar.pack_start(builder.get_object('info_menu'));
+        for (let child = widget.get_first_child(); child; child = child.get_next_sibling()) {
+            const found = this._findHeaderBar(child);
+            if (found)
+                return found;
+        }
+        return null;
+    }
+
+    _addHeaderBarInfoButton(window, settings, builder) {
+        const adwHeaderBar = this._findHeaderBar(window);
+        if (adwHeaderBar)
+            adwHeaderBar.pack_start(builder.get_object('info_menu'));
 
         // Setup menu actions
         const actionGroup = new Gio.SimpleActionGroup();

@@ -1,22 +1,43 @@
+/* Hiệu ứng tìm kiếm Layout */
 .tiling-layout-search-highlight {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-radius: 20px;
+    background-color: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 16px;
 }
 
 .layout-shortcut .boxed-list {
     box-shadow: none;
 }
 
+/* Thanh Layout Picker (Snap Bar ở cạnh trên màn hình giống macOS Sequoia) */
 .tiling-menu-container {
-    padding: 20px;
+    padding: 12px;
 }
 
 .tiling-menu-container > StBoxLayout {
-    spacing: 15px;
-    padding: 15px;
-    border-radius: 20px;
+    spacing: 12px;
+    padding: 10px 14px;
+    border-radius: 18px;
+    background-color: rgba(30, 30, 34, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
 }
 
 .tiling-menu-container > StBoxLayout > StIcon {
-    icon-size: 64px;
+    icon-size: 48px;
+    border-radius: 10px;
+    padding: 6px;
+    transition-duration: 150ms;
+}
+
+.tiling-menu-container > StBoxLayout > StIcon:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Khung xem trước khi kéo cửa sổ (Tile Preview kiểu kính mờ macOS) */
+.tile-preview {
+    background-color: rgba(255, 255, 255, 0.12);
+    border: 1.5px solid rgba(255, 255, 255, 0.42);
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
