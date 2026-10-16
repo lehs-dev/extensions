@@ -84,6 +84,38 @@ export class Actor {
     insert_child_above(actor) { this.add_child(actor); }
     insert_child_below(actor) { this.add_child(actor); }
     insert_child_at_index(actor) { this.add_child(actor); }
+    set_child_above_sibling(actor, sibling = null) {
+        if (actor.parent !== this)
+            return;
+        const index = this.children.indexOf(actor);
+        if (index !== -1)
+            this.children.splice(index, 1);
+        if (!sibling) {
+            this.children.push(actor);
+        } else {
+            const sibIndex = this.children.indexOf(sibling);
+            if (sibIndex === -1)
+                this.children.push(actor);
+            else
+                this.children.splice(sibIndex + 1, 0, actor);
+        }
+    }
+    set_child_below_sibling(actor, sibling = null) {
+        if (actor.parent !== this)
+            return;
+        const index = this.children.indexOf(actor);
+        if (index !== -1)
+            this.children.splice(index, 1);
+        if (!sibling) {
+            this.children.unshift(actor);
+        } else {
+            const sibIndex = this.children.indexOf(sibling);
+            if (sibIndex === -1)
+                this.children.unshift(actor);
+            else
+                this.children.splice(sibIndex, 0, actor);
+        }
+    }
     remove_child(actor) {
         if (actor.parent !== this)
             throw new Error('Removing actor from wrong parent');

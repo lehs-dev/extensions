@@ -137,6 +137,10 @@ export default class CompizMagicLampEffectExtension extends Extension {
 
             this.animate(actor, MagicLampUnminimizeEffect, UNMINIMIZE_EFFECT_NAME);
         });
+
+        this._restackedId = global.display?.connect?.('restacked', () => {
+            this._keepAnimatingActorsOnTop();
+        });
     }
 
     disable() {
@@ -153,6 +157,10 @@ export default class CompizMagicLampEffectExtension extends Extension {
         if (this.unminimizeId) {
             global.window_manager.disconnect(this.unminimizeId);
             this.unminimizeId = null;
+        }
+        if (this._restackedId) {
+            global.display?.disconnect?.(this._restackedId);
+            this._restackedId = null;
         }
     
         global.get_window_actors().forEach((actor) => {
@@ -225,12 +233,11 @@ export default class CompizMagicLampEffectExtension extends Extension {
         let effect = null;
         const originalOpacity = actor.opacity;
         try {
-            if (windowMonitor && targetMonitor && targetMonitor !== windowMonitor) {
-                // Wayland surface actors belong to their original stage views.
-                // A texture snapshot can deform across outputs without those
-                // per-monitor surface visibility constraints.
-                // Capture the full actor so clipping does not crop the texture
-                // before it is stretched to the animation actor's dimensions.
+            if (icon) {
+                // Wayland surface actors belong to their original stage views and
+                // Mutter stack layer. A texture snapshot can deform across outputs
+                // and above global.window_group without clipping or being occluded
+                // by adjacent/tiled windows (e.g. App A when App B minimizes).
                 const content = actor.paint_to_content(null);
                 if (!content)
                     throw new Error('Window snapshot is unavailable');
@@ -253,6 +260,7 @@ export default class CompizMagicLampEffectExtension extends Extension {
             this._activeEffects.add(effect);
             if (snapshot)
                 actor.opacity = 0;
+            this._keepAnimatingActorsOnTop();
             animationActor.add_effect_with_name(name, effect);
         } catch (error) {
             console.warn(`[Magic Lamp] Could not animate window: ${error}`);
@@ -262,6 +270,20 @@ export default class CompizMagicLampEffectExtension extends Extension {
                 snapshot?.destroy();
                 actor.opacity = originalOpacity;
                 complete.call(Main.wm._shellwm, actor);
+            }
+        }
+    }
+
+    _keepAnimatingActorsOnTop() {
+        for (const effect of this._activeEffects || []) {
+            const actor = effect._animationActor;
+            if (actor && !effect.sourceActor) {
+                const parent = actor.get_parent ? actor.get_parent() : actor.parent;
+                if (parent?.set_child_above_sibling) {
+                    parent.set_child_above_sibling(actor, null);
+                } else if (global.window_group?.set_child_above_sibling) {
+                    global.window_group.set_child_above_sibling(actor, null);
+                }
             }
         }
     }

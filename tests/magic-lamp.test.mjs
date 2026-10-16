@@ -638,3 +638,137 @@ test('cross-monitor effects stop on gestures and disable drains detached snapsho
     assert.equal(Main.wm._shellwm.completed_minimize, originalMinimize);
     assert.equal(Main.wm._shellwm.completed_unminimize, originalUnminimize);
 });
+
+test('animating window in tiled layout is raised above siblings and kept on top across restack events', async () => {
+    const settings = {enable_animations: true, reducedMotion: 0};
+    const settingsData = {
+        EFFECT: {get: () => 'default'},
+        DURATION: {get: () => 400},
+        X_TILES: {get: () => 10},
+        Y_TILES: {get: () => 10},
+    };
+    class WindowActor extends Actor {
+        get_size() { return [this.width, this.height]; }
+        get_x() { return this.x; }
+        get_y() { return this.y; }
+        queue_redraw() {}
+        paint_to_content() { return {}; }
+        get_effect(name) { return this.effects?.get(name) ?? null; }
+        add_effect_with_name(name, effect) {
+            this.effects ??= new Map();
+            this.effects.set(name, effect);
+            effect.vfunc_set_actor(this);
+        }
+        remove_effect(effect) {
+            for (const [name, current] of this.effects ?? []) {
+                if (current === effect) this.effects.delete(name);
+            }
+            effect.vfunc_set_actor(null);
+        }
+    }
+    class DeformEffect extends Actor {
+        constructor(params) { super(); this._init(params); }
+        _init() {}
+        vfunc_set_actor(actor) { this.actor = actor; }
+        get_actor() { return this.actor; }
+        set_n_tiles() {}
+        invalidate() {}
+    }
+    class Timeline extends Actor {
+        constructor(params) { super(params); this.actor = params?.actor; }
+        start() { this.playing = true; }
+        stop() { this.playing = false; }
+        get_progress() { return 0.5; }
+    }
+
+    const windowGroup = new Actor();
+    const uiGroup = new Actor();
+    uiGroup.add_child(windowGroup);
+    const manager = new Actor();
+    const display = new Actor();
+    let minimized = 0;
+    const Main = {
+        overview: {visible: false},
+        uiGroup,
+        layoutManager: {
+            monitors: [{index: 0, x: 0, y: 0, width: 1920, height: 1080}],
+        },
+        wm: {
+            _shouldAnimateActor() {},
+            _workspaceAnimation: {gestureActive: false},
+            _shellwm: {
+                completed_minimize: () => minimized++,
+                completed_unminimize: () => {},
+            },
+        },
+    };
+
+    const {default: Extension} = await loadModule(
+        'compiz-alike-magic-lamp-effect@hermes83.github.com/extension.js', {
+            globals: {
+                global: {
+                    window_manager: manager,
+                    window_group: windowGroup,
+                    display,
+                    get_window_actors: () => [appA, appB],
+                },
+            },
+            mocks: {
+                'gi://GObject': {default: {registerClass() {}}},
+                'gi://Clutter': {default: {Timeline, DeformEffect}},
+                'gi://St': {default: {
+                    Widget: WindowActor,
+                    Settings: {get: () => settings},
+                    ReducedMotion: {REDUCE: 1},
+                    Side: {TOP: 0, RIGHT: 1, BOTTOM: 2, LEFT: 3},
+                }},
+                'gi://GLib': {default: {
+                    PRIORITY_DEFAULT_IDLE: 0,
+                    SOURCE_REMOVE: false,
+                    idle_add: () => 0,
+                    source_remove: () => {},
+                }},
+                'resource:///org/gnome/shell/extensions/extension.js': {Extension: class {}},
+                'resource:///org/gnome/shell/ui/main.js': Main,
+                './settings_data.js': {SettingsData: class {constructor() { Object.assign(this, settingsData); }}},
+            },
+        });
+
+    // App A is on the left half (0 to 960), App B is on the right half (960 to 1920)
+    const appA = new WindowActor({x: 0, y: 0, width: 960, height: 1040});
+    appA.meta_window = {get_monitor: () => 0};
+    const appB = new WindowActor({x: 960, y: 0, width: 960, height: 1040});
+    appB.meta_window = {get_monitor: () => 0};
+
+    // In windowGroup, App B is at index 0 and App A is at index 1 (App A is above App B in stack)
+    windowGroup.add_child(appB);
+    windowGroup.add_child(appA);
+    assert.deepEqual(windowGroup.get_children(), [appB, appA]);
+
+    const extension = new Extension();
+    extension.getSettings = () => ({});
+    // App B's dock icon is located on App A's side (left half: x: 300, y: 1040)
+    const dockIconForB = {x: 300, y: 1040, width: 48, height: 48, monitorIndex: 0, dockPosition: 'bottom'};
+    extension.getIcon = actor => (actor === appB ? dockIconForB : null);
+    extension.enable();
+
+    // Trigger minimize on App B
+    manager.emit('minimize', appB);
+
+    // App B's snapshot is created and placed in uiGroup above windowGroup
+    const [effect] = extension._activeEffects;
+    const snapshot = effect._animationActor;
+    assert.notEqual(snapshot, appB, 'Snapshot widget is used for animation');
+    assert.equal(appB.opacity, 0, 'Original window actor is hidden during animation');
+    assert.equal(uiGroup.get_children().at(-1), snapshot, 'Snapshot is rendered above the entire window_group');
+
+    // Complete the effect
+    effect.destroy();
+    assert.equal(minimized, 1);
+    assert.equal(appB.opacity, 255, 'Original window opacity restored on completion');
+    assert.equal(snapshot.destroyed, true, 'Snapshot actor destroyed on completion');
+    assert.deepEqual(uiGroup.get_children(), [windowGroup], 'Only windowGroup remains in uiGroup');
+    assert.equal(extension._activeEffects.size, 0);
+
+    extension.disable();
+});
