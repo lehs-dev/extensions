@@ -2,6 +2,10 @@
 
 Ngày: 16/10/2026. Tiếp tục trên working tree của Antigravity; giữ các thay đổi đã có.
 
+Cập nhật 17/10/2026: bỏ shader cưỡng chế bo góc cửa sổ và workaround constraint nhằm giữ góc bo của Tiling Assistant theo yêu cầu người dùng; khôi phục tile edge constraint và maximize từng trục bình thường, để ứng dụng và GNOME quyết định hình dạng góc. Bảng nghiệm thu bên dưới ghi lại lần chạy ngày 16/10/2026.
+
+Kiểm tra sau thay đổi 17/10/2026: **151/151 Node tests PASS**, native GJS/Gio PASS, `node scripts/check.mjs` kiểm tra **192 JavaScript files, 9 schema directories: 0 failures**, `git diff --check` PASS. Các test chỉ dành cho shader và listener đã gỡ được xóa; các test hình học và trạng thái tile được giữ và cập nhật. Chưa kiểm tra trực quan trên GNOME thật.
+
 ## Phần đã triển khai
 
 | Extension | Kết quả |
@@ -9,7 +13,7 @@ Ngày: 16/10/2026. Tiếp tục trên working tree của Antigravity; giữ các
 | Dash2Dock Lite | Cosine bell, animation theo `Clutter.Timeline` và thời gian frame thực, dừng clock khi nghỉ; viền 1px, chấm running 4px, separator, theme sáng/tối và đồng bộ với session color scheme. Màu người dùng lưu được giữ nguyên. |
 | Magic Lamp | Ưu tiên icon dock trực tiếp trước geometry cache; không tạo đích giả khi thiếu icon. Đầu phễu thắt còn tối đa 1 stage unit ở giữa cạnh icon hướng về cửa sổ; thu/phục hồi đảo ngược chính xác, không gập lưới. Thiếu đích hợp lệ thì co 6% và fade tại cửa sổ trong tối đa 160ms. Giữ opacity và cleanup snapshot khi đi qua nhiều monitor. |
 | Spotlight | Bỏ blur/dim toàn màn hình; panel gọn, theme sáng/tối và kích thước theo monitor/scale. Sửa chuyển phím vào ClutterText, trạng thái search-active, kích hoạt kết quả bằng chuột/phím, focus menu ngữ cảnh và fade khi đóng. Giữ mở/focus đồng bộ và cleanup khi disable. |
-| Tiling Assistant | Chọn được năm preset 1/3–2/3 từ layout picker; mười shortcut có hàng cấu hình trong preferences. Shader bo góc 15 stage units được gắn/gỡ theo trạng thái tile; dùng frame bounds để phân biệt surface và CSD shadow. Không nhân monitor scale thêm vào radius/gap trong hệ tọa độ stage. |
+| Tiling Assistant | Chọn được năm preset 1/3–2/3 từ layout picker; mười shortcut có hàng cấu hình trong preferences. Góc cửa sổ do ứng dụng và GNOME quyết định; đã bỏ shader bo góc 15 stage units và workaround constraint nhằm giữ góc bo, khôi phục tile edge constraint và maximize từng trục bình thường. Không nhân monitor scale thêm vào gap trong hệ tọa độ stage. |
 | Window Gap | Outer margin mặc định 12px, inner gap của Tiling Assistant mặc định 12px, screen gap bổ sung bằng 0; không cộng đôi struts. |
 | Blur my Shell | Giữ native blur mặc định và pooling khi đang chạy; khi disable, gỡ signal scale/actor và dispose toàn bộ effect đang dùng hoặc nằm trong pool. |
 | Static Workspace Background | Giữ implementation nền tĩnh và animation native. Bổ sung kiểm tra hook wallpaper/blur theo cả hai thứ tự bật và disable giữa chuyển workspace. |
@@ -32,7 +36,7 @@ Container có Node, GJS/Gio và GLib, nhưng không có GNOME Shell/Mutter 51, p
 
 Spotlight chỉ giữ actor trong suốt để nhận click ngoài popup; không làm mờ hoặc dim desktop. Test kiểm tra không tạo blur effect và không tô nền actor này. Chưa có số đo chứng minh input <16ms hay không drop frame ở 60/120Hz, và chưa xác nhận trực quan thiết kế mới trong phiên GNOME thật.
 
-Đã bỏ assertion tự đặt thuộc tính rounded-corner lên mock rồi gọi đó là test tích hợp. Kiểm tra wallpaper hiện tìm đúng background actor; corner tests kiểm tra effect lifecycle/uniform/snippet riêng.
+Ở lần nghiệm thu 16/10/2026, đã bỏ assertion tự đặt thuộc tính rounded-corner lên mock rồi gọi đó là test tích hợp. Kiểm tra wallpaper tìm đúng background actor; các corner test khi đó kiểm tra effect lifecycle/uniform/snippet riêng của shader nay đã được bỏ.
 
 ## Kiểm tra desktop còn cần thực hiện
 
@@ -40,7 +44,7 @@ Sau khi đưa source/schema mới vào thư mục extension đang dùng, đăng 
 
 1. Rê chuột chậm/nhanh qua Dock; thử 60/120Hz, fractional scaling, bốn cạnh và autohide. Thu nhỏ/phục hồi liên tiếp, gồm cửa sổ và Dock ở hai monitor khác nhau.
 2. Bấm nhanh shortcut Spotlight; gõ ngay khi popup bắt đầu mở, thử chữ Unicode, Backspace, mũi tên, Tab/Shift+Tab, Space/Enter trên kết quả và disable khi đang mở. Giữ chuột trên kết quả rồi thả để kích hoạt, thử menu chuột phải và mở khi Overview đang hiển thị. Bật/tắt Light Style trong lúc popup mở; desktop phải giữ nguyên độ rõ/sáng.
-3. Snap nửa, góc, thirds và two-thirds; kiểm tra khoảng hở, góc và shadow với ứng dụng GTK/Qt/XWayland ở 100%, 125% và 200%. Restore/disable không để lại effect.
+3. Snap nửa, góc, thirds và two-thirds; kiểm tra khoảng hở và shadow với ứng dụng GTK/Qt/XWayland ở 100%, 125% và 200%. Góc cửa sổ phải giữ hình dạng do ứng dụng và GNOME quyết định khi tile, maximize, fullscreen và restore.
 4. Vuốt workspace rồi đảo chiều liên tục; thử nhiều monitor, bật/tắt blur/nền tĩnh giữa gesture, reduced motion và khóa/mở khóa phiên.
 5. Theo dõi lỗi trong phiên desktop:
 
@@ -54,7 +58,7 @@ journalctl --user -b -f -o cat | rg 'JS ERROR|TypeError|Gjs-CRITICAL|Clutter-CRI
 - [Clutter Timeline.get_delta](https://mutter.gnome.org/clutter/method.Timeline.get_delta.html): thời gian tính bằng milliseconds trong `new-frame`.
 - [Shell 51 native blur](https://raw.githubusercontent.com/GNOME/gnome-shell/51.0/src/shell-blur-effect.c): adaptive downscale, cache trong actor mode và chi phí background mode.
 
-## Kết quả nghiệm thu tự động cuối
+## Kết quả nghiệm thu tự động ngày 16/10/2026
 
 | Kiểm tra | Kết quả |
 | --- | --- |
@@ -65,4 +69,4 @@ journalctl --user -b -f -o cat | rg 'JS ERROR|TypeError|Gjs-CRITICAL|Clutter-CRI
 | libxml2 đọc preferences/SVG đã sửa | **9 files: 0 failures**; kiểm tra XML well-formed, không thay thế GtkBuilder runtime |
 | `git diff --check` | PASS |
 
-Phần triển khai và kiểm tra tự động đã hoàn tất. Các tiêu chí desktop ở trên còn chờ chạy trên GNOME 51 thật; chưa xác nhận GPU shader output, frame pacing hay input latency.
+Các kết quả trên được ghi nhận trước thay đổi bỏ cưỡng chế bo góc ngày 17/10/2026. Các tiêu chí desktop ở trên còn chờ chạy trên GNOME 51 thật; chưa xác nhận frame pacing hay input latency.

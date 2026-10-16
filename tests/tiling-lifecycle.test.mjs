@@ -40,8 +40,7 @@ async function setup() {
         [resolve(root, 'src/common.js')]: {Settings: settings},
         [resolve(root, 'src/extension/tilingWindowManager.js')]: {TilingWindowManager: twm},
     };
-    for (const name of ['moveHandler', 'resizeHandler', 'keybindingHandler', 'layoutsManager', 'altTab', 'focusHint',
-        'roundedCornersManager'])
+    for (const name of ['moveHandler', 'resizeHandler', 'keybindingHandler', 'layoutsManager', 'altTab', 'focusHint'])
         mocks[`./src/extension/${name}.js`] = {default: class {destroy() {}}};
     const {default: Extension} = await loadModule(`${root}/extension.js`, {
         mocks, globals: {global: {display: {get_tab_list: () => []}}},

@@ -15,7 +15,7 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
   7. `light-style@gnome-shell-extensions.gcampax.github.com` — GNOME 51 color scheme switcher.
   8. `spotlight@nin` — Compact floating search panel with search stealer and transparent outside-click surface.
   9. `static-workspace-background@CleoMenezesJr.github.io` — Fixed wallpaper during workspace switch transitions.
-  10. `tiling-assistant@leleat-on-github` — Window snap presets (halves, quarters, 1/3-2/3), 15px rounded corners SDF shader, gap coordination.
+  10. `tiling-assistant@leleat-on-github` — Window snap presets (halves, quarters, 1/3-2/3), native window corners, gap coordination.
   11. `window-gap@amirhosseinkarimi.github.io` — Screen margin struts (`affectsStruts: true`) for uniform window spacing.
 
 ## Feature Inventory
@@ -24,19 +24,19 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
 | 1 | Dash2Dock Lite Cosine Bell Curve | Refine magnification to follow smooth continuous raised cosine bell curve $0.5 \times (1 - \cos(\pi p))$ | M1 | ORIGINAL_REQUEST § R2 |
 | 2 | Magic Lamp Dynamic Dock Target | Coordinate Compiz Magic Lamp minimize/unminimize trajectory with dynamic Dash2Dock Lite icon coordinates | M1 | ORIGINAL_REQUEST § R2 |
 | 3 | Tiling Assistant 1/3 & 2/3 Presets | Harmonize Tiling Assistant with macOS Sequoia-style 1/3 and 2/3 window snap presets | M2 | ORIGINAL_REQUEST § R3 |
-| 4 | 15px Continuous Rounded Corners & Gaps | Maintain 15px rounded corners via Cogl.Snippet and uniform gaps with Window Gap | M2 | ORIGINAL_REQUEST § R3 |
+| 4 | Native Window Corners & Gaps | Leave window corner shape to applications and GNOME; maintain uniform gaps with Window Gap | M2 | User feedback 2026-10-17 |
 | 5 | Spotlight Compact Panel | Compact light/dark popup with transparent outside-click surface; full-screen blur/dim removed per user feedback | M2 | User feedback 2026-10-16 |
 | 6 | Spotlight Instant Typing & Navigation | Eliminate input latency (<16ms, synchronous focus grab) and add keyboard navigation (arrows) | M2 | ORIGINAL_REQUEST § R3 |
 | 7 | Fixed Wallpaper Swipe | Keep workspace wallpaper stationary during multi-touch swipe transitions | M2 | ORIGINAL_REQUEST § R3 |
 | 8 | Formatting & Git Hygiene | Clean trailing whitespace in `tilingPopup.js:223, 226` so `git diff --check` passes | M2 | Survey (explorer_survey_3) |
-| 9 | Comprehensive Test Suite & Acceptance | All 71+ Node tests pass, native GJS tests pass, schema checks pass, git diff clean, desktop criteria verified | M3 | ORIGINAL_REQUEST § AC |
+| 9 | Comprehensive Test Suite & Acceptance | Automated regression, native GJS, schema and formatting results recorded in the status report; desktop acceptance pending | M3 | ORIGINAL_REQUEST § AC |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
 | M1 | macOS Sequoia Dock & Window Animations (R2) | Cosine bell, compositor frame clock, dynamic dock icon coordinates, Sequoia defaults and theme integration | none | IMPLEMENTED |
-| M2 | macOS Sequoia Tiling, Spotlight, Spaces & Hygiene (R3 & AC) | Accessible thirds presets, tiled rounded corners, coordinated gaps, Spotlight blur/focus/lifecycle, fixed wallpaper and formatting | none | IMPLEMENTED |
-| M3 | Final Acceptance & Adversarial Hardening (All ACs) | Automated regression, native Gio, syntax/schema-cache and formatting checks; hardware latency/frame pacing and visual desktop acceptance | M1, M2 | AUTOMATED PASS (160/160); DESKTOP PENDING |
+| M2 | macOS Sequoia Tiling, Spotlight, Spaces & Hygiene (R3 & AC) | Accessible thirds presets, native window corners, coordinated gaps, Spotlight blur/focus/lifecycle, fixed wallpaper and formatting | none | IMPLEMENTED |
+| M3 | Final Acceptance & Adversarial Hardening (All ACs) | Automated regression, native Gio, syntax/schema-cache and formatting checks; hardware latency/frame pacing and visual desktop acceptance | M1, M2 | AUTOMATED PASS 2026-10-17 (151/151); DESKTOP PENDING |
 
 ## Interface Contracts
 
@@ -58,6 +58,7 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
 ### Tiling Assistant ↔ Window Gap
 - **Work Area Contract**: Window Gap provides outer screen struts via `Main.layoutManager.addChrome(actor, { affectsStruts: true })`.
 - **Inner Gap Contract**: Tiling Assistant applies `windowGap / 2` between adjacent tiles and respects `singleScreenGap` at outer boundaries.
+- **Window Corners**: Applications and GNOME determine window corner shape; Tiling Assistant does not attach a rounding shader. Normal tile edge constraints and partial maximization are restored after removing the corner-preserving workaround.
 - **Snap Presets**: Halves (50%), Quarters (25%), Left/Right Third (33.33%), Left/Right Two-Thirds (66.67%), Center Third (33.33%).
 
 ## Code Layout

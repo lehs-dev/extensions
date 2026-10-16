@@ -66,7 +66,7 @@ async function setup(backend = 'ubuntu', preferences = {}) {
         let frame = {...originalFrame};
         let flags = 0;
         Object.assign(window, {
-            maximizeCalls: 0, constraints: [0, 0, 0, 0],
+            maximizeCalls: 0, constraints: [0, 0, 0, 0], constraintOverrideCalls: 0,
             get_id: () => windows.indexOf(window),
             get_monitor: () => 0,
             get_frame_rect: () => ({...frame}),
@@ -100,13 +100,18 @@ async function setup(backend = 'ubuntu', preferences = {}) {
                 setFlags(3);
             };
             window.unmaximize = function () { setFlags(0); };
-            window.set_maximize_flags = directions => {
-                window.maximizeCalls++;
-                setFlags(flags | directions);
-            };
+            if (backend === 'ubuntu') {
+                window.set_maximize_flags = directions => {
+                    window.maximizeCalls++;
+                    setFlags(flags | directions);
+                };
+            }
         }
         if (backend === 'ubuntu')
-            window.override_constraints = (...edges) => { window.constraints = edges; };
+            window.override_constraints = (...edges) => {
+                window.constraintOverrideCalls++;
+                window.constraints = edges;
+            };
         setFlags(0);
         windows.push(window);
         return window;
@@ -117,29 +122,33 @@ async function setup(backend = 'ubuntu', preferences = {}) {
 // Explicit frame expectations include an 8px gap between adjacent windows,
 // with no screen-edge gap, matching the reported configuration.
 const layouts = [
-    ['left', [0, 32, 960, 1040], [0, 32, 956, 1040]],
-    ['right', [960, 32, 960, 1040], [964, 32, 956, 1040]],
-    ['top', [0, 32, 1920, 520], [0, 32, 1920, 516]],
-    ['bottom', [0, 552, 1920, 520], [0, 556, 1920, 516]],
-    ['top-left', [0, 32, 960, 520], [0, 32, 956, 516]],
-    ['top-right', [960, 32, 960, 520], [964, 32, 956, 516]],
-    ['bottom-left', [0, 552, 960, 520], [0, 556, 956, 516]],
-    ['bottom-right', [960, 552, 960, 520], [964, 556, 956, 516]],
+    ['left', [0, 32, 960, 1040], [0, 32, 956, 1040], 2, [0, 0, 0, 0]],
+    ['right', [960, 32, 960, 1040], [964, 32, 956, 1040], 2, [0, 0, 0, 0]],
+    ['top', [0, 32, 1920, 520], [0, 32, 1920, 516], 1, [0, 0, 0, 0]],
+    ['bottom', [0, 552, 1920, 520], [0, 556, 1920, 516], 1, [0, 0, 0, 0]],
+    ['top-left', [0, 32, 960, 520], [0, 32, 956, 516], 0, [2, 2, 1, 1]],
+    ['top-right', [960, 32, 960, 520], [964, 32, 956, 516], 0, [2, 1, 2, 1]],
+    ['bottom-left', [0, 552, 960, 520], [0, 556, 956, 516], 0, [1, 2, 1, 2]],
+    ['bottom-right', [960, 552, 960, 520], [964, 556, 956, 516], 0, [1, 1, 2, 2]],
 ];
 const fromArray = ([x, y, width, height]) => ({x, y, width, height});
 
 for (const backend of ['ubuntu', 'upstream', 'legacy']) {
-    test(`half and quarter tiles retain normal decoration state on ${backend} Mutter`, async () => {
+    test(`half and quarter tiles preserve geometry and native states on ${backend} Mutter`, async () => {
         const {twm, Rect, createWindow} = await setup(backend, {'disable-tile-groups': true});
         const window = createWindow();
-        for (const [name, tile, frame] of layouts) {
+        let nativeMaximizeCalls = 0;
+        for (const [name, tile, frame, flags, constraints] of layouts) {
             // Use the actual Rect implementation, including its gap calculations.
             await twm.tile(window, new Rect(...tile), {openTilingPopup: false});
             assert.deepEqual(window.get_frame_rect(), fromArray(frame), name);
-            assert.equal(window.maximizedHorizontally, false, name);
-            assert.equal(window.maximizedVertically, false, name);
-            assert.deepEqual(window.constraints, [0, 0, 0, 0], name);
-            assert.equal(window.maximizeCalls, 0, name);
+            const nativeFlags = backend === 'upstream' ? 0 : flags;
+            assert.equal(window.maximizedHorizontally, Boolean(nativeFlags & 1), name);
+            assert.equal(window.maximizedVertically, Boolean(nativeFlags & 2), name);
+            assert.deepEqual(window.constraints, backend === 'ubuntu' ? constraints : [0, 0, 0, 0], name);
+            if (nativeFlags)
+                nativeMaximizeCalls++;
+            assert.equal(window.maximizeCalls, nativeMaximizeCalls, name);
             assert.equal(window.isTiled, true);
             assert.deepEqual(geometry(window.tiledRect), fromArray(tile));
             assert.deepEqual([...twm.getTileGroupFor(window)], [window]);
@@ -148,6 +157,9 @@ for (const backend of ['ubuntu', 'upstream', 'legacy']) {
         twm.untile(window, {skipAnim: true});
         assert.deepEqual(window.get_frame_rect(), originalFrame);
         assert.equal(window.isTiled, false);
+        assert.equal(window.maximizedHorizontally, false);
+        assert.equal(window.maximizedVertically, false);
+        assert.deepEqual(window.constraints, [0, 0, 0, 0]);
         assert.equal(twm.getTileStates().size, 0);
         twm.destroy();
     });
@@ -164,7 +176,7 @@ for (const backend of ['ubuntu', 'upstream', 'legacy']) {
 
         await twm.tile(window, new Rect(...layouts[1][1]), {openTilingPopup: false});
         assert.equal(window.maximizedHorizontally, false);
-        assert.equal(window.maximizedVertically, false);
+        assert.equal(window.maximizedVertically, backend !== 'upstream');
         assert.deepEqual(window.get_frame_rect(), fromArray(layouts[1][2]));
         twm.untile(window, {skipAnim: true});
         assert.deepEqual(window.get_frame_rect(), originalFrame);
@@ -172,40 +184,48 @@ for (const backend of ['ubuntu', 'upstream', 'legacy']) {
     });
 }
 
-test('retiling clears old partial maximization and Ubuntu edge constraints', async () => {
+test('retiling updates native edge constraints and clears them when restored', async () => {
     const {twm, Rect, createWindow} = await setup('ubuntu', {'disable-tile-groups': true});
     for (const flags of [0, 1, 2]) {
         const window = createWindow();
         window.set_maximize_flags(flags);
-        window.override_constraints(2, 2, 1, 1);
-        await twm.tile(window, new Rect(...layouts[0][1]), {openTilingPopup: false});
+        window.constraints = [1, 1, 2, 2];
+        await twm.tile(window, new Rect(...layouts[4][1]), {openTilingPopup: false});
         assert.equal(window.maximizedHorizontally, false);
         assert.equal(window.maximizedVertically, false);
+        assert.deepEqual(window.constraints, [2, 2, 1, 1]);
+        assert.equal(window.constraintOverrideCalls, 1);
+        assert.deepEqual(window.get_frame_rect(), fromArray(layouts[4][2]));
+        twm.untile(window, {skipAnim: true});
         assert.deepEqual(window.constraints, [0, 0, 0, 0]);
-        assert.deepEqual(window.get_frame_rect(), fromArray(layouts[0][2]));
+        assert.equal(window.constraintOverrideCalls, 2);
+        assert.deepEqual(window.get_frame_rect(), originalFrame);
     }
     twm.destroy();
 });
 
-test('screen gaps and maximization with gaps retain normal decoration state', async () => {
+test('screen gaps and maximization with gaps preserve configured geometry', async () => {
     const {twm, Rect, createWindow} = await setup('ubuntu', {
         'disable-tile-groups': true, 'single-screen-gap': 12, 'maximize-with-gap': true,
     });
     const window = createWindow();
     await twm.tile(window, new Rect(...layouts[0][1]), {openTilingPopup: false});
     assert.deepEqual(window.get_frame_rect(), {x: 12, y: 44, width: 944, height: 1016});
+    assert.equal(window.maximizedHorizontally, false);
+    assert.equal(window.maximizedVertically, false);
+    assert.deepEqual(window.constraints, [2, 2, 1, 2]);
     await twm.tile(window, new Rect(workArea));
     assert.deepEqual(window.get_frame_rect(), {x: 12, y: 44, width: 1896, height: 1016});
     assert.equal(window.maximizeCalls, 0);
-    assert.deepEqual(window.constraints, [0, 0, 0, 0]);
     assert.equal(window.isTiled, false);
     assert.equal(twm.isMaximized(window), true);
     twm.untile(window, {skipAnim: true});
     assert.deepEqual(window.get_frame_rect(), originalFrame);
+    assert.deepEqual(window.constraints, [0, 0, 0, 0]);
     twm.destroy();
 });
 
-test('normal decoration state preserves tile groups and the tiling popup request', async () => {
+test('tiling preserves tile groups and the tiling popup request', async () => {
     const {twm, Rect, createWindow} = await setup();
     const left = createWindow();
     const right = createWindow();
@@ -223,7 +243,7 @@ test('normal decoration state preserves tile groups and the tiling popup request
     twm.destroy();
 });
 
-test('dragging a rounded tile restores its size immediately even with untile animations enabled', async () => {
+test('dragging a tile restores its size immediately even with untile animations enabled', async () => {
     const {twm, Rect, createWindow, animations, utility} = await setup('ubuntu', {
         'disable-tile-groups': true, 'enable-untile-animations': true,
     });
@@ -242,7 +262,7 @@ test('dragging a rounded tile restores its size immediately even with untile ani
     const window = createWindow();
     const actor = new Actor();
     window.get_compositor_private = () => actor;
-    await twm.tile(window, new Rect(...layouts[0][1]), {openTilingPopup: false});
+    await twm.tile(window, new Rect(...layouts[4][1]), {openTilingPopup: false});
     const handler = Object.create(MoveHandler.prototype);
     handler._wasMaximizedOnStart = false;
     let resumed = false;
@@ -256,7 +276,7 @@ test('dragging a rounded tile restores its size immediately even with untile ani
     assert.equal(resumed, true);
     assert.equal(animations.length, 0, 'a live drag must not start a Shell resize clone');
     // Keyboard restoration still uses the configured untile animation.
-    await twm.tile(window, new Rect(...layouts[0][1]), {openTilingPopup: false});
+    await twm.tile(window, new Rect(...layouts[4][1]), {openTilingPopup: false});
     twm.untile(window);
     assert.equal(animations.length, 1);
     twm.destroy();

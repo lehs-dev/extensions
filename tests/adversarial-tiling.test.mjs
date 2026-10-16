@@ -133,6 +133,10 @@ async function setupTwm(preferences = {}, workArea = {x: 0, y: 32, width: 1920, 
             maximize() {
                 window.maximizedHorizontally = window.maximizedVertically = true;
             },
+            set_maximize_flags(directions) {
+                window.maximizedHorizontally ||= Boolean(directions & 1);
+                window.maximizedVertically ||= Boolean(directions & 2);
+            },
         });
         window.maximizedHorizontally = window.maximizedVertically = false;
         windows.push(window);
@@ -362,7 +366,7 @@ test('ADVERSARIAL: Gaps coordination (8px uniform) across ultrawide and negative
     }
 });
 
-test('ADVERSARIAL: normal client decoration state survives retiling and window state changes', async () => {
+test('ADVERSARIAL: retiling preserves native vertical maximization and restores full maximization', async () => {
     const {twm, Rect, createWindow} = await setupTwm();
     const area = new Rect({x: 0, y: 32, width: 1920, height: 1040});
 
@@ -377,17 +381,15 @@ test('ADVERSARIAL: normal client decoration state survives retiling and window s
         'tile-right-third',
     ];
 
-    // Cycle through all new presets repeatedly and verify decoration state invariants
+    // Cycle through all new presets repeatedly and verify window state invariants.
     for (const shortcut of shortcuts) {
         const tileRect = twm.getDefaultTileFor(shortcut, area);
         await twm.tile(window, tileRect, {openTilingPopup: false});
 
-        // These invariants retain client decorations. Shader radius and effect
-        // lifecycle are verified separately in rounded-corners.test.mjs.
         assert.equal(window.isTiled, true, `window.isTiled must remain true for ${shortcut}`);
         assert.equal(window.maximizedHorizontally, false, `window must NOT be horizontally maximized for ${shortcut}`);
-        assert.equal(window.maximizedVertically, false, `window must NOT be vertically maximized for ${shortcut}`);
-        assert.deepEqual(window.constraints, [0, 0, 0, 0], `window constraints must be clear for ${shortcut}`);
+        assert.equal(window.maximizedVertically, true, `window must be vertically maximized for ${shortcut}`);
+        assert.deepEqual(window.constraints, [0, 0, 0, 0], `full-height presets use native maximization for ${shortcut}`);
 
         // The original floating untiledRect must be preserved throughout retiling
         assert.deepEqual(geometry(window.untiledRect), {x: 50, y: 50, width: 400, height: 300});
@@ -403,8 +405,8 @@ test('ADVERSARIAL: normal client decoration state survives retiling and window s
 
     assert.equal(window.isTiled, true, 'tiling a maximized window must set isTiled: true');
     assert.equal(window.maximizedHorizontally, false, 'tiling a maximized window must unmaximize horizontally');
-    assert.equal(window.maximizedVertically, false, 'tiling a maximized window must unmaximize vertically');
-    assert.deepEqual(window.constraints, [0, 0, 0, 0], 'tiling a maximized window must clear edge constraints');
+    assert.equal(window.maximizedVertically, true, 'full-height tiles retain native vertical maximization');
+    assert.deepEqual(window.constraints, [0, 0, 0, 0]);
 
     twm.destroy();
 });

@@ -12,7 +12,6 @@ import { Rect, Util } from './utility.js';
 export class TilingWindowManager {
     static initialize() {
         this._signals = new TilingSignals();
-        this._tileStateListeners = new Set();
 
         /**
          * @type {Map<number, number[]>} - {
@@ -79,7 +78,6 @@ export class TilingWindowManager {
 
         this._tileGroups.clear();
         this._tileStates.clear();
-        this._tileStateListeners.clear();
 
         if (this._openAppTiledTimerId) {
             GLib.Source.remove(this._openAppTiledTimerId);
@@ -95,19 +93,6 @@ export class TilingWindowManager {
             GLib.Source.remove(this._wsRemovedTimer);
             this._wsRemovedTimer = null;
         }
-    }
-
-    // isTiled/tiledRect are extension state, so Meta.Window doesn't emit a
-    // property notification when they change. Decorations subscribe here.
-    static addTileStateListener(callback) {
-        const listeners = this._tileStateListeners;
-        listeners.add(callback);
-        return () => listeners.delete(callback);
-    }
-
-    static _notifyTileStateChanged(window) {
-        for (const callback of this._tileStateListeners)
-            callback(window);
     }
 
     /**
@@ -228,6 +213,11 @@ export class TilingWindowManager {
 
         const { x, y, width, height } = newRect.addGaps(workArea, monitor);
 
+        const verticalMaximize =
+            !maximize && y === workArea.y && height === workArea.height;
+        const horizontalMaximize =
+            !maximize && x === workArea.x && width === workArea.width;
+
         // Animations
         const wActor = window.get_compositor_private();
         if (
@@ -247,14 +237,19 @@ export class TilingWindowManager {
             );
         }
 
-        // GTK/libadwaita remove rounded corners for tiled edges and partial
-        // maximization. Keep tiles as normal windows and let our tiledRect,
-        // tile groups and resize handler manage the layout. Clear any edge
-        // constraints left by an earlier tile on Mutter builds supporting it.
-        if (window.override_constraints) {
-            window.override_constraints(Meta.WindowConstraint.NONE,
-                Meta.WindowConstraint.NONE, Meta.WindowConstraint.NONE,
-                Meta.WindowConstraint.NONE);
+        if (!verticalMaximize && !horizontalMaximize && !maximize &&
+                window.override_constraints) {
+            const leftConstraint = newRect.x === workArea.x
+                ? Meta.WindowConstraint.MONITOR : Meta.WindowConstraint.WINDOW;
+            const rightConstraint = newRect.x2 === workArea.x2
+                ? Meta.WindowConstraint.MONITOR : Meta.WindowConstraint.WINDOW;
+            const topConstraint = newRect.y === workArea.y
+                ? Meta.WindowConstraint.MONITOR : Meta.WindowConstraint.WINDOW;
+            const bottomConstraint = newRect.y2 === workArea.y2
+                ? Meta.WindowConstraint.MONITOR : Meta.WindowConstraint.WINDOW;
+
+            window.override_constraints(topConstraint, leftConstraint,
+                rightConstraint, bottomConstraint);
         }
 
         // See issue #137.
@@ -274,7 +269,17 @@ export class TilingWindowManager {
         window.move_to_monitor(monitor);
         window.move_frame(true, x, y);
         window.move_resize_frame(true, x, y, width, height);
-        this._notifyTileStateChanged(window);
+
+        const maximizeFlags = verticalMaximize ? Meta.MaximizeFlags.VERTICAL
+            : horizontalMaximize ? Meta.MaximizeFlags.HORIZONTAL : null;
+        if (maximizeFlags !== null) {
+            if (window.set_maximize_flags)
+                window.set_maximize_flags(maximizeFlags);
+            else if (window.maximize.length > 0)
+                Util.maximizeWindow(window, maximizeFlags);
+            // The zero-argument API only supports full maximization. Keep
+            // the tile geometry when partial maximization is unavailable.
+        }
 
         // Maximized with gaps
         if (maximize) {
@@ -369,7 +374,6 @@ export class TilingWindowManager {
         window.isTiled = false;
         window.tiledRect = null;
         window.untiledRect = null;
-        this._notifyTileStateChanged(window);
 
         this.deleteTilingState(window);
     }

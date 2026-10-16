@@ -104,6 +104,11 @@ async function setupTwm(preferences = {}, workArea = standardWorkArea, monitorSc
                 flags = 3;
                 window.maximizedHorizontally = window.maximizedVertically = true;
             },
+            set_maximize_flags(directions) {
+                flags |= directions;
+                window.maximizedHorizontally = Boolean(flags & 1);
+                window.maximizedVertically = Boolean(flags & 2);
+            },
         });
         window.maximizedHorizontally = window.maximizedVertically = false;
         windows.push(window);
@@ -175,7 +180,7 @@ test('macOS Sequoia 1/3 and 2/3 presets geometry on non-divisible resolution (13
     twm.destroy();
 });
 
-test('preset tiling preserves normal client decoration state and uniform gaps', async () => {
+test('preset tiling preserves uniform gaps and native vertical maximization', async () => {
     const {twm, Rect, createWindow} = await setupTwm({'window-gap': 8, 'single-screen-gap': 0});
     const area = new Rect(standardWorkArea);
 
@@ -188,11 +193,10 @@ test('preset tiling preserves normal client decoration state and uniform gaps', 
     await twm.tile(leftWindow, leftThirdTile, {openTilingPopup: false});
     await twm.tile(rightWindow, rightTwoThirdsTile, {openTilingPopup: false});
 
-    // Client decorations remain enabled; rounded-corners.test.mjs covers the shader radius.
     for (const w of [leftWindow, rightWindow]) {
         assert.equal(w.isTiled, true);
         assert.equal(w.maximizedHorizontally, false);
-        assert.equal(w.maximizedVertically, false);
+        assert.equal(w.maximizedVertically, true);
         assert.deepEqual(w.constraints, [0, 0, 0, 0]);
     }
 
@@ -209,30 +213,6 @@ test('preset tiling preserves normal client decoration state and uniform gaps', 
     assert.equal(rightFrame.x - (leftFrame.x + leftFrame.width), 8);
 
     twm.destroy();
-});
-
-test('tiling state listeners cover snapping, gapped maximize, and restoring without stale subscriptions', async () => {
-    const {twm, Rect, createWindow} = await setupTwm({'maximize-with-gap': true});
-    const window = createWindow();
-    const area = new Rect(standardWorkArea);
-    const states = [];
-    const disconnect = twm.addTileStateListener(w => states.push({
-        isTiled: w.isTiled, hasTile: Boolean(w.tiledRect), frame: w.get_frame_rect(),
-    }));
-    await twm.tile(window, twm.getDefaultTileFor('tile-left-third', area), {openTilingPopup: false});
-    await twm.tile(window, area, {openTilingPopup: false});
-    twm.untile(window);
-    assert.deepEqual(states.map(({isTiled, hasTile}) => ({isTiled, hasTile})), [
-        {isTiled: true, hasTile: true},
-        {isTiled: false, hasTile: true},
-        {isTiled: false, hasTile: false},
-    ]);
-    assert.deepEqual(states.at(-1).frame, originalFrame);
-    disconnect();
-    await twm.tile(window, twm.getDefaultTileFor('tile-right-third', area), {openTilingPopup: false});
-    assert.equal(states.length, 3);
-    twm.destroy();
-    disconnect(); // Safe even when the manager was already destroyed.
 });
 
 test('dual coordination with window-gap struts and tiling assistant inner gaps', async () => {

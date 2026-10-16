@@ -25,7 +25,6 @@ import KeybindingHandler from './src/extension/keybindingHandler.js';
 import LayoutsManager from './src/extension/layoutsManager.js';
 import AltTabOverride from './src/extension/altTab.js';
 import FocusHintManager from './src/extension/focusHint.js';
-import RoundedCornersManager from './src/extension/roundedCornersManager.js';
 import { Rect, Util } from './src/extension/utility.js';
 
 Gio._promisify(Gio.File.prototype, 'load_contents_async');
@@ -184,7 +183,6 @@ export default class TilingAssistantExtension extends Extension {
         this._keybindingHandler = new KeybindingHandler();
         this._layoutsManager = new LayoutsManager();
         this._focusHintManager = new FocusHintManager();
-        this._roundedCornersManager = new RoundedCornersManager(this._twm);
         this._altTabOverride = new AltTabOverride();
 
         // Disable native tiling.
@@ -271,9 +269,6 @@ export default class TilingAssistantExtension extends Extension {
         this._layoutsManager = null;
         this._focusHintManager?.destroy();
         this._focusHintManager = null;
-        this._roundedCornersManager?.destroy();
-        this._roundedCornersManager = null;
-
         this._altTabOverride?.destroy();
         this._altTabOverride = null;
 
