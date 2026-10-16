@@ -7,6 +7,7 @@ async function setup(modern = true) {
     const wm = new Actor();
     const windows = [];
     let scale = 1;
+    let monitorScale = null;
     let uploads = 0;
     class ShaderEffect {
         constructor() { this.values = new Map(); this._init(); }
@@ -67,11 +68,13 @@ async function setup(modern = true) {
         window.get_compositor_private = () => window.actor;
         window.get_frame_rect = () => window.frame;
         window.get_buffer_rect = () => window.buffer;
+        window.get_monitor = () => 0;
         window.is_fullscreen = () => window.fullscreen;
         windows.push(window);
         return window;
     }
     display.list_all_windows = () => windows;
+    display.get_monitor_scale = () => monitorScale ?? scale;
     const {default: Manager} = await loadModule(
         'tiling-assistant@leleat-on-github/src/extension/roundedCornersManager.js', {
             globals: {global: {display, window_manager: wm, stage: {}}},
@@ -90,7 +93,8 @@ async function setup(modern = true) {
         });
     const effectFor = window => window.actor?.effects.get('tiling-assistant-rounded-corners');
     return {Manager, display, wm, windows, createWindow, WindowActor, effectFor,
-        setScale: value => { scale = value; }, getUploads: () => uploads};
+        setScale: value => { scale = value; },
+        setMonitorScale: value => { monitorScale = value; }, getUploads: () => uploads};
 }
 
 for (const modern of [true, false]) {
@@ -169,7 +173,7 @@ for (const modern of [true, false]) {
     });
 
     test(`shader uses the frame inside the buffer and adapts to scale and resize on ${backend}`, async () => {
-        const {Manager, createWindow, effectFor, setScale, getUploads} = await setup(modern);
+        const {Manager, createWindow, effectFor, setScale, setMonitorScale, getUploads} = await setup(modern);
         const window = createWindow({maximized: true});
         const manager = new Manager();
         const effect = effectFor(window);
@@ -177,12 +181,16 @@ for (const modern of [true, false]) {
         assert.deepEqual(Object.fromEntries(effect.values), {tex: 0,
             buffer_width: 1000, buffer_height: 840,
             frame_left: 20, frame_top: 20, frame_right: 980, frame_bottom: 820,
-            corner_radius: 12, pixel_size: 1});
+            corner_radius: 15, pixel_size: 1});
         setScale(2);
         window.actor.textureWidth = 1250; // A 1.25x render target.
         effect.vfunc_paint_target();
-        assert.equal(effect.values.get('corner_radius'), 24);
+        assert.equal(effect.values.get('corner_radius'), 30);
         assert.equal(effect.values.get('pixel_size'), 0.8);
+        setMonitorScale(1); // The Shell theme can retain the other monitor's 2x scale.
+        window.emit('position-changed');
+        effect.vfunc_paint_target();
+        assert.equal(effect.values.get('corner_radius'), 15, 'use the window monitor scale');
         window.frame.width = 10;
         window.emit('size-changed');
         assert.equal(effect.repaint, true);

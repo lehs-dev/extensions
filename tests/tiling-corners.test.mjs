@@ -19,6 +19,7 @@ async function setup(backend = 'ubuntu', preferences = {}) {
         }
     }
     const settings = {'window-gap': 8, ...preferences};
+    const animations = [];
     const windows = [];
     const workspace = {};
     const global = {
@@ -40,10 +41,12 @@ async function setup(backend = 'ubuntu', preferences = {}) {
             Mtk: {Rectangle},
             Meta: {MaximizeFlags: {HORIZONTAL: 1, VERTICAL: 2, BOTH: 3},
                 WindowConstraint: {NONE: 0, WINDOW: 1, MONITOR: 2},
-                TabList: {NORMAL_ALL: 0}},
+                TabList: {NORMAL_ALL: 0}, SizeChange: {MAXIMIZE: 0, UNMAXIMIZE: 1}},
         },
         '../dependencies/shell.js': {Config: {PACKAGE_VERSION: '51.0'},
-            Main: {overview: {visible: false}}},
+            Main: {overview: {visible: false}, wm: {
+                _prepareAnimationInfo: (...args) => animations.push(args),
+            }}},
         '../dependencies/unexported/altTab.js': {getWindows: () => [...windows]},
         '../common.js': {Orientation: {}, Direction: {}, Settings: {
             getBoolean: key => Boolean(settings[key]), getInt: key => settings[key] ?? 0,
@@ -108,7 +111,7 @@ async function setup(backend = 'ubuntu', preferences = {}) {
         windows.push(window);
         return window;
     }
-    return {twm, Rect: utility.Rect, createWindow, settings};
+    return {twm, Rect: utility.Rect, createWindow, settings, animations, utility};
 }
 
 // Explicit frame expectations include an 8px gap between adjacent windows,
@@ -217,5 +220,44 @@ test('normal decoration state preserves tile groups and the tiling popup request
     assert.deepEqual(geometry(popupRequests[1].rect), fromArray(layouts[1][2]));
     twm.untile(right, {skipAnim: true});
     assert.deepEqual([...twm.getTileGroupFor(left)], [left]);
+    twm.destroy();
+});
+
+test('dragging a rounded tile restores its size immediately even with untile animations enabled', async () => {
+    const {twm, Rect, createWindow, animations, utility} = await setup('ubuntu', {
+        'disable-tile-groups': true, 'enable-untile-animations': true,
+    });
+    const {default: MoveHandler} = await loadModule(
+        'tiling-assistant@leleat-on-github/src/extension/moveHandler.js', {
+            mocks: {
+                '../dependencies/gi.js': {Clutter: {}, GLib: {}, Gio: {}, Meta: {}, Mtk: {},
+                    GObject: {registerClass: cls => cls}},
+                '../dependencies/shell.js': {Main: {}, WindowManager: {TilePreview: Actor}},
+                '../common.js': {MoveModes: {}, Orientation: {}, Settings: {}},
+                './utility.js': utility,
+                './tilingWindowManager.js': {TilingWindowManager: twm},
+                './layoutPicker.js': {LayoutPicker: class {}, LayoutPickerTileType: {}},
+            },
+        });
+    const window = createWindow();
+    const actor = new Actor();
+    window.get_compositor_private = () => actor;
+    await twm.tile(window, new Rect(...layouts[0][1]), {openTilingPopup: false});
+    const handler = Object.create(MoveHandler.prototype);
+    handler._wasMaximizedOnStart = false;
+    let resumed = false;
+    handler._onMoveStarted = restoredWindow => {
+        assert.equal(restoredWindow, window);
+        assert.equal(window.isTiled, false);
+        assert.deepEqual(window.get_frame_rect(), {x: 0, y: 32, width: 640, height: 480});
+        resumed = true;
+    };
+    handler._restoreSizeAndRestartGrab(window, 1);
+    assert.equal(resumed, true);
+    assert.equal(animations.length, 0, 'a live drag must not start a Shell resize clone');
+    // Keyboard restoration still uses the configured untile animation.
+    await twm.tile(window, new Rect(...layouts[0][1]), {openTilingPopup: false});
+    twm.untile(window);
+    assert.equal(animations.length, 1);
     twm.destroy();
 });

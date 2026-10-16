@@ -5,7 +5,8 @@ import Meta from 'gi://Meta';
 import St from 'gi://St';
 
 const EFFECT_NAME = 'tiling-assistant-rounded-corners';
-const RADIUS = 12;
+// Match libadwaita's floating windows and the tile preview in stylesheet.css.
+const RADIUS = 15;
 
 const DECLARATIONS = `
 uniform sampler2D tex;
@@ -61,7 +62,10 @@ class RoundedCornersEffect extends Clutter.ShaderEffect {
             const frame = window.get_frame_rect();
             const buffer = window.get_buffer_rect();
             if (buffer.width > 0 && buffer.height > 0 && frame.width > 0 && frame.height > 0) {
-                const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+                const monitor = window.get_monitor();
+                const scale = monitor >= 0
+                    ? global.display.get_monitor_scale(monitor)
+                    : St.ThemeContext.get_for_stage(global.stage).scale_factor;
                 const radius = Math.min(RADIUS * scale, frame.width / 2, frame.height / 2);
                 const texture = this.get_texture();
                 this.set_uniform_value('tex', 0);

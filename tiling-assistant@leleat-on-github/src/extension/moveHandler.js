@@ -494,7 +494,10 @@ export default class TilingMoveHandler {
     _restoreSizeAndRestartGrab(window, grabOp) {
         Twm.untile(window, {
             restoreFullPos: false,
-            skipAnim: this._wasMaximizedOnStart
+            // During a live drag, Shell's resize animation scales a frozen
+            // clone while the pointer keeps moving. Restore immediately so
+            // tiled windows with normal decorations also stay under the pointer.
+            skipAnim: true
         });
 
         this._onMoveStarted(window, grabOp);
@@ -934,24 +937,32 @@ class TilePreview extends WindowManager.TilePreview {
         return !this._rect || !rect.equal(this._rect);
     }
 
-    // Added param for animation and removed style for rounded corners
+    // Keep _rect in layout coordinates for edge/hold detection, but draw the
+    // same gapped frame that TilingWindowManager will apply when dropping.
     open(window, tileRect, monitorIndex, animateTo = undefined) {
         const windowActor = window.get_compositor_private();
-        if (!windowActor)
+        const monitor = Main.layoutManager.monitors[monitorIndex];
+        if (!windowActor || !monitor)
             return;
 
         global.window_group.set_child_below_sibling(this, windowActor);
 
-        if (this._rect && this._rect.equal(tileRect))
+        const workArea = new Rect(window.get_work_area_for_monitor(monitorIndex));
+        const tile = new Rect(tileRect);
+        const frame = tile.equal(workArea) && !Settings.getBoolean('maximize-with-gap')
+            ? tile
+            : tile.addGaps(workArea, monitorIndex);
+
+        if (this._showing && this._monitorIndex === monitorIndex &&
+                this._rect?.equal(tile.meta) && this._frameRect?.equal(frame.meta))
             return;
 
         const changeMonitor = this._monitorIndex === -1 ||
             this._monitorIndex !== monitorIndex;
 
         this._monitorIndex = monitorIndex;
-        this._rect = tileRect;
-
-        const monitor = Main.layoutManager.monitors[monitorIndex];
+        this._rect = tile.meta;
+        this._frameRect = frame.meta;
 
         if (!this._showing || changeMonitor) {
             const monitorRect = new Mtk.Rectangle({
@@ -971,19 +982,22 @@ class TilePreview extends WindowManager.TilePreview {
 
         if (!animateTo) {
             animateTo = {
-                x: tileRect.x,
-                y: tileRect.y,
-                width: tileRect.width,
-                height: tileRect.height,
+                x: frame.x,
+                y: frame.y,
+                width: frame.width,
+                height: frame.height,
                 opacity: 255,
                 duration: WINDOW_ANIMATION_TIME,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD
             };
         } else {
-            animateTo.x === undefined && this.set_x(tileRect.x);
-            animateTo.y === undefined && this.set_y(tileRect.y);
-            animateTo.width === undefined && this.set_width(tileRect.width);
-            animateTo.height === undefined && this.set_height(tileRect.height);
+            animateTo = { ...animateTo };
+            for (const property of ['x', 'y', 'width', 'height']) {
+                if (animateTo[property] === undefined)
+                    this[`set_${property}`](frame[property]);
+                else
+                    animateTo[property] = frame[property];
+            }
             animateTo.opacity === undefined && this.set_opacity(255);
             animateTo.duration = animateTo.duration ?? WINDOW_ANIMATION_TIME;
             animateTo.mode = animateTo.mode ?? Clutter.AnimationMode.EASE_OUT_QUAD;
