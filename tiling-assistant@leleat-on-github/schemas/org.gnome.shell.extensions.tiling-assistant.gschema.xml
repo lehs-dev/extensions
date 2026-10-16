@@ -42,6 +42,19 @@
 		<key name="single-screen-gap" type="i">
 			<default>0</default>
 		</key>
+		<key name="use-individual-screen-gaps" type="b">
+			<default>false</default>
+			<summary>Use custom screen edge gaps</summary>
+		</key>
+		<key name="screen-gaps-panel-monitor-only" type="b">
+			<default>true</default>
+			<summary>Apply custom screen edge gaps only on displays with a panel</summary>
+		</key>
+		<key name="panel-edge-gap" type="i">
+			<default>0</default>
+			<range min="0" max="500"/>
+			<summary>Gap next to the panel when custom screen edges do not apply</summary>
+		</key>
 		<key name="screen-top-gap" type="i">
 			<default>0</default>
 		</key>

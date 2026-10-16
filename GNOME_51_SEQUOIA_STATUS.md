@@ -4,7 +4,9 @@ Ngày: 16/10/2026. Tiếp tục trên working tree của Antigravity; giữ các
 
 Cập nhật 17/10/2026: bỏ shader cưỡng chế bo góc cửa sổ và workaround constraint nhằm giữ góc bo của Tiling Assistant theo yêu cầu người dùng; khôi phục tile edge constraint và maximize từng trục bình thường, để ứng dụng và GNOME quyết định hình dạng góc. Bảng nghiệm thu bên dưới ghi lại lần chạy ngày 16/10/2026.
 
-Kiểm tra sau thay đổi 17/10/2026: **151/151 Node tests PASS**, native GJS/Gio PASS, `node scripts/check.mjs` kiểm tra **192 JavaScript files, 9 schema directories: 0 failures**, `git diff --check` PASS. Các test chỉ dành cho shader và listener đã gỡ được xóa; các test hình học và trạng thái tile được giữ và cập nhật. Chưa kiểm tra trực quan trên GNOME thật.
+Kiểm tra sau khi bỏ shader 17/10/2026: **151/151 Node tests PASS**, native GJS/Gio PASS, `node scripts/check.mjs` kiểm tra **192 JavaScript files, 9 schema directories: 0 failures**, `git diff --check` PASS. Các test chỉ dành cho shader và listener đã gỡ được xóa; các test hình học và trạng thái tile được giữ và cập nhật. Chưa kiểm tra trực quan trên GNOME thật.
+
+Cập nhật khoảng cách cạnh panel 17/10/2026: thêm Panel Edge mặc định 0, nhận diện vị trí panel trên đúng màn hình và đưa bốn cạnh tùy chỉnh ra phần Gaps. Với Screen Edges = 10, màn hình có panel dùng 0 ở cạnh sát panel và 10 ở ba cạnh còn lại; màn hình không có panel giữ 10 ở cả bốn cạnh. Custom Screen Edges mặc định chỉ áp dụng cho màn hình có panel; cấu hình tùy chỉnh cũ giữ phạm vi trước đó. Tile, preview và resize dùng chung cách tính. **159/159 Node tests PASS**, native GJS/Gio và kiểm tra Gio thật cho schema/migration PASS, **193 JavaScript files, 9 schema directories: 0 failures**, `git diff --check` PASS. XML preferences đã được kiểm tra; chưa chạy GtkBuilder hoặc kiểm tra trực quan vì container thiếu Gtk/Adw và GNOME Shell.
 
 ## Phần đã triển khai
 
@@ -28,6 +30,7 @@ Cache `gschemas.compiled` đi kèm được biên dịch lại. `scripts/check.m
 
 - Spotlight mặc định `Ctrl+Space`; có thể chọn `Super+Space` trong preferences. Tab/Shift+Tab giữ cơ chế focus native của kết quả tìm kiếm; không thêm cơ chế hoàn thành lệnh riêng.
 - Các shortcut thirds mặc định chưa gán để tránh chiếm phím đang dùng. Có thể đặt chúng trong preferences hoặc chọn trực tiếp từ layout picker khi kéo cửa sổ.
+- Trong Tiling Assistant → Gaps, giữ Screen Edges = 10 và Panel Edge = 0 để bỏ riêng khe hở sát panel. Bật Custom Screen Edges để chỉnh Top/Left/Right/Bottom; giữ Only on Displays with a Panel để màn hình phụ không có panel tiếp tục dùng Screen Edges đồng đều.
 - Các thay đổi default chỉ áp dụng cho khóa chưa có giá trị người dùng lưu. Với cấu hình cũ, đặt Window Gap outer margin và Tiling Assistant inner gap bằng 12 để dùng preset này; để screen gap của Tiling Assistant bằng 0 khi đã dùng outer struts.
 
 ## Giới hạn xác minh

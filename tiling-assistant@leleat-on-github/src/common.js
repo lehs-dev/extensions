@@ -4,6 +4,28 @@
  */
 
 /**
+ * Preserve legacy screen edge settings and initialize a new custom configuration.
+ */
+export function migrateScreenGapSettings(gioSettings) {
+    const edgeKeys = ['screen-top-gap', 'screen-left-gap',
+        'screen-right-gap', 'screen-bottom-gap'];
+
+    if (gioSettings.get_user_value('use-individual-screen-gaps') === null) {
+        const legacyCustom = edgeKeys.some(key => gioSettings.get_int(key) !== 0);
+        gioSettings.set_boolean('use-individual-screen-gaps', legacyCustom);
+        if (legacyCustom && gioSettings.get_user_value('screen-gaps-panel-monitor-only') === null)
+            gioSettings.set_boolean('screen-gaps-panel-monitor-only', false);
+    }
+
+    // Seed a new custom configuration without replacing saved edges, including zero.
+    if (gioSettings.get_boolean('use-individual-screen-gaps') &&
+            edgeKeys.every(key => gioSettings.get_user_value(key) === null)) {
+        const baseGap = gioSettings.get_int('single-screen-gap');
+        edgeKeys.forEach(key => gioSettings.set_int(key, baseGap));
+    }
+}
+
+/**
  * A Singleton providing access to the settings.
  */
 export class Settings {
@@ -11,6 +33,7 @@ export class Settings {
     static _extension;
 
     static initialize(gioSettings, extension = null) {
+        migrateScreenGapSettings(gioSettings);
         this._settings = gioSettings;
         this._extension = extension;
     }

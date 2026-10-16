@@ -2,7 +2,7 @@ import { Adw, Gdk, Gio, GLib, Gtk } from './src/dependencies/prefs/gi.js';
 import { ExtensionPreferences } from './src/dependencies/prefs.js';
 
 import LayoutPrefs from './src/prefs/layoutsPrefs.js';
-import { Shortcuts } from './src/common.js';
+import { Shortcuts, migrateScreenGapSettings } from './src/common.js';
 import './src/prefs/shortcutListener.js';
 
 export default class Prefs extends ExtensionPreferences {
@@ -20,6 +20,7 @@ export default class Prefs extends ExtensionPreferences {
         window.set_can_navigate_back(true);
 
         const settings = this.getSettings();
+        migrateScreenGapSettings(settings);
         const builder = new Gtk.Builder();
         builder.set_translation_domain(this.uuid);
         builder.add_from_file(`${this.path}/src/ui/prefs.ui`);
@@ -43,6 +44,7 @@ export default class Prefs extends ExtensionPreferences {
 
         // Bind settings to GUI
         this._bindSwitches(settings, builder);
+        this._bindScreenGaps(settings, builder, window);
         this._bindSpinbuttons(settings, builder);
         this._bindComboRows(settings, builder);
         this._bindRadioButtons(settings, builder);
@@ -80,13 +82,31 @@ export default class Prefs extends ExtensionPreferences {
             'enable-tile-animations',
             'enable-untile-animations',
             'enable-hold-maximize-inverse-landscape',
-            'enable-hold-maximize-inverse-portrait'
+            'enable-hold-maximize-inverse-portrait',
+            'screen-gaps-panel-monitor-only'
         ];
 
         switches.forEach(key => {
             const widget = builder.get_object(key.replaceAll('-', '_'));
             settings.bind(key, widget, 'active', Gio.SettingsBindFlags.DEFAULT);
         });
+    }
+
+    _bindScreenGaps(settings, builder, window) {
+        const customRow = builder.get_object('use_individual_screen_gaps');
+        const modeChangedId = settings.connect('changed::use-individual-screen-gaps', () => {
+            migrateScreenGapSettings(settings);
+        });
+        window.connect('close-request', () => {
+            settings.disconnect(modeChangedId);
+            return false;
+        });
+        settings.bind('use-individual-screen-gaps', customRow,
+            'enable-expansion', Gio.SettingsBindFlags.DEFAULT);
+        settings.bind('use-individual-screen-gaps', customRow,
+            'expanded', Gio.SettingsBindFlags.GET);
+        settings.bind('use-individual-screen-gaps', builder.get_object('panel_edge_gap'),
+            'sensitive', Gio.SettingsBindFlags.GET | Gio.SettingsBindFlags.INVERT_BOOLEAN);
     }
 
     /*
@@ -96,6 +116,7 @@ export default class Prefs extends ExtensionPreferences {
         const spinButtons = [
             'window-gap',
             'single-screen-gap',
+            'panel-edge-gap',
             'screen-top-gap',
             'screen-left-gap',
             'screen-right-gap',
@@ -109,7 +130,10 @@ export default class Prefs extends ExtensionPreferences {
 
         spinButtons.forEach(key => {
             const widget = builder.get_object(key.replaceAll('-', '_'));
-            settings.bind(key, widget, 'value', Gio.SettingsBindFlags.DEFAULT);
+            const flags = key === 'panel-edge-gap'
+                ? Gio.SettingsBindFlags.DEFAULT | Gio.SettingsBindFlags.NO_SENSITIVITY
+                : Gio.SettingsBindFlags.DEFAULT;
+            settings.bind(key, widget, 'value', flags);
         });
     }
 

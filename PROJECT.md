@@ -24,7 +24,7 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
 | 1 | Dash2Dock Lite Cosine Bell Curve | Refine magnification to follow smooth continuous raised cosine bell curve $0.5 \times (1 - \cos(\pi p))$ | M1 | ORIGINAL_REQUEST § R2 |
 | 2 | Magic Lamp Dynamic Dock Target | Coordinate Compiz Magic Lamp minimize/unminimize trajectory with dynamic Dash2Dock Lite icon coordinates | M1 | ORIGINAL_REQUEST § R2 |
 | 3 | Tiling Assistant 1/3 & 2/3 Presets | Harmonize Tiling Assistant with macOS Sequoia-style 1/3 and 2/3 window snap presets | M2 | ORIGINAL_REQUEST § R3 |
-| 4 | Native Window Corners & Gaps | Leave window corner shape to applications and GNOME; maintain uniform gaps with Window Gap | M2 | User feedback 2026-10-17 |
+| 4 | Native Window Corners & Gaps | Leave window corner shape to applications and GNOME; support panel-aware screen gaps and configurable edges alongside Window Gap | M2 | User feedback 2026-10-17 |
 | 5 | Spotlight Compact Panel | Compact light/dark popup with transparent outside-click surface; full-screen blur/dim removed per user feedback | M2 | User feedback 2026-10-16 |
 | 6 | Spotlight Instant Typing & Navigation | Eliminate input latency (<16ms, synchronous focus grab) and add keyboard navigation (arrows) | M2 | ORIGINAL_REQUEST § R3 |
 | 7 | Fixed Wallpaper Swipe | Keep workspace wallpaper stationary during multi-touch swipe transitions | M2 | ORIGINAL_REQUEST § R3 |
@@ -36,7 +36,7 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
 |---|------|-------|-------------|--------|
 | M1 | macOS Sequoia Dock & Window Animations (R2) | Cosine bell, compositor frame clock, dynamic dock icon coordinates, Sequoia defaults and theme integration | none | IMPLEMENTED |
 | M2 | macOS Sequoia Tiling, Spotlight, Spaces & Hygiene (R3 & AC) | Accessible thirds presets, native window corners, coordinated gaps, Spotlight blur/focus/lifecycle, fixed wallpaper and formatting | none | IMPLEMENTED |
-| M3 | Final Acceptance & Adversarial Hardening (All ACs) | Automated regression, native Gio, syntax/schema-cache and formatting checks; hardware latency/frame pacing and visual desktop acceptance | M1, M2 | AUTOMATED PASS 2026-10-17 (151/151); DESKTOP PENDING |
+| M3 | Final Acceptance & Adversarial Hardening (All ACs) | Automated regression, native Gio, syntax/schema-cache and formatting checks; hardware latency/frame pacing and visual desktop acceptance | M1, M2 | AUTOMATED PASS 2026-10-17 (159/159); DESKTOP PENDING |
 
 ## Interface Contracts
 
@@ -58,6 +58,7 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
 ### Tiling Assistant ↔ Window Gap
 - **Work Area Contract**: Window Gap provides outer screen struts via `Main.layoutManager.addChrome(actor, { affectsStruts: true })`.
 - **Inner Gap Contract**: Tiling Assistant applies `windowGap / 2` between adjacent tiles and respects `singleScreenGap` at outer boundaries.
+- **Panel Edge Gap**: Uniform screen gaps use `panel-edge-gap` (default 0) only beside the visible panel on its actual monitor. Displays without a panel keep the uniform gap. Custom screen edges support four independent values, scoped to panel displays by default; legacy custom settings retain their previous scope. Tile, preview and resize share the same effective gaps.
 - **Window Corners**: Applications and GNOME determine window corner shape; Tiling Assistant does not attach a rounding shader. Normal tile edge constraints and partial maximization are restored after removing the corner-preserving workaround.
 - **Snap Presets**: Halves (50%), Quarters (25%), Left/Right Third (33.33%), Left/Right Two-Thirds (66.67%), Center Third (33.33%).
 

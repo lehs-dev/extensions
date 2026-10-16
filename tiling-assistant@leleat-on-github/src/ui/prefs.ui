@@ -133,11 +133,8 @@
           <child>
             <object class="AdwSpinRow" id="single_screen_gap">
               <property name="title" translatable="yes" comments="Translators: This is a setting under the 'Gaps' preference group in the 'General' tab to set the gaps between tiled windows and the screen edges">Screen Edges</property>
+              <property name="subtitle" translatable="yes">Used when custom screen edges do not apply</property>
               <property name="activatable-widget">single_screen_gap</property>
-              <property name="visible"
-                        bind-source="enable_advanced_experimental_features"
-                        bind-property="active"
-                        bind-flags="invert-boolean"/>
               <property name="adjustment">
                 <object class="GtkAdjustment">
                   <property name="upper">500</property>
@@ -148,71 +145,82 @@
             </object>
           </child>
           <child>
-            <object class="AdwSpinRow" id="screen_top_gap">
-              <property name="title" translatable="yes" comments="Translators: This is a setting under the 'Gaps' preference group in the 'General' tab to set the gaps between tiled windows and the top screen edge">Screen Edge Top</property>
-              <property name="activatable-widget">screen_top_gap</property>
-              <property name="visible"
-                        bind-source="enable_advanced_experimental_features"
-                        bind-property="active"
-                        bind-flags="sync-create"/>
+            <object class="AdwSpinRow" id="panel_edge_gap">
+              <property name="title" translatable="yes">Panel Edge</property>
+              <property name="subtitle" translatable="yes">Gap next to the panel when custom screen edges are off</property>
+              <property name="activatable-widget">panel_edge_gap</property>
               <property name="adjustment">
                 <object class="GtkAdjustment">
                   <property name="upper">500</property>
-                  <property name="step-increment">2</property>
+                  <property name="step-increment">1</property>
                   <property name="page-increment">8</property>
                 </object>
               </property>
             </object>
           </child>
           <child>
-            <object class="AdwSpinRow" id="screen_left_gap">
-              <property name="title" translatable="yes" comments="Translators: This is a setting under the 'Gaps' preference group in the 'General' tab to set the gaps between tiled windows and the left screen edge">Screen Edge Left</property>
-              <property name="activatable-widget">screen_left_gap</property>
-              <property name="visible"
-                        bind-source="enable_advanced_experimental_features"
-                        bind-property="active"
-                        bind-flags="sync-create"/>
-              <property name="adjustment">
-                <object class="GtkAdjustment">
-                  <property name="upper">500</property>
-                  <property name="step-increment">2</property>
-                  <property name="page-increment">8</property>
+            <object class="AdwExpanderRow" id="use_individual_screen_gaps">
+              <property name="title" translatable="yes">Custom Screen Edges</property>
+              <property name="subtitle" translatable="yes">Set each edge separately, including the edge next to the panel</property>
+              <property name="show-enable-switch">True</property>
+              <child>
+                <object class="AdwSwitchRow" id="screen_gaps_panel_monitor_only">
+                  <property name="title" translatable="yes">Only on Displays with a Panel</property>
+                  <property name="subtitle" translatable="yes">Other displays use the Screen Edges gap</property>
                 </object>
-              </property>
-            </object>
-          </child>
-          <child>
-            <object class="AdwSpinRow" id="screen_right_gap">
-              <property name="title" translatable="yes" comments="Translators: This is a setting under the 'Gaps' preference group in the 'General' tab to set the gaps between tiled windows and the right screen edge">Screen Edge Right</property>
-              <property name="activatable-widget">screen_right_gap</property>
-              <property name="visible"
-                        bind-source="enable_advanced_experimental_features"
-                        bind-property="active"
-                        bind-flags="sync-create"/>
-              <property name="adjustment">
-                <object class="GtkAdjustment">
-                  <property name="upper">500</property>
-                  <property name="step-increment">2</property>
-                  <property name="page-increment">8</property>
+              </child>
+              <child>
+                <object class="AdwSpinRow" id="screen_top_gap">
+                  <property name="title" translatable="yes" comments="Translators: This is a setting under the 'Gaps' preference group in the 'General' tab to set the gaps between tiled windows and the top screen edge">Screen Edge Top</property>
+                  <property name="activatable-widget">screen_top_gap</property>
+                  <property name="adjustment">
+                    <object class="GtkAdjustment">
+                      <property name="upper">500</property>
+                      <property name="step-increment">2</property>
+                      <property name="page-increment">8</property>
+                    </object>
+                  </property>
                 </object>
-              </property>
-            </object>
-          </child>
-          <child>
-            <object class="AdwSpinRow" id="screen_bottom_gap">
-              <property name="title" translatable="yes" comments="Translators: This is a setting under the 'Gaps' preference group in the 'General' tab to set the gaps between tiled windows and the bottom screen edge">Screen Edge Bottom</property>
-              <property name="activatable-widget">screen_bottom_gap</property>
-              <property name="visible"
-                        bind-source="enable_advanced_experimental_features"
-                        bind-property="active"
-                        bind-flags="sync-create"/>
-              <property name="adjustment">
-                <object class="GtkAdjustment">
-                  <property name="upper">500</property>
-                  <property name="step-increment">2</property>
-                  <property name="page-increment">8</property>
+              </child>
+              <child>
+                <object class="AdwSpinRow" id="screen_left_gap">
+                  <property name="title" translatable="yes" comments="Translators: This is a setting under the 'Gaps' preference group in the 'General' tab to set the gaps between tiled windows and the left screen edge">Screen Edge Left</property>
+                  <property name="activatable-widget">screen_left_gap</property>
+                  <property name="adjustment">
+                    <object class="GtkAdjustment">
+                      <property name="upper">500</property>
+                      <property name="step-increment">2</property>
+                      <property name="page-increment">8</property>
+                    </object>
+                  </property>
                 </object>
-              </property>
+              </child>
+              <child>
+                <object class="AdwSpinRow" id="screen_right_gap">
+                  <property name="title" translatable="yes" comments="Translators: This is a setting under the 'Gaps' preference group in the 'General' tab to set the gaps between tiled windows and the right screen edge">Screen Edge Right</property>
+                  <property name="activatable-widget">screen_right_gap</property>
+                  <property name="adjustment">
+                    <object class="GtkAdjustment">
+                      <property name="upper">500</property>
+                      <property name="step-increment">2</property>
+                      <property name="page-increment">8</property>
+                    </object>
+                  </property>
+                </object>
+              </child>
+              <child>
+                <object class="AdwSpinRow" id="screen_bottom_gap">
+                  <property name="title" translatable="yes" comments="Translators: This is a setting under the 'Gaps' preference group in the 'General' tab to set the gaps between tiled windows and the bottom screen edge">Screen Edge Bottom</property>
+                  <property name="activatable-widget">screen_bottom_gap</property>
+                  <property name="adjustment">
+                    <object class="GtkAdjustment">
+                      <property name="upper">500</property>
+                      <property name="step-increment">2</property>
+                      <property name="page-increment">8</property>
+                    </object>
+                  </property>
+                </object>
+              </child>
             </object>
           </child>
           <child>

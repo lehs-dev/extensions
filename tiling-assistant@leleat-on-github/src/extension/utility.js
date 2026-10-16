@@ -113,13 +113,53 @@ export class Util {
         return gap % 2 === 0 ? gap : gap + 1;
     }
 
-    static useIndividualGaps(monitor) {
-        // Prefer individual gaps over the single one
-        const screenTopGap = this.getScaledGap('screen-top-gap', monitor);
-        const screenLeftGap = this.getScaledGap('screen-left-gap', monitor);
-        const screenRightGap = this.getScaledGap('screen-right-gap', monitor);
-        const screenBottomGap = this.getScaledGap('screen-bottom-gap', monitor);
-        return screenTopGap || screenLeftGap || screenRightGap || screenBottomGap;
+    /** Return the effective outer gaps for this monitor in stage coordinates. */
+    static getScreenGaps(monitor) {
+        const panelEdge = this._getPanelEdge(monitor);
+        if (Settings.getBoolean('use-individual-screen-gaps') &&
+                (!Settings.getBoolean('screen-gaps-panel-monitor-only') || panelEdge)) {
+            return Object.fromEntries(['top', 'left', 'right', 'bottom'].map(edge =>
+                [edge, this.getScaledGap(`screen-${edge}-gap`, monitor)]));
+        }
+
+        const gap = this.getScaledGap('single-screen-gap', monitor);
+        const gaps = {top: gap, left: gap, right: gap, bottom: gap};
+        if (panelEdge)
+            gaps[panelEdge] = Settings.getInt('panel-edge-gap');
+        return gaps;
+    }
+
+    static _getPanelEdge(monitorIndex) {
+        const monitor = Main.layoutManager?.monitors?.[monitorIndex];
+        const panelBox = Main.layoutManager?.panelBox;
+        const panel = Main.panel?.actor ?? Main.panel ?? panelBox;
+        if (!monitor || !panel || panel.visible === false || panelBox?.visible === false ||
+                panel.mapped === false)
+            return null;
+
+        // Use the real panel's stage geometry, not work-area insets: docks and
+        // Window Gap also reserve space but must retain their screen-edge gaps.
+        const [x, y] = panel.get_transformed_position?.() ?? [panel.x, panel.y];
+        const [width, height] = panel.get_transformed_size?.() ?? [panel.width, panel.height];
+        if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0 ||
+                x >= monitor.x + monitor.width || x + width <= monitor.x ||
+                y >= monitor.y + monitor.height || y + height <= monitor.y)
+            return null;
+
+        // Orientation prevents a full-width top panel also matching left/right.
+        // A floating or off-screen panel does not occupy a screen edge.
+        if (width >= height) {
+            if (Math.abs(y - monitor.y) <= 1)
+                return 'top';
+            if (Math.abs(y + height - monitor.y - monitor.height) <= 1)
+                return 'bottom';
+        } else {
+            if (Math.abs(x - monitor.x) <= 1)
+                return 'left';
+            if (Math.abs(x + width - monitor.x - monitor.width) <= 1)
+                return 'right';
+        }
+        return null;
     }
 
     /**
@@ -448,49 +488,25 @@ export class Rect {
      * @returns {Rect} the rectangle after the gaps were taken into account
      */
     addGaps(workArea, monitor) {
-        const screenTopGap = Util.getScaledGap('screen-top-gap', monitor);
-        const screenLeftGap = Util.getScaledGap('screen-left-gap', monitor);
-        const screenRightGap = Util.getScaledGap('screen-right-gap', monitor);
-        const screenBottomGap = Util.getScaledGap('screen-bottom-gap', monitor);
-        const singleScreenGap = Util.getScaledGap('single-screen-gap', monitor);
+        const {top, left, right, bottom} = Util.getScreenGaps(monitor);
         const windowGap = Util.getScaledGap('window-gap', monitor);
         const r = this.copy();
 
-        // Prefer individual gaps
-        if (Util.useIndividualGaps(monitor)) {
-            [['x', 'width', screenLeftGap, screenRightGap],
-                ['y', 'height', screenTopGap, screenBottomGap]]
-            .forEach(([pos, dim, posGap, dimGap]) => {
-                if (this[pos] === workArea[pos]) {
-                    r[pos] = this[pos] + posGap;
-                    r[dim] -= posGap;
-                } else {
-                    r[pos] = this[pos] + windowGap / 2;
-                    r[dim] -= windowGap / 2;
-                }
+        [['x', 'width', left, right], ['y', 'height', top, bottom]]
+        .forEach(([pos, dim, posGap, dimGap]) => {
+            if (this[pos] === workArea[pos]) {
+                r[pos] = this[pos] + posGap;
+                r[dim] -= posGap;
+            } else {
+                r[pos] = this[pos] + windowGap / 2;
+                r[dim] -= windowGap / 2;
+            }
 
-                if (this[pos] + this[dim] === workArea[pos] + workArea[dim])
-                    r[dim] -= dimGap;
-                else
-                    r[dim] -= windowGap / 2;
-            });
-        // Use the single screen gap
-        } else {
-            [['x', 'width'], ['y', 'height']].forEach(([pos, dim]) => {
-                if (this[pos] === workArea[pos]) {
-                    r[pos] = this[pos] + singleScreenGap;
-                    r[dim] -= singleScreenGap;
-                } else {
-                    r[pos] = this[pos] + windowGap / 2;
-                    r[dim] -= windowGap / 2;
-                }
-
-                if (this[pos] + this[dim] === workArea[pos] + workArea[dim])
-                    r[dim] -= singleScreenGap;
-                else
-                    r[dim] -= windowGap / 2;
-            });
-        }
+            if (this[pos] + this[dim] === workArea[pos] + workArea[dim])
+                r[dim] -= dimGap;
+            else
+                r[dim] -= windowGap / 2;
+        });
 
         return r;
     }

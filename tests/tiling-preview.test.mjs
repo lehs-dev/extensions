@@ -91,6 +91,7 @@ test('preview includes the same inner and outer gaps as the final tiled frame', 
 test('preview respects individual edge gaps and native versus gapped maximize', async () => {
     const {preview, window, settings, rect} = await setup({
         'single-screen-gap': 12,
+        'use-individual-screen-gaps': true, 'screen-gaps-panel-monitor-only': false,
         'screen-top-gap': 20, 'screen-bottom-gap': 16,
         'screen-left-gap': 10, 'screen-right-gap': 14,
     });
