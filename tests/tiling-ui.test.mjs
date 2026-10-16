@@ -44,15 +44,19 @@ async function setupPicker() {
     const tracked = new Set();
     layout.addChrome = actor => tracked.add(actor);
     layout.untrackChrome = actor => tracked.delete(actor);
-    const {LayoutPicker, LayoutPickerTileType: types} = await loadModule(`${root}/src/extension/layoutPicker.js`, {
+    const {
+        LayoutPicker,
+        LayoutPickerTileType: types,
+        LayoutPickerVisibility: visibilities,
+    } = await loadModule(`${root}/src/extension/layoutPicker.js`, {
         globals: {global},
         mocks: {
             '../dependencies/gi.js': {
-                Clutter: {Orientation: {HORIZONTAL: 0}},
+                Clutter: {Orientation: {HORIZONTAL: 0}, AnimationMode: {EASE_OUT_QUAD: 0}},
                 GLib: {build_filenamev: values => values.join('/')},
                 GObject: {registerClass: (meta, cls) => cls,
                     ParamSpec: {int() {}}, ParamFlags: {READWRITE: 1}},
-                St: {Bin: Widget, BoxLayout: Widget, Icon: Widget},
+                St: {Bin: Widget, BoxLayout: Widget, Icon: Widget, Side: {TOP: 0, RIGHT: 1, BOTTOM: 2, LEFT: 3}},
                 Gio: {FileIcon: {new: file => file}, File: {new_for_path: path => path},
                     ThemedIcon: class {constructor(params) { Object.assign(this, params); }}},
             },
@@ -69,7 +73,7 @@ async function setupPicker() {
         });
         return picker;
     };
-    return {types, createPicker, global, display, layout, tracked};
+    return {types, visibilities, createPicker, global, display, layout, tracked};
 }
 
 test('every thirds shortcut is registered, has a schema entry, and is editable in preferences', async () => {
@@ -148,3 +152,37 @@ test('center-third in dynamic focus mode tiles directly without an undefined foc
     assert.equal(selected.target, window);
     assert.equal(selected.rect, 'tile-center-third');
 });
+
+test('picker initializes completely hidden and never leaks visibility during early session startup', async () => {
+    const {visibilities, createPicker, display, layout} = await setupPicker();
+
+    // Test 1: Standard initialization must be completely hidden and non-reactive
+    const picker = createPicker();
+    assert.equal(picker.visible, false, 'Picker must be invisible upon init');
+    assert.equal(picker.opacity, 0, 'Picker must have opacity 0 upon init');
+    assert.equal(picker.reactive, false, 'Picker must be non-reactive upon init');
+    assert.equal(picker._visibility, visibilities.HIDDEN);
+
+    // Test 2: Early session startup / reboot condition where display has no focused monitor (-1)
+    display.get_current_monitor = () => -1;
+    picker._updateAllocation(-1);
+    assert.equal(picker.visible, false, 'Picker stays invisible when monitor is -1');
+    assert.equal(picker.opacity, 0, 'Picker opacity remains 0 when monitor is -1');
+    assert.equal(picker.reactive, false);
+
+    // Test 3: Showing and hiding lifecycle
+    picker._setVisibility(visibilities.PEAK);
+    assert.equal(picker.visible, true);
+    assert.equal(picker.opacity, 255);
+    assert.equal(picker.reactive, true);
+
+    picker._setVisibility(visibilities.HIDDEN);
+    assert.equal(picker.reactive, false, 'Reactive should be disabled immediately when starting to hide');
+    picker.complete('ease');
+    assert.equal(picker.visible, false);
+    assert.equal(picker.opacity, 0);
+    assert.equal(picker.reactive, false);
+
+    picker.destroy();
+});
+

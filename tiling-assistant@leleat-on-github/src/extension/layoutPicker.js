@@ -3,11 +3,11 @@ import { Main } from '../dependencies/shell.js';
 
 import { Settings } from '../common.js';
 
-const LayoutPickerVisibility = {
+export const LayoutPickerVisibility = Object.freeze({
     HIDDEN: 0,
     PEAK: 1,
     SHOWN: 2
-};
+});
 
 function iconPath(name) {
     return GLib.build_filenamev([
@@ -107,8 +107,16 @@ export const LayoutPicker = GObject.registerClass({
 }, class LayoutPicker extends St.Bin {
     _init() {
         super._init({
-            style_class: 'tiling-menu-container'
+            style_class: 'tiling-menu-container',
+            visible: false,
+            opacity: 0,
+            reactive: false
         });
+
+        this.visible = false;
+        this.opacity = 0;
+        this.reactive = false;
+        this.translation_y = 0;
 
         this._container = new St.BoxLayout({
             x_expand: true,
@@ -121,8 +129,6 @@ export const LayoutPicker = GObject.registerClass({
 
         this.set_child(this._container);
 
-        this._addChrome();
-
         this._icons = {};
 
         for (const [group, config] of Object.entries(ICONS)) {
@@ -133,6 +139,8 @@ export const LayoutPicker = GObject.registerClass({
 
             this._container.add_child(icon);
         }
+
+        this._addChrome();
 
         // e.g a dock is enabled and or disabled
         global.display.connectObject('workareas-changed', () => {
@@ -154,17 +162,19 @@ export const LayoutPicker = GObject.registerClass({
         // so it can hide itself without the move handler having to track it.
         global.display.connectObject('grab-op-end', () => this.onMoveFinished(), this);
 
-        // just in case extension is enabled and disable
-        this._updateAllocation(global.display.get_current_monitor());
-
         this.connectObject('notify::translation-y', () => {
-            this.set_clip(
+            this.set_clip?.(
                 0,
                 this.height - this.translation_y,
                 this.width,
                 this.height
             );
         }, this);
+
+        this.set_clip?.(0, this.height, this.width, this.height);
+
+        // just in case extension is enabled and disable
+        this._updateAllocation(global.display.get_current_monitor());
     }
 
     _setVisibility(visibility) {
@@ -173,14 +183,19 @@ export const LayoutPicker = GObject.registerClass({
 
         this._visibility = visibility;
 
-        this.opacity = 255;
-        this.reactive = true;
+        if (visibility === LayoutPickerVisibility.HIDDEN) {
+            this.reactive = false;
+        } else {
+            this.visible = true;
+            this.opacity = 255;
+            this.reactive = true;
+        }
 
-
+        const sideBottom = St.Side?.BOTTOM ?? St.Side?.Bottom ?? 2;
         let positions = [
             0,
-            this._container.get_theme_node().get_padding(St.Side.Bottom) +
-                this.get_theme_node().get_padding(St.Side.BOTTOM),
+            this._container.get_theme_node().get_padding(sideBottom) +
+                this.get_theme_node().get_padding(sideBottom),
             this.height
         ];
 
@@ -189,10 +204,13 @@ export const LayoutPicker = GObject.registerClass({
         this.ease({
             translation_y: positions[visibility],
             duration: 250,
-            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            mode: Clutter.AnimationMode?.EASE_OUT_QUAD ?? 0,
             onComplete: () => {
-                this.opacity = this._visibility !== LayoutPickerVisibility.HIDDEN ? 255 : 0;
-                this.reactive = this._visibility !== LayoutPickerVisibility.HIDDEN;
+                const isHidden = this._visibility === LayoutPickerVisibility.HIDDEN;
+                this.opacity = isHidden ? 0 : 255;
+                this.reactive = !isHidden;
+                if (isHidden)
+                    this.visible = false;
 
                 // once picker is fully shown onMoving might not be able to update tile type
                 // for situations like no cursor update after picker is fully shown.
@@ -390,25 +408,45 @@ export const LayoutPicker = GObject.registerClass({
 
     _getArea(monitorIndex) {
         const monitorArea = Main.layoutManager.monitors[monitorIndex];
+        if (!monitorArea)
+            return null;
 
         if (monitorArea.inFullscreen)
             return monitorArea;
 
-        const activeWs = global.workspace_manager.get_active_workspace();
-        return activeWs.get_work_area_for_monitor(monitorIndex);
+        const activeWs = global.workspace_manager?.get_active_workspace?.();
+        if (!activeWs)
+            return monitorArea;
+
+        return activeWs.get_work_area_for_monitor?.(monitorIndex) ?? monitorArea;
     }
 
     _updateAllocation(monitorIndex) {
+        if (monitorIndex === undefined || monitorIndex < 0 || !Main.layoutManager.monitors[monitorIndex])
+            monitorIndex = Main.layoutManager.primaryIndex ?? 0;
+
         // The current monitor can already be gone (e.g. when the last monitor
         // is removed during shutdown), so make sure it still exists before
         // asking Mutter for its work area.
-        if (!Main.layoutManager.monitors[monitorIndex])
+        if (!Main.layoutManager.monitors[monitorIndex]) {
+            if (this._visibility === LayoutPickerVisibility.HIDDEN) {
+                this.visible = false;
+                this.opacity = 0;
+                this.reactive = false;
+            }
             return;
+        }
 
         const area = this._getArea(monitorIndex);
 
-        if (area === null)
+        if (area === null) {
+            if (this._visibility === LayoutPickerVisibility.HIDDEN) {
+                this.visible = false;
+                this.opacity = 0;
+                this.reactive = false;
+            }
             return;
+        }
 
         const [, natWidth] = this.get_preferred_width(-1);
         const [, natHeight] = this.get_preferred_height(-1);
@@ -416,8 +454,17 @@ export const LayoutPicker = GObject.registerClass({
         const targetX = Math.round(area.x + (area.width - natWidth) / 2);
         const targetY = Math.round(area.y - natHeight);
 
-        if (targetX === this.x && targetY === this.y)
+        if (targetX === this.x && targetY === this.y) {
+            if (this._visibility === LayoutPickerVisibility.HIDDEN) {
+                this.remove_all_transitions();
+                this.translation_y = 0;
+                this.opacity = 0;
+                this.reactive = false;
+                this.visible = false;
+                this.set_clip?.(0, this.height, this.width, this.height);
+            }
             return;
+        }
 
         this.set_position(targetX, targetY);
 
@@ -427,6 +474,8 @@ export const LayoutPicker = GObject.registerClass({
         this.translation_y = 0;
         this.opacity = 0;
         this.reactive = false;
+        this.visible = false;
+        this.set_clip?.(0, this.height, this.width, this.height);
     }
 
     _addChrome() {
@@ -441,6 +490,7 @@ export const LayoutPicker = GObject.registerClass({
     }
 
     destroy() {
+        this.remove_all_transitions();
         this._untrackChrome();
 
         global.display.disconnectObject(this);

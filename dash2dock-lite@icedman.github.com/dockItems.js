@@ -31,6 +31,9 @@ class DockItemMenu extends PopupMenu.PopupMenu {
 
     super(sourceActor, 0.5, side);
 
+    this.actor.hide();
+    this.actor.opacity = 0;
+
     let { desktopApp } = params;
     if (!desktopApp) return;
 
@@ -59,8 +62,17 @@ class DockItemMenu extends PopupMenu.PopupMenu {
   _onActivate() {}
 
   popup() {
+    this.actor.opacity = 255;
     this.open(BoxPointer.PopupAnimation.FULL);
     this._menuManager.ignoreRelease();
+  }
+
+  close(animate) {
+    super.close(animate);
+    if (!this.isOpen) {
+      this.actor.hide();
+      this.actor.opacity = 0;
+    }
   }
 }
 
@@ -308,10 +320,14 @@ export const DockItemContainer = GObject.registerClass(
           desktopApp,
         });
         this._menu.item = this;
+        this._menu.actor.hide();
+        this._menu.actor.opacity = 0;
         this._menuManager = new PopupMenu.PopupMenuManager(this);
         this._menu._menuManager = this._menuManager;
         Main.uiGroup.add_child(this._menu.actor);
         this._menuManager.addMenu(this._menu);
+        this._menu.actor.hide();
+        this._menu.actor.opacity = 0;
         this._menu.close();
         dashIcon._menu = this._menu;
       }

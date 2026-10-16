@@ -623,3 +623,115 @@ test('Dock follows real light-style St notifications over interface preferences 
     assert.equal(stSettings.signals.size, 0);
     lightStyle.disable();
 });
+
+test('DockItemMenu initializes completely hidden with zero opacity and stays invisible on startup', async () => {
+    class MockPopupMenu {
+        constructor() {
+            this.actor = new Actor();
+            this.isOpen = false;
+        }
+        addAction(name, cb) {
+            return {name, cb, emit() {}};
+        }
+        open() {
+            this.isOpen = true;
+            this.actor.visible = true;
+        }
+        close() {
+            if (!this.isOpen) return;
+            this.isOpen = false;
+            this.actor.visible = false;
+        }
+    }
+    class MockPopupMenuManager {
+        addMenu() {}
+        ignoreRelease() {}
+    }
+    const uiGroup = new Actor();
+    const Main = {
+        uiGroup,
+        overview: {d2dl: {}},
+    };
+    const desktopAppMock = {
+        get_name: () => 'Trash',
+        get_icon: () => ({ get_names: () => ['user-trash'] }),
+        list_actions: () => ['trash'],
+        get_action_name: () => 'Empty Trash',
+        launch: () => {},
+        launch_action: () => {},
+    };
+
+    const dockItemsModule = await loadModule('dash2dock-lite@icedman.github.com/dockItems.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': Main,
+            'resource:///org/gnome/shell/ui/boxpointer.js': {PopupAnimation: {FULL: 1}},
+            'resource:///org/gnome/shell/ui/popupMenu.js': {
+                PopupMenu: MockPopupMenu,
+                PopupMenuManager: MockPopupMenuManager,
+            },
+            './utils.js': {trySpawnCommandLine: async () => {}},
+            'resource:///org/gnome/shell/ui/dash.js': {
+                Dash: class {},
+                DashIcon: class extends Actor {},
+                DashItemContainer: class extends Actor {
+                    constructor(...args) {
+                        super(...args);
+                        if (typeof this._init === 'function')
+                            this._init(...args);
+                    }
+                    _init(params) { Object.assign(this, params); }
+                    setChild(c) { this.child = c; }
+                    setLabelText() {}
+                },
+            },
+            './dock.js': {DockPosition: {TOP: 'top', BOTTOM: 'bottom'}},
+            'gi://Shell': {
+                default: {AppSystem: {get_default: () => ({get_installed: () => []})}},
+                AppSystem: {get_default: () => ({get_installed: () => []})},
+            },
+            'gi://Gio': {default: {}},
+            'gi://GObject': {
+                default: {
+                    registerClass: (meta, cls) => cls,
+                },
+                registerClass: (meta, cls) => cls,
+            },
+            'gi://Clutter': {
+                default: {
+                    get_default_text_direction: () => 0,
+                    TextDirection: {RTL: 1},
+                },
+                get_default_text_direction: () => 0,
+                TextDirection: {RTL: 1},
+            },
+            'gi://St': {
+                default: {
+                    Side: {TOP: 0, BOTTOM: 1, LEFT: 2, RIGHT: 3},
+                    Widget: class extends Actor {},
+                },
+                Side: {TOP: 0, BOTTOM: 1, LEFT: 2, RIGHT: 3},
+                Widget: class extends Actor {},
+            },
+        },
+    });
+
+    const item = new dockItemsModule.DockItemContainer({
+        appinfo_filename: 'trash-dash2dock-lite.desktop',
+        app: desktopAppMock,
+    });
+
+    // 1. Verify that menu actor was added to uiGroup but is completely hidden with 0 opacity
+    assert.equal(uiGroup.children.includes(item._menu.actor), true);
+    assert.equal(item._menu.actor.visible, false, 'Menu actor must be hidden on startup');
+    assert.equal(item._menu.actor.opacity, 0, 'Menu actor must have 0 opacity on startup');
+
+    // 2. Calling popup() should open and restore opacity
+    item._menu.popup();
+    assert.equal(item._menu.isOpen, true);
+    assert.equal(item._menu.actor.opacity, 255);
+
+    // 3. Calling close() should hide and reset opacity
+    item._menu.close();
+    assert.equal(item._menu.actor.visible, false);
+    assert.equal(item._menu.actor.opacity, 0);
+});

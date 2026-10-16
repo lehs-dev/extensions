@@ -23,7 +23,12 @@ export default class FocusHintManager {
         // On a fresh install no color is set for the hint yet. Use the bg color
         // from the tile preview style by using a temporary widget.
         if (Settings.getString('focus-hint-color') === '') {
-            const widget = new St.Widget({ style_class: 'tile-preview' });
+            const widget = new St.Widget({
+                style_class: 'tile-preview',
+                opacity: 0,
+                visible: false,
+                reactive: false
+            });
             global.stage.add_child(widget);
 
             const color = widget.get_theme_node().get_background_color();
