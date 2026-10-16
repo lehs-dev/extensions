@@ -15,104 +15,151 @@ export const Integrations = class {
   }
 
   hookCompiz(hook = true) {
-    let compiz = Main.extensionManager.lookup(
+    const compiz = Main.extensionManager.lookup(
       'compiz-alike-magic-lamp-effect@hermes83.github.com'
     );
-    if (compiz && compiz.stateObj) {
-      let stateObj = compiz.stateObj;
-      this._compiz = stateObj;
-      if (!hook) {
-        if (stateObj._getIcon) {
-          stateObj.getIcon = stateObj._getIcon;
-          stateObj._getIcon = null;
-        }
-      } else {
-        if (!stateObj._getIcon) stateObj._getIcon = stateObj.getIcon;
-        if (!this._compizGetIcon) this._compizGetIcon = this.compiz_getIcon.bind(this);
-        stateObj.getIcon = this.extension.lamp_app_animation
-          ? this._compizGetIcon
-          : stateObj._getIcon;
-      }
-    }
+    const stateObj = compiz?.stateObj;
+    if (!hook || this.extension.lamp_app_animation === false || this._compiz !== stateObj)
+      this.releaseCompiz();
+    if (!hook || !stateObj || this.extension.lamp_app_animation === false || this._compiz)
+      return;
+
+    this._compiz = stateObj;
+    const original = this._originalCompizGetIcon = stateObj.getIcon;
+    const hookState = this._compizHook = {
+      resolve: this.compiz_getIcon.bind(this),
+      original,
+      owner: stateObj,
+    };
+    // Keep fallback in the wrapper: the original can itself query this
+    // integration when Compiz is enabled after the dock.
+    this._compizGetIcon = (actor) => hookState.resolve?.(actor) ||
+      hookState.original.call(hookState.owner, actor);
+    stateObj.getIcon = this._compizGetIcon;
   }
 
   releaseCompiz() {
-    this.hookCompiz(false);
+    if (this._compiz && this._compiz.getIcon === this._compizGetIcon)
+      this._compiz.getIcon = this._originalCompizGetIcon;
+    // A later hook may still call our wrapper. Make it a passive fallback and
+    // drop the bound integration so it cannot retain a disabled dock.
+    if (this._compizHook)
+      this._compizHook.resolve = null;
+    this._compizHook = null;
     this._compiz = null;
+    this._originalCompizGetIcon = null;
+    this._compizGetIcon = null;
   }
 
   // Prefer an icon on the window's monitor, then on the primary dock.
   compiz_getIcon(actor) {
-    const metaWindow = actor.meta_window;
-    const windowMonitor = Main.layoutManager.monitors[metaWindow.get_monitor()];
-    const docks = (this.extension.docks || [])
-      .map((dock) => ({ dock, monitor: dock.getMonitor() }))
-      .filter(({ monitor }) => monitor);
+    if (this.extension?.lamp_app_animation === false)
+      return null;
+    const metaWindow = actor?.meta_window || actor?.get_meta_window?.() || actor;
+    const windowMonitorIndex = typeof metaWindow?.get_monitor === 'function'
+      ? metaWindow.get_monitor()
+      : null;
+    const windowMonitor = windowMonitorIndex !== null
+      ? Main.layoutManager.monitors[windowMonitorIndex]
+      : null;
+    const docks = (this.extension?.docks || [])
+      .map((dock) => ({ dock, monitor: dock.getMonitor?.() }))
+      .filter(({ monitor }) => monitor &&
+        [monitor.x, monitor.y, monitor.width, monitor.height].every(Number.isFinite) &&
+        monitor.width > 0 && monitor.height > 0);
     const priority = ({ monitor }) =>
       monitor.index === windowMonitor?.index ? 0 :
       monitor.index === Main.layoutManager.primaryIndex ? 1 : 2;
     docks.sort((a, b) => priority(a) - priority(b));
 
-    if (docks.length === 0) {
-      return this._compiz._getIcon.call(this._compiz, actor);
-    }
+    if (docks.length === 0)
+      return null;
 
-    const windowApp = Shell.WindowTracker.get_default().get_window_app(metaWindow);
-    const appId = windowApp?.get_id();
-    const pid = metaWindow.get_pid();
-    let target = docks[0];
-    let dashIcon = null;
+    const windowTracker = Shell?.WindowTracker?.get_default?.();
+    const windowApp = windowTracker?.get_window_app?.(metaWindow);
+    const appId = windowApp?.get_id?.();
+    const pid = typeof metaWindow?.get_pid === 'function' ? metaWindow.get_pid() : null;
     for (const candidate of docks) {
-      const match = (candidate.dock.dash?._box?.get_children() || []).find((element) => {
-        const app = element.child?._delegate?.app;
-        return app && (
-          app === windowApp ||
-          (appId && app.get_id() === appId) ||
-          (pid && app.get_pids()?.includes(pid))
-        );
+      const elements = [...new Set([
+        ...(candidate.dock._icons || []),
+        ...(candidate.dock.dash?._box?.get_children?.() || []),
+      ])];
+      const matches = elements.filter((element) => {
+        const app = element?.child?._delegate?.app || element?.child?.app ||
+                    element?._appwell?.app || element?.app;
+        if (app) {
+          if (windowApp && app === windowApp) return true;
+          if (appId && app.get_id?.() === appId) return true;
+          if (pid && app.get_pids?.()?.includes(pid)) return true;
+        }
+        if (appId && (element?.appId === appId || element?._icon?.icon_name === appId))
+          return true;
+        return false;
       });
-      if (match) {
-        target = candidate;
-        dashIcon = match;
-        break;
+      for (const match of matches) {
+        const geometry = this._compizIconGeometry(match, candidate.dock, candidate.monitor);
+        if (geometry)
+          return geometry;
       }
     }
 
-    const { dock, monitor } = target;
-    const iconActor = dashIcon?._renderer || dashIcon || dock.dash;
-    const position = iconActor?.get_transformed_position();
-    const size = iconActor?.get_transformed_size();
-    const halfIconSize = dock._preferredIconSize() * (monitor.geometry_scale || 1) / 2;
-    let x = position && Number.isFinite(position[0])
-      ? position[0] + (size?.[0] > 0 ? size[0] / 2 : halfIconSize)
-      : monitor.x + monitor.width / 2;
-    let y = position && Number.isFinite(position[1])
-      ? position[1] + (size?.[1] > 0 ? size[1] / 2 : halfIconSize)
-      : monitor.y + monitor.height / 2;
-    x = Math.max(monitor.x, Math.min(monitor.x + monitor.width, x));
-    y = Math.max(monitor.y, Math.min(monitor.y + monitor.height, y));
+    return null;
+  }
 
+  _compizIconGeometry(dashIcon, dock, monitor) {
+    const iconActor = dashIcon._renderer || dashIcon;
+    const rawPosition = iconActor.get_transformed_position?.();
+    if (!rawPosition || !Number.isFinite(rawPosition[0]) || !Number.isFinite(rawPosition[1]))
+      return null;
+
+    const preferredSize = typeof dock._preferredIconSize === 'function'
+      ? dock._preferredIconSize() * (monitor.geometry_scale || 1)
+      : (dock._iconSizeScaledDown || dock._iconSize || 48) * (monitor.geometry_scale || 1);
+    const iconSize = Number.isFinite(preferredSize) && preferredSize > 0 ? preferredSize : 48;
+
+    const rawSize = iconActor?.get_transformed_size?.();
+    const width = Math.min(monitor.width,
+      Number.isFinite(rawSize?.[0]) && rawSize[0] > 0 ? rawSize[0] : iconSize);
+    const height = Math.min(monitor.height,
+      Number.isFinite(rawSize?.[1]) && rawSize[1] > 0 ? rawSize[1] : iconSize);
+
+    let [x, y] = rawPosition;
+    const right = monitor.x + monitor.width;
+    const bottom = monitor.y + monitor.height;
+    // Autohide moves the real icon beyond its dock edge. Keep its app-specific
+    // coordinate along that edge; unrelated off-screen geometry is not a target.
     switch (dock._position) {
       case 'left':
-        x = monitor.x;
+        if (y + height <= monitor.y || y >= bottom || x >= right)
+          return null;
+        x = Math.max(monitor.x, x);
         break;
       case 'right':
-        x = monitor.x + monitor.width;
+        if (y + height <= monitor.y || y >= bottom || x + width <= monitor.x)
+          return null;
+        x = Math.min(right - width, x);
         break;
       case 'top':
-        y = monitor.y;
+        if (x + width <= monitor.x || x >= right || y >= bottom)
+          return null;
+        y = Math.max(monitor.y, y);
         break;
       case 'bottom':
       default:
-        y = monitor.y + monitor.height;
+        if (x + width <= monitor.x || x >= right || y + height <= monitor.y)
+          return null;
+        y = Math.min(bottom - height, y);
         break;
     }
+
+    x = Math.max(monitor.x, Math.min(monitor.x + monitor.width - width, x));
+    y = Math.max(monitor.y, Math.min(monitor.y + monitor.height - height, y));
 
     return {
       x,
       y,
-      width: 0,
-      height: 0,
+      width,
+      height,
       monitorIndex: monitor.index,
       dockPosition: dock._position || 'bottom',
     };

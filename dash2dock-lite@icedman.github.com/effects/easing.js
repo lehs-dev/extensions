@@ -176,17 +176,22 @@ function QuinticEaseInOut(p) {
 }
 
 // Sine
-function SineEaseIn(p) {
+export function SineEaseIn(p) {
   return Math.sin((p - 1) * MPI_2) + 1;
 }
 
-function SineEaseOut(p) {
+export function SineEaseOut(p) {
   return Math.sin(p * MPI_2);
 }
 
-function SineEaseInOut(p) {
+export function SineEaseInOut(p) {
+  if (p <= 0) return 0;
+  if (p >= 1) return 1;
+  if (p === 0.5) return 0.5;
   return 0.5 * (1 - Math.cos(p * MPI));
 }
+
+export const CosineBell = SineEaseInOut;
 
 // Circular
 function CircularEaseIn(p) {

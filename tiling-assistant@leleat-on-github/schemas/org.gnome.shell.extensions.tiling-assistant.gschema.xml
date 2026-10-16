@@ -37,7 +37,7 @@
 			<default>0</default>
 		</key>
 		<key name="window-gap" type="i">
-			<default>0</default>
+			<default>12</default>
 		</key>
 		<key name="single-screen-gap" type="i">
 			<default>0</default>
@@ -136,6 +136,36 @@
 			<default>[]</default>
 		</key>
 		<key name="tile-bottomright-quarter-ignore-ta" type="as">
+			<default>[]</default>
+		</key>
+		<key name="tile-left-third" type="as">
+			<default>[]</default>
+		</key>
+		<key name="tile-right-third" type="as">
+			<default>[]</default>
+		</key>
+		<key name="tile-center-third" type="as">
+			<default>[]</default>
+		</key>
+		<key name="tile-left-two-thirds" type="as">
+			<default>[]</default>
+		</key>
+		<key name="tile-right-two-thirds" type="as">
+			<default>[]</default>
+		</key>
+		<key name="tile-left-third-ignore-ta" type="as">
+			<default>[]</default>
+		</key>
+		<key name="tile-right-third-ignore-ta" type="as">
+			<default>[]</default>
+		</key>
+		<key name="tile-center-third-ignore-ta" type="as">
+			<default>[]</default>
+		</key>
+		<key name="tile-left-two-thirds-ignore-ta" type="as">
+			<default>[]</default>
+		</key>
+		<key name="tile-right-two-thirds-ignore-ta" type="as">
 			<default>[]</default>
 		</key>
 		<!-- Layouts Page -->

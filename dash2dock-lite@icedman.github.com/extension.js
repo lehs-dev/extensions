@@ -31,6 +31,8 @@ import { tempPath, trySpawnCommandLine } from './utils.js';
 import { loadFile } from './utils.js';
 
 import { Timer } from './timer.js';
+import { FrameTimer } from './frameTimer.js';
+import { dockColor } from './appearance.js';
 import { Style } from './style.js';
 import { Dock } from './dock.js';
 import { Services } from './services.js';
@@ -182,9 +184,8 @@ export default class Dash2DockLiteExt extends Extension {
     this._timer = new Timer('loop timer');
     this._timer.initialize(3500);
 
-    // for animation runs
-    // resolution (15) will be modified by animation-fps
-    this._hiTimer = new Timer('hi-res timer');
+    // Animation subscribers run on the compositor's frame clock.
+    this._hiTimer = new FrameTimer('hi-res timer', global.stage);
     this._hiTimer.initialize(15);
 
     // for deferred or debounced runs
@@ -460,7 +461,8 @@ export default class Dash2DockLiteExt extends Extension {
       this._interfaceSettings.connectObject(
         'changed::color-scheme',
         () => {
-          // apply light/dark themeing
+          this._updateStyle();
+          this.animate();
         },
         this
       );
@@ -527,6 +529,7 @@ export default class Dash2DockLiteExt extends Extension {
         case 'running-indicator-size':
         case 'running-indicator-color':
         case 'running-indicator-style': {
+          this._updateStyle();
           this.animate();
           break;
         }
@@ -714,6 +717,17 @@ export default class Dash2DockLiteExt extends Extension {
       this
     );
 
+    // light-style overrides the session mode and explicitly notifies St;
+    // it does not change org.gnome.desktop.interface's color-scheme key.
+    St.Settings.get().connectObject(
+      'notify::color-scheme',
+      () => {
+        this._updateStyle();
+        this.animate();
+      },
+      this
+    );
+
     Main.extensionManager.connectObject(
       'extensions-loaded',
       (manager) => {
@@ -818,6 +832,7 @@ export default class Dash2DockLiteExt extends Extension {
     Main.overview.disconnectObject(this);
     Main.layoutManager.disconnectObject(this);
     Main.sessionMode.disconnectObject(this);
+    St.Settings.get().disconnectObject(this);
     global.display.disconnectObject(this);
     global.stage.disconnectObject(this);
     St.TextureCache.get_default().disconnectObject(this);
@@ -897,6 +912,7 @@ export default class Dash2DockLiteExt extends Extension {
   }
 
   _onSessionUpdated() {
+    this._updateStyle();
     this.animate();
   }
 
@@ -931,6 +947,11 @@ export default class Dash2DockLiteExt extends Extension {
   _updateBlurredBackground() {}
 
   _getPreferredColorScheme() {
+    const sessionScheme = Main.sessionMode.colorScheme;
+    if (sessionScheme === 'prefer-light')
+      return 'light';
+    if (sessionScheme === 'prefer-dark')
+      return 'dark';
     let scheme = 'light';
 
     if (this._interfaceSettings) {
@@ -1008,6 +1029,11 @@ export default class Dash2DockLiteExt extends Extension {
 
   _updateStyle(disable) {
     let styles = [];
+    const scheme = this._getPreferredColorScheme();
+    this._dockColors = Object.fromEntries([
+      'background-color', 'border-color', 'separator-color', 'running-indicator-color',
+    ].map(name => [name, dockColor(name, this[name.replace(/-/g, '_')], scheme,
+      Boolean(this._settings?.get_user_value(name)))]));
 
     let rads = [0, 8, 16, 20, 24, 28, 32, 36, 40, 42];
 
@@ -1030,8 +1056,9 @@ export default class Dash2DockLiteExt extends Extension {
       }
       ss.push(`border-radius: ${r}px;`);
       this.computed_border_radius = r;
-      let rgba = this._style.rgba(this.background_color);
+      let rgba = this._style.rgba(this._dockColors['background-color']);
       ss.push(`background: rgba(${rgba});`);
+      ss.push('box-shadow: 0 3px 12px 0 rgba(0, 0, 0, 0.22);');
       styles.push(`#d2daBackground { ${ss.join(' ')}}`);
     }
 
@@ -1123,7 +1150,7 @@ export default class Dash2DockLiteExt extends Extension {
     }
 
     if (this.separator_thickness) {
-      let rgba = this._style.rgba(this.separator_color);
+      let rgba = this._style.rgba(this._dockColors['separator-color']);
       styles.push(`.dash-separator { background-color: rgba(${rgba}); }`);
     }
 
@@ -1141,7 +1168,7 @@ export default class Dash2DockLiteExt extends Extension {
 
     let border_style = '';
     if (this.border_thickness /* && !this._disable_borders */) {
-      let rgba = this._style.rgba(this.border_color);
+      let rgba = this._style.rgba(this._dockColors['border-color']);
       border_style = `border: ${this.border_thickness}px solid rgba(${rgba}) !important;`;
     }
 

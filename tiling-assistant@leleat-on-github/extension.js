@@ -184,7 +184,7 @@ export default class TilingAssistantExtension extends Extension {
         this._keybindingHandler = new KeybindingHandler();
         this._layoutsManager = new LayoutsManager();
         this._focusHintManager = new FocusHintManager();
-        this._roundedCornersManager = new RoundedCornersManager();
+        this._roundedCornersManager = new RoundedCornersManager(this._twm);
         this._altTabOverride = new AltTabOverride();
 
         // Disable native tiling.

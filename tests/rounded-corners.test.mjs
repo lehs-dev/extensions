@@ -92,7 +92,19 @@ async function setup(modern = true) {
             },
         });
     const effectFor = window => window.actor?.effects.get('tiling-assistant-rounded-corners');
+    const tileListeners = new Set();
+    const tilingManager = {addTileStateListener(callback) {
+        tileListeners.add(callback);
+        return () => tileListeners.delete(callback);
+    }};
+    const setTiled = (window, rect) => {
+        window.tiledRect = rect;
+        window.isTiled = Boolean(rect);
+        for (const callback of tileListeners)
+            callback(window);
+    };
     return {Manager, display, wm, windows, createWindow, WindowActor, effectFor,
+        tilingManager, tileListeners, setTiled,
         setScale: value => { scale = value; },
         setMonitorScale: value => { monitorScale = value; }, getUploads: () => uploads};
 }
@@ -181,16 +193,21 @@ for (const modern of [true, false]) {
         assert.deepEqual(Object.fromEntries(effect.values), {tex: 0,
             buffer_width: 1000, buffer_height: 840,
             frame_left: 20, frame_top: 20, frame_right: 980, frame_bottom: 820,
-            corner_radius: 15, pixel_size: 1});
+            corner_radius: 15, pixel_size: 1, preserve_shadow: 0});
         setScale(2);
         window.actor.textureWidth = 1250; // A 1.25x render target.
         effect.vfunc_paint_target();
-        assert.equal(effect.values.get('corner_radius'), 30);
+        assert.equal(effect.values.get('corner_radius'), 15, 'radius stays in logical frame coordinates');
         assert.equal(effect.values.get('pixel_size'), 0.8);
         setMonitorScale(1); // The Shell theme can retain the other monitor's 2x scale.
         window.emit('position-changed');
         effect.vfunc_paint_target();
-        assert.equal(effect.values.get('corner_radius'), 15, 'use the window monitor scale');
+        assert.equal(effect.values.get('corner_radius'), 15, 'moving between mixed-scale monitors retains the logical radius');
+        window.actor.textureWidth = 2000;
+        effect.vfunc_paint_target();
+        assert.equal(effect.values.get('pixel_size'), 0.5, 'AA tracks a 2x render target');
+        assert.equal(effect.values.get('corner_radius') / effect.values.get('pixel_size'), 30,
+            '15 logical pixels cover 30 physical pixels at 2x, rather than 60');
         window.frame.width = 10;
         window.emit('size-changed');
         assert.equal(effect.repaint, true);
@@ -210,6 +227,34 @@ for (const modern of [true, false]) {
             assert.equal(effect.vfunc_get_static_snippet, undefined);
         }
         manager.destroy();
+    });
+
+    test(`tiling and gapped maximize apply 15px corners while preserving client shadows on ${backend}`, async () => {
+        const {Manager, createWindow, effectFor, tilingManager, tileListeners, setTiled} = await setup(modern);
+        const window = createWindow();
+        const manager = new Manager(tilingManager);
+        assert.equal(effectFor(window), undefined);
+        setTiled(window, {...window.frame});
+        const effect = effectFor(window);
+        assert.ok(effect, 'extension state change applies the effect without a geometry signal');
+        effect.vfunc_paint_target();
+        assert.equal(effect.values.get('corner_radius'), 15);
+        assert.equal(effect.values.get('preserve_shadow'), 1);
+        assert.equal(window.maximizedHorizontally, false);
+        window.isTiled = false; // A maximize-with-gap uses tiledRect but no native maximize flags.
+        window.emit('size-changed');
+        assert.equal(effectFor(window), effect);
+        const source = modern ? effect.vfunc_get_static_snippet().body : effect.source;
+        assert.match(source, /preserve_shadow > 0\.5/);
+        assert.match(source, /position\.x < frame_left/);
+        assert.match(source, /position\.x > frame_right/);
+        setTiled(window, null);
+        assert.equal(effectFor(window), undefined);
+        assert.equal(effect.window, null);
+        setTiled(window, {...window.frame});
+        manager.destroy();
+        assert.equal(window.actor.effects.size, 0);
+        assert.equal(tileListeners.size, 0);
     });
 }
 

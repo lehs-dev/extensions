@@ -212,7 +212,7 @@ export default class Prefs extends ExtensionPreferences {
         const shortcuts = Shortcuts.getAllKeys();
         shortcuts.forEach(key => {
             const shortcut = builder.get_object(key.replaceAll('-', '_'));
-            shortcut.initialize(key, settings);
+            shortcut?.initialize(key, settings);
         });
     }
 

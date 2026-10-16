@@ -16,26 +16,16 @@ export class PopupPositioner {
     // Queue the popup to be sized, positioned and shown. The onShown callback fires
     // after everything settles so the caller can grab focus only once the popup is actually on screen.
     showCentered(onShown) {
+        this.stop();
         const monitor = this.getTargetMonitor();
-        // The popup grows downward from here as results come in. We do not recenter
-        // because that makes the popup visibly drift upward as it grows.
-
-        // Width fixed at 520px, part of the design philosophy of one good size with
-        // no settings. Capped at 85 percent of monitor width so it never spills over.
-        const popupWidth = Math.min(520, Math.floor(monitor.width * 0.85));
+        const scale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
+        const popupWidth = Math.min(640 * scale, Math.floor(monitor.width * 0.85));
         this._popup.set_width(popupWidth);
-        this._popup.queue_relayout();
-        // All sizes are logical pixels. GNOME handles HiDPI scaling automatically,
-        // which is why we never do any scaling ourselves.
-
-        // Showing the popup needs a layout pass first or get_preferred_height returns
-        // a stale value from before CSS applied. We defer through idle so the layout pass has a chance to run first.
-        this._idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-            this._idleId = 0;
-            this._center(popupWidth, monitor);
-            this._animateOpen(onShown);
-            return GLib.SOURCE_REMOVE;
-        });
+        // CSS lengths use the theme scale; monitor geometry is already in stage units.
+        const maxHeight = Math.min(540, Math.floor(monitor.height * 0.7 / scale));
+        this._popup._content.set_style(`max-height: ${maxHeight}px;`);
+        this._center(popupWidth, monitor);
+        this._animateOpen(onShown);
     }
 
     // Opens on the monitor where the cursor currently sits. Falls back to the
@@ -52,7 +42,9 @@ export class PopupPositioner {
     }
 
     _center(popupWidth, monitor) {
-        const [, naturalHeight] = this._popup.get_preferred_height(popupWidth);
+        let [, naturalHeight] = this._popup.get_preferred_height(popupWidth);
+        if (!naturalHeight || naturalHeight <= 0)
+            naturalHeight = 65;
         // Place the popup 25 percent from the top of the monitor. Clamp so the
         // top edge never goes off-screen, which matters when results expand the
         // popup to its maximum height.
@@ -63,22 +55,23 @@ export class PopupPositioner {
             Math.floor(monitor.x + (monitor.width - popupWidth) / 2),
             Math.max(topY, minTopY),
         );
+        this._popup.set_pivot_point(0.5, 0);
     }
 
     _animateOpen(onShown) {
+        // Cancel a close even if animations were disabled since it started.
+        this._popup.remove_transition('opacity');
+        this._popup.remove_transition('scale-x');
+        this._popup.remove_transition('scale-y');
         const stSettings = St.Settings.get();
         if (stSettings && !stSettings.enable_animations) {
             this._popup.opacity = 255;
             this._popup.scale_x = 1.0;
             this._popup.scale_y = 1.0;
             this._popup.show();
-            onShown();
+            onShown?.();
             return;
         }
-        // Cancel any in-flight close animation before starting a new one.
-        this._popup.remove_transition('opacity');
-        this._popup.remove_transition('scale-x');
-        this._popup.remove_transition('scale-y');
         this._popup.opacity = 0;
         this._popup.scale_x = 0.96;
         this._popup.scale_y = 0.96;
@@ -91,7 +84,7 @@ export class PopupPositioner {
             scale_y: 1.0,
             duration: 180,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            onComplete: onShown,
+            onComplete: () => onShown?.(),
         });
     }
 

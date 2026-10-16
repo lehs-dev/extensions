@@ -1284,8 +1284,8 @@ export let Dock = GObject.registerClass(
       if (this.extension._hiTimer) {
         if (!this._animationSeq) {
           this._animationSeq = this.extension._hiTimer.runLoop(
-            (s) => {
-              this.animate(s._delay);
+            (s, dt) => {
+              this.animate(dt);
             },
             this.animationInterval,
             'animationTimer'
@@ -1343,6 +1343,7 @@ export let Dock = GObject.registerClass(
       this._animationSeq = null;
       this.extension._hiTimer.cancel(this.autohider._animationSeq);
       this.autohider._animationSeq = null;
+      this.autohider._cancelReveal();
       this.extension._loTimer.cancel(this.debounceEndSeq);
       this.extension._loTimer.cancel(this._debounceBeginAnimateSeq);
       this.debounceEndSeq = null;

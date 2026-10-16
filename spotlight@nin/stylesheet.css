@@ -1,131 +1,185 @@
-/* Spotlight stylesheet */
-/* Reuses the GNOME Overview search widgets, styled to fit our popup. */
-/* Dark mode: background rgba(28,28,30,0.85), text #f5f5f7, selection rgba(255,255,255,0.12) */
-/* Light mode: background rgba(255,255,255,0.88), text #1d1d1f, selection rgba(0,122,255,0.12) */
-/* Global reset, kill inherited focus outlines or borders from parent theme. */
-.spotlight-container,
-.spotlight-container * {
-  border: none;
-  outline: none;
-  box-shadow: none;
-  -st-icon-style: requested;
+/* Spotlight reuses the Overview search widgets inside a compact floating panel. */
+.spotlight-backdrop {
+  background-color: transparent;
 }
-/* Container, single unified window, dark default. */
+
 .spotlight-container {
-  background-color: rgba(28, 28, 30, 0.85);
-  border-radius: 36px;
-  padding: 10px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  background-color: rgba(36, 36, 39, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  padding: 0;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
   color: #f5f5f7;
   max-height: 540px;
 }
-/* Light theme overrides applied when the container carries the theme-light class. */
+
 .spotlight-container.theme-light {
-  background-color: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  background-color: rgba(250, 250, 252, 0.98);
+  border-color: rgba(0, 0, 0, 0.14);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
   color: #1d1d1f;
 }
-/* Search entry, make it blend into unified window, dark default. */
-.spotlight-container > StEntry,
-.spotlight-container > StEntry:focus {
+
+/* Reset the Overview entry's fixed width and external margins. */
+.spotlight-container .spotlight-entry-stolen,
+.spotlight-container .spotlight-entry-stolen:focus {
+  width: auto;
+  min-width: 0;
+  margin: 0;
   background-color: transparent;
+  background-image: none;
   color: #f5f5f7;
   border: none;
-  border-radius: 14px;
-  padding: 12px 16px;
-  font-size: 18px;
+  border-radius: 18px;
+  box-shadow: none;
+  padding: 16px 20px;
+  font-size: 20px;
   font-weight: 400;
-  caret-color: #ffffff;
+  caret-color: #f5f5f7;
   selection-background-color: #0a84ff;
+  selected-color: #ffffff;
 }
-.spotlight-container.theme-light > StEntry,
-.spotlight-container.theme-light > StEntry:focus {
+
+.spotlight-container.theme-light .spotlight-entry-stolen,
+.spotlight-container.theme-light .spotlight-entry-stolen:focus {
   color: #1d1d1f;
-  caret-color: #000000;
-  selection-background-color: rgba(0, 122, 255, 0.2);
+  caret-color: #1d1d1f;
 }
-.spotlight-container > StEntry StLabel.hint-text {
-  color: rgba(245, 245, 247, 0.35);
+
+.spotlight-container .spotlight-entry-stolen .search-entry-icon {
+  icon-size: 20px;
+  margin: 0;
+  padding: 0 8px 0 0;
+  color: #b7b7bd;
 }
-.spotlight-container.theme-light > StEntry StLabel.hint-text {
-  color: rgba(29, 29, 31, 0.35);
+
+.spotlight-container.theme-light .spotlight-entry-stolen .search-entry-icon {
+  color: #6e6e73;
 }
-/* Search results area, transparent so it blends with container. */
+
+.spotlight-container .spotlight-entry-stolen .hint-text {
+  color: #a1a1a8;
+}
+
+.spotlight-container.theme-light .spotlight-entry-stolen .hint-text {
+  color: #76767d;
+}
+
+.spotlight-container #searchResults {
+  margin: 0 8px 8px;
+}
+
+.spotlight-container #searchResultsContent {
+  spacing: 8px;
+}
+
 .spotlight-container .search-section-content {
-  background-color: transparent !important;
-  border-radius: 12px;
-  padding: 2px;
-}
-/* Individual result rows, dark by default. */
-.spotlight-container .list-search-result,
-.spotlight-container .overview-tile,
-.spotlight-container .search-provider-icon,
-.spotlight-container .list-search-provider-content {
   background-color: transparent;
-  color: #f5f5f7;
-  border-radius: 12px;
+  border: none;
+  border-radius: 10px;
+  margin: 0;
+  padding: 4px;
 }
-.spotlight-container.theme-light .list-search-result,
-.spotlight-container.theme-light .overview-tile,
-.spotlight-container.theme-light .search-provider-icon,
-.spotlight-container.theme-light .list-search-provider-content {
-  color: #1d1d1f;
+
+.spotlight-container .search-section-separator {
+  height: 4px;
+  background-color: transparent;
 }
-/* Selected and hover state, dark by default. */
-.spotlight-container .list-search-result:selected,
-.spotlight-container .overview-tile:selected,
-.spotlight-container .list-search-result:hover,
-.spotlight-container .overview-tile:hover,
-.spotlight-container .search-provider-icon:hover,
-.spotlight-container .list-search-provider-content:hover,
-.spotlight-container .list-search-result:focus,
-.spotlight-container .overview-tile:focus,
-.spotlight-container .search-provider-icon:focus,
-.spotlight-container .list-search-provider-content:focus {
-  background-color: rgba(255, 255, 255, 0.12) !important;
-  color: #ffffff;
+
+.spotlight-container .grid-search-results {
+  spacing: 12px;
 }
-.spotlight-container.theme-light .list-search-result:selected,
-.spotlight-container.theme-light .overview-tile:selected,
-.spotlight-container.theme-light .list-search-result:hover,
-.spotlight-container.theme-light .overview-tile:hover,
-.spotlight-container.theme-light .search-provider-icon:hover,
-.spotlight-container.theme-light .list-search-provider-content:hover,
-.spotlight-container.theme-light .list-search-result:focus,
-.spotlight-container.theme-light .overview-tile:focus,
-.spotlight-container.theme-light .search-provider-icon:focus,
-.spotlight-container.theme-light .list-search-provider-content:focus {
-  background-color: rgba(0, 122, 255, 0.12) !important;
-  color: #000000;
-}
-/* Result text colors, dark by default. */
+
 .spotlight-container .list-search-result,
-.spotlight-container .list-search-result StLabel {
+.spotlight-container .grid-search-result,
+.spotlight-container .app-well-app,
+.spotlight-container .overview-tile,
+.spotlight-container .search-provider-icon {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
   color: #f5f5f7;
+  border-radius: 10px;
+  padding: 10px 12px;
 }
+
 .spotlight-container.theme-light .list-search-result,
-.spotlight-container.theme-light .list-search-result StLabel {
+.spotlight-container.theme-light .grid-search-result,
+.spotlight-container.theme-light .app-well-app,
+.spotlight-container.theme-light .overview-tile,
+.spotlight-container.theme-light .search-provider-icon {
   color: #1d1d1f;
 }
-.spotlight-container .list-search-result:selected StLabel,
-.spotlight-container .list-search-result:hover StLabel,
-.spotlight-container .list-search-result:focus StLabel {
+
+.spotlight-container .list-search-result:hover,
+.spotlight-container .grid-search-result:hover,
+.spotlight-container .app-well-app:hover,
+.spotlight-container .overview-tile:hover,
+.spotlight-container .search-provider-icon:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.spotlight-container.theme-light .list-search-result:hover,
+.spotlight-container.theme-light .grid-search-result:hover,
+.spotlight-container.theme-light .app-well-app:hover,
+.spotlight-container.theme-light .overview-tile:hover,
+.spotlight-container.theme-light .search-provider-icon:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.spotlight-container .list-search-result:selected,
+.spotlight-container .grid-search-result:selected,
+.spotlight-container .app-well-app:selected,
+.spotlight-container .overview-tile:selected,
+.spotlight-container .list-search-result:focus,
+.spotlight-container .grid-search-result:focus,
+.spotlight-container .app-well-app:focus,
+.spotlight-container .overview-tile:focus,
+.spotlight-container .search-provider-icon:focus {
+  background-color: #0a64cc;
   color: #ffffff;
 }
-.spotlight-container.theme-light .list-search-result:selected StLabel,
-.spotlight-container.theme-light .list-search-result:hover StLabel,
-.spotlight-container.theme-light .list-search-result:focus StLabel {
-  color: #000000;
+
+.spotlight-container.theme-light .list-search-result:selected,
+.spotlight-container.theme-light .grid-search-result:selected,
+.spotlight-container.theme-light .app-well-app:selected,
+.spotlight-container.theme-light .overview-tile:selected,
+.spotlight-container.theme-light .list-search-result:focus,
+.spotlight-container.theme-light .grid-search-result:focus,
+.spotlight-container.theme-light .app-well-app:focus,
+.spotlight-container.theme-light .overview-tile:focus,
+.spotlight-container.theme-light .search-provider-icon:focus {
+  background-color: #0066d6;
+  color: #ffffff;
 }
-/* Provider section headers, dark by default. */
-.spotlight-container .search-provider-icon {
-  color: #98989d;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  padding: 6px 12px 2px 12px;
+
+.spotlight-container .list-search-result-description {
+  color: #a1a1a8;
 }
-.spotlight-container.theme-light .search-provider-icon {
+
+.spotlight-container.theme-light .list-search-result-description {
+  color: #6e6e73;
+}
+
+.spotlight-container .list-search-result:focus .list-search-result-description,
+.spotlight-container .list-search-result:selected .list-search-result-description {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.spotlight-container .search-provider-icon .list-search-provider-content .list-search-provider-details {
+  color: inherit;
+  font-size: 11px;
+}
+
+.spotlight-container .search-statusbox {
+  padding: 16px;
+}
+
+.spotlight-container .search-statustext {
+  font-size: 14px;
+  color: #a1a1a8;
+}
+
+.spotlight-container.theme-light .search-statustext {
   color: #6e6e73;
 }

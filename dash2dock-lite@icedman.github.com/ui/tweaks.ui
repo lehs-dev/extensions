@@ -383,8 +383,9 @@
   </object>
   <object class="GtkStringList" id="animation-rise-curve-model">
     <items>
-      <item translatable="yes">Quadratic Ease Out</item>
+      <item translatable="yes">Cosine Bell (macOS Sequoia)</item>
       <item translatable="yes">Cubic Ease Out</item>
+      <item translatable="yes">Quadratic Ease Out</item>
     </items>
   </object>
 </interface>

@@ -1,7 +1,7 @@
 // Spotlight: global signal connections
 // SPDX-License-Identifier: GPL-3.0-or-later
 import Shell from 'gi://Shell';
-import {applyTheme} from './theme.js';
+import St from 'gi://St';
 
 // Connects global signals that live for the entire popup lifetime, across
 // open and close cycles. Uses plain connect with explicit IDs so defense
@@ -17,7 +17,22 @@ export function connectGlobalSignals(popup, settings, ifaceSettings) {
         'changed::color-scheme', () => {
             if (popup._visible &&
                 settings.get_string('theme-preference') === 'default')
-                applyTheme(popup._content, settings, ifaceSettings);
+                popup._syncTheme();
+        },
+        popup,
+    );
+    popup._stSettings = St.Settings.get();
+    popup._stSettings.connectObject(
+        'notify::color-scheme', () => {
+            if (popup._visible && settings.get_string('theme-preference') === 'default')
+                popup._syncTheme();
+        },
+        popup,
+    );
+    settings.connectObject(
+        'changed::theme-preference', () => {
+            if (popup._visible)
+                popup._syncTheme();
         },
         popup,
     );
@@ -35,4 +50,7 @@ export function disconnectGlobalSignals(popup) {
         popup._appStateChangedId = 0;
     }
     popup._ifaceSettings.disconnectObject(popup);
+    popup._stSettings.disconnectObject(popup);
+    popup._stSettings = null;
+    popup._settings.disconnectObject(popup);
 }

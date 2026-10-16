@@ -121,13 +121,16 @@ export const DockItemDotsOverlay = GObject.registerClass(
 
       let options = extension.running_indicator_style_options;
       let running_indicator_style = options[extension.running_indicator_style];
-      let running_indicator_color = extension.running_indicator_color;
+      let running_indicator_color = extension._dockColors?.['running-indicator-color'] ||
+        extension.running_indicator_color;
 
       renderer.set_state({
         count: appCount,
         color: running_indicator_color || [1, 1, 1, 1],
         style: running_indicator_style || 'default',
         size: extension.running_indicator_size || 0,
+        // Canvas space diameter for a 4 logical pixel default indicator.
+        diameter: 4 * scale / canvasScale,
         rotate: vertical
           ? position == DockPosition.RIGHT
             ? -90

@@ -3,7 +3,6 @@
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
-import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import {PopupBackdrop} from '../components/backdrop.js';
@@ -39,7 +38,7 @@ class SpotlightPopup extends St.Widget {
         this._content = new St.BoxLayout({
             style_class: 'spotlight-container',
             orientation: Clutter.Orientation.VERTICAL,
-            width: 520,
+            x_expand: true,
         });
         this.add_child(this._content);
 
@@ -54,21 +53,22 @@ class SpotlightPopup extends St.Widget {
     }
 
     returnOverviewSearch() {
+        this._syncClose();
         this._stealer.restore();
         this._thumbnailEnhancer.revert();
     }
 
     open() {
-        if (this._visible || this._opening || this._openIdleId !== 0)
+        cancelIdle(this, '_closeIdleId');
+        if (this._visible) {
+            this._stealer.entry?.grab_key_focus();
             return;
+        }
         if (!this._stealer.entry || !this._stealer.search)
             return;
-        this._opening = true;
-        scheduleIdle(this, '_openIdleId', () => this._doOpen());
-    }
 
-    _doOpen() {
         this._opening = false;
+
         const entry = this._stealer.entry;
         const search = this._stealer.search;
 
@@ -81,26 +81,33 @@ class SpotlightPopup extends St.Widget {
             search.get_parent().remove_child(search);
         this._content.add_child(search);
 
-        applyTheme(this._content, this._settings, this._ifaceSettings);
+        // Measure the empty entry before the first allocation, including on reopen.
+        search._text.set_text('');
+        search.visible = false;
 
         const monitor = this._positioner.getTargetMonitor();
         this._backdrop = new PopupBackdrop(() => this.close(), monitor);
+        this._syncTheme();
         this._backdrop.show();
 
         if (this.get_parent())
             Main.layoutManager.removeChrome(this);
         Main.layoutManager.addChrome(this);
 
-        this._positioner.showCentered(() => entry.grab_key_focus());
-
-        search._text.set_text('');
-        search.visible = false;
+        this._positioner.showCentered();
 
         if (!this._textChangedEventId)
             this._textChangedEventId = trackTextVisibility(search);
 
         installCloseDefense(this, search, entry);
         this._visible = true;
+
+        // Focus immediately so input can arrive during the opening animation.
+        entry.grab_key_focus();
+    }
+
+    _syncTheme() {
+        applyTheme(this._content, this._settings, this._ifaceSettings);
     }
 
     close() {
@@ -111,7 +118,14 @@ class SpotlightPopup extends St.Widget {
         scheduleIdle(this, '_closeIdleId', () => this._doClose());
     }
 
-    _doClose() {
+    toggle() {
+        if (this._visible && this._closeIdleId === 0)
+            this.close();
+        else
+            this.open();
+    }
+
+    _doClose(animate = true) {
         this._positioner.stop();
         if (this._backdrop) {
             this._backdrop.destroy();
@@ -125,23 +139,24 @@ class SpotlightPopup extends St.Widget {
             this._textChangedEventId = 0;
         }
 
-        const entry = this._stealer.entry;
-        if (entry && entry.get_parent()) {
-            entry.visible = false;
-            entry.get_parent().remove_child(entry);
-        }
-
-        const search = this._stealer.search;
-        if (search && search.get_parent()) {
-            search.hide();
-            search.get_parent().remove_child(search);
-        }
-
         this._visible = false;
-        this._animateClose(() => {
+        const removeChrome = () => {
+            // Keep the content intact until the fade finishes. Unmapping the
+            // native controller resets its text and must happen after activation.
+            this.hide();
+            for (const actor of [this._stealer.entry, this._stealer.search]) {
+                if (actor?.get_parent() === this._content)
+                    this._content.remove_child(actor);
+            }
             if (this.get_parent())
                 Main.layoutManager.removeChrome(this);
-        });
+        };
+        if (animate) {
+            this._animateClose(removeChrome);
+        } else {
+            this.hide();
+            removeChrome();
+        }
     }
 
     _syncClose() {
@@ -149,10 +164,19 @@ class SpotlightPopup extends St.Widget {
         cancelIdle(this, '_closeIdleId');
         this._opening = false;
         if (this._visible)
-            this._doClose();
+            this._doClose(false);
+        this._positioner.stop();
+        this.remove_all_transitions();
+        this.hide();
+        if (this.get_parent())
+            Main.layoutManager.removeChrome(this);
     }
 
     _animateClose(onComplete) {
+        // An accessibility setting may change during an in-flight transition.
+        this.remove_transition('opacity');
+        this.remove_transition('scale-x');
+        this.remove_transition('scale-y');
         const stSettings = St.Settings.get();
         if (stSettings && !stSettings.enable_animations) {
             this.hide();
@@ -162,10 +186,6 @@ class SpotlightPopup extends St.Widget {
             onComplete();
             return;
         }
-        // Cancel any in-flight open animation.
-        this.remove_transition('opacity');
-        this.remove_transition('scale-x');
-        this.remove_transition('scale-y');
         this.ease({
             opacity: 0,
             duration: 150,

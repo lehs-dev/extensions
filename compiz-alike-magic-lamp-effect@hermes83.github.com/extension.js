@@ -37,7 +37,43 @@ import { SettingsData } from './settings_data.js';
 
 const MINIMIZE_EFFECT_NAME = 'minimize-magic-lamp-effect';
 const UNMINIMIZE_EFFECT_NAME = 'unminimize-magic-lamp-effect';
-const nonZero = value => Math.abs(value) < 1e-6 ? 1e-6 : value;
+const clamp = value => Math.max(0, Math.min(1, value));
+const smoothstep = value => { const t = clamp(value); return t * t * (3 - 2 * t); };
+const mix = (from, to, progress) => from + (to - from) * progress;
+
+// Icon geometry is optional on Wayland. Missing or stale geometry must never
+// send a window to an arbitrary screen corner or an invisible Overview icon.
+function iconTarget(icon, monitors = []) {
+    if (!icon || !['x', 'y', 'width', 'height'].every(key => Number.isFinite(icon[key])) ||
+        icon.width <= 0 || icon.height <= 0)
+        return null;
+    const intersects = monitor => monitor && icon.x < monitor.x + monitor.width &&
+        icon.x + icon.width > monitor.x && icon.y < monitor.y + monitor.height &&
+        icon.y + icon.height > monitor.y;
+    const monitor = (Number.isInteger(icon.monitorIndex) && intersects(monitors[icon.monitorIndex])
+        ? monitors[icon.monitorIndex] : monitors.find(intersects));
+    if (!monitor || icon.width > monitor.width || icon.height > monitor.height)
+        return null;
+    return {x: icon.x, y: icon.y, width: icon.width, height: icon.height,
+        monitorIndex: monitors.indexOf(monitor), dockPosition: icon.dockPosition};
+}
+
+function funnelTarget(icon, side) {
+    // A positive one-pixel aperture keeps the mesh valid while giving the
+    // funnel a pointed tip instead of the icon's full-width, flat base.
+    const size = Math.min(1, icon.width, icon.height);
+    let x = icon.x + (icon.width - size) / 2;
+    let y = icon.y + (icon.height - size) / 2;
+    if (side === St.Side.BOTTOM)
+        y = icon.y;
+    else if (side === St.Side.TOP)
+        y = icon.y + icon.height - size;
+    else if (side === St.Side.RIGHT)
+        x = icon.x;
+    else if (side === St.Side.LEFT)
+        x = icon.x + icon.width - size;
+    return {x, y, width: size, height: size};
+}
 
 export default class CompizMagicLampEffectExtension extends Extension {
 
@@ -151,51 +187,39 @@ export default class CompizMagicLampEffectExtension extends Extension {
     }
 
     getIcon(actor) {
-        let [success, icon] = actor.meta_window.get_icon_geometry();
-        if (success) {
-            return icon;
-        } 
-    
-        let monitor = Main.layoutManager.monitors[actor.meta_window.get_monitor()];
-        if (monitor && Main.overview.dash) {
-            let dashIcon = null;
-            let transformed_position = null;
-            let pids = null;
-            let pid = actor.get_meta_window() ? actor.get_meta_window().get_pid() : null;
-            if (pid) {
-                Main.overview.dash._box.get_children()
-                    .filter(dashElement => dashElement.child && dashElement.child._delegate && dashElement.child._delegate.app)
-                    .forEach(dashElement => {
-                        pids = dashElement.child._delegate.app.get_pids();
-                        if (pids && pids.indexOf(pid) >= 0) {
-                            transformed_position = dashElement.get_transformed_position();
-                            if (transformed_position && Number.isFinite(transformed_position[0])) {
-                                dashIcon = {x: transformed_position[0], y: monitor.y + monitor.height, width: 0, height: 0};
-                                return;
-                            }
-                        }
-                    });
-            }
-            if (dashIcon) {
-                return dashIcon;
-            }
-
-            return {x: monitor.x + monitor.width / 2, y: monitor.y + monitor.height, width: 0, height: 0};
+        const monitors = Main.layoutManager.monitors;
+        // The live dock includes magnification and autohide; Meta's cached
+        // geometry can describe the previous dock position.
+        try {
+            const d2d = Main.extensionManager?.lookup?.('dash2dock-lite@icedman.github.com');
+            const target = iconTarget(d2d?.stateObj?.integrations?.compiz_getIcon?.(actor), monitors);
+            if (target)
+                return target;
+        } catch (error) {
+            console.warn(`[Magic Lamp] Dock target unavailable: ${error}`);
         }
-
-        return {x: 0, y: 0, width: 0, height: 0};    
+        try {
+            const metaWindow = actor?.meta_window || actor?.get_meta_window?.();
+            const [success, icon] = metaWindow?.get_icon_geometry?.() || [false, null];
+            return success ? iconTarget(icon, monitors) : null;
+        } catch (error) {
+            return null;
+        }
     }
 
     animate(actor, EffectClass, name) {
         const complete = name === MINIMIZE_EFFECT_NAME ?
             this._hooks?.minimize || Main.wm._shellwm.original_completed_minimize :
             this._hooks?.unminimize || Main.wm._shellwm.original_completed_unminimize;
-        const icon = this.getIcon(actor);
         const monitors = Main.layoutManager.monitors;
+        let icon = null;
+        try {
+            icon = iconTarget(this.getIcon(actor), monitors);
+        } catch (error) {
+            console.warn(`[Magic Lamp] Icon target unavailable: ${error}`);
+        }
         const windowMonitor = monitors[actor.meta_window.get_monitor()];
-        const targetMonitor = Number.isInteger(icon.monitorIndex) ? monitors[icon.monitorIndex] :
-            monitors.find(monitor => icon.x >= monitor.x && icon.x < monitor.x + monitor.width &&
-                icon.y >= monitor.y && icon.y <= monitor.y + monitor.height);
+        const targetMonitor = icon ? monitors[icon.monitorIndex] : null;
         let animationActor = actor;
         let snapshot = null;
         let effect = null;
@@ -263,7 +287,7 @@ export default class CompizMagicLampEffectExtension extends Extension {
     }
 }
 
-class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
+export class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
     static {
         GObject.registerClass(this);
     }    
@@ -277,8 +301,6 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
         this._sourceOpacity = params.originalOpacity;
         this._onDestroy = params.onDestroy;
 
-        this.EPSILON = 40;
-
         this.isMinimizeEffect = false;
         this.newFrameEvent = null;
         this.completedEvent = null;
@@ -289,29 +311,15 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
         this.monitor = {x: 0, y: 0, width: 0, height: 0};
         this.iconMonitor = {x: 0, y: 0, width: 0, height: 0};
         this.window = {x: 0, y: 0, width: 0, height: 0, scale: 1};
-        this.icon = {...(params.icon || {x: 0, y: 0, width: 0, height: 0})};
+        this.icon = params.icon ? {...params.icon} : null;
+        this._funnelTarget = null;
         
         this.progress = 0;
-        this.split = 0.3;
         this.k = 0;
         this.j = 0;
-        this.expandWidth = 0;
-        this.fullWidth = 0;
-        this.expandHeight = 0;
-        this.fullHeight = 0;
-        this.width = 0;
-        this.height = 0;
-        this.x = 0;
-        this.y = 0;
-        this.offsetX = 0;
-        this.offsetY = 0;
-        this.effectX = 0;
-        this.effectY = 0;
         this.iconPosition = null;
 
-        this.toTheBorder = true;   // true
-        this.maxIconSize = null;    // 48
-        this.alignIcon = 'center';  // 'left-top'
+        this.toTheBorder = false;
 
         this.EFFECT = this.settingsData.EFFECT.get(); //'default' - 'sine'
         const clampSetting = (value, minimum, maximum, fallback) =>
@@ -327,6 +335,26 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
     destroy_actor(actor) {}
 
     on_tick_elapsed(timer, msecs) {}
+
+    _shouldStop() {
+        const settings = St.Settings.get();
+        return !settings.enable_animations ||
+            (St.ReducedMotion && settings.reducedMotion === St.ReducedMotion.REDUCE) ||
+            Main.overview.visible || Main.wm._workspaceAnimation?.gestureActive;
+    }
+
+    _updateProgress(progress) {
+        this.progress = clamp(progress);
+        // The neck reaches the icon while the tail is already moving. Both
+        // phases ease smoothly and overlap instead of stopping at a hard split.
+        this.k = smoothstep(this.progress / 0.55);
+        this.j = smoothstep((this.progress - 0.18) / 0.82);
+        const opacity = this.fallback ? 1 - smoothstep(this.progress)
+            : 1 - smoothstep((this.progress - 0.88) / 0.12);
+        const actor = this.get_actor() || this._animationActor;
+        if (actor && this._animationOpacity !== undefined)
+            actor.opacity = Math.round(this._animationOpacity * opacity);
+    }
 
     vfunc_set_actor(actor) {
         if (!actor) {
@@ -357,88 +385,61 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
         if (this.sourceActor)
             this._sourceDestroyId = this.sourceActor.connect('destroy', () => this.destroy());
 
-        [this.window.x, this.window.y] = [this.actor.get_x() - this.monitor.x, this.actor.get_y() - this.monitor.y];
-        
-        if (!this.icon || (this.icon.x == 0 && this.icon.y == 0 && this.icon.width == 0 && this.icon.height == 0)) {
-            this.icon.x = this.monitor.x + this.monitor.width / 2;
-            this.icon.y = this.monitor.height + this.monitor.y;
-        }
-
-        // Dash2Dock may place the target icon on a different monitor.
+        [this.window.x, this.window.y] = [actor.get_x() - this.monitor.x, actor.get_y() - this.monitor.y];
+        this._animationOpacity = actor.opacity;
         const monitors = Main.layoutManager.monitors;
-        if (Number.isInteger(this.icon.monitorIndex)) {
-            this.iconMonitor = monitors[this.icon.monitorIndex] || this.monitor;
-        } else {
-            monitors.forEach((monitor, monitorIndex) => {
-                // Both geometries already use stage coordinates; applying the
-                // monitor scale again makes adjacent monitors overlap.
-                if (this.icon.x >= monitor.x && this.icon.x <= monitor.x + monitor.width &&
-                    this.icon.y >= monitor.y && this.icon.y <= monitor.y + monitor.height)
-                    this.iconMonitor = monitor;
-            });
-            if (this.iconMonitor.width === 0 || this.iconMonitor.height === 0)
-                this.iconMonitor = this.monitor;
-        }
-
-        const crossMonitor = this.iconMonitor !== this.monitor;
+        const target = iconTarget(this.icon, monitors);
+        this.fallback = !target;
+        this.iconMonitor = target ? monitors[target.monitorIndex] : this.monitor;
+        // Without a real destination, use a short, restrained shrink/fade at
+        // the window itself. The fallback does not pretend a dock icon exists.
+        this.icon = target ? {...target, x: target.x - this.monitor.x, y: target.y - this.monitor.y} : {
+            x: this.window.x + this.window.width * 0.03,
+            y: this.window.y + this.window.height * 0.03,
+            width: this.window.width * 0.94,
+            height: this.window.height * 0.94,
+        };
         const dockSides = {
             bottom: St.Side.BOTTOM,
             left: St.Side.LEFT,
             right: St.Side.RIGHT,
             top: St.Side.TOP,
         };
-        const dockSide = dockSides[this.icon.dockPosition];
-        const iconXOnTarget = this.icon.x - this.iconMonitor.x;
-        const iconYOnTarget = this.icon.y - this.iconMonitor.y;
-
-        [this.icon.x, this.icon.y, this.icon.width, this.icon.height] =
-            [this.icon.x - this.monitor.x, this.icon.y - this.monitor.y,
-             this.icon.width, this.icon.height];
-
-        if (dockSide !== undefined) {
-            this.iconPosition = dockSide;
-        } else if (iconYOnTarget + this.icon.height >= this.iconMonitor.height - this.EPSILON) {
-            this.iconPosition = St.Side.BOTTOM;
-        } else if (iconXOnTarget <= this.EPSILON) {
-            this.iconPosition = St.Side.LEFT;
-        } else if (iconXOnTarget + this.icon.width >= this.iconMonitor.width - this.EPSILON) {
-            this.iconPosition = St.Side.RIGHT;
-        } else {
-            this.iconPosition = St.Side.TOP;
+        this.iconPosition = dockSides[target?.dockPosition];
+        if (this.iconPosition === undefined) {
+            const distances = target ? [
+                [St.Side.TOP, Math.abs(target.y - this.iconMonitor.y)],
+                [St.Side.BOTTOM, Math.abs(this.iconMonitor.y + this.iconMonitor.height - target.y - target.height)],
+                [St.Side.LEFT, Math.abs(target.x - this.iconMonitor.x)],
+                [St.Side.RIGHT, Math.abs(this.iconMonitor.x + this.iconMonitor.width - target.x - target.width)],
+            ] : [[St.Side.BOTTOM, 0]];
+            this.iconPosition = distances.sort((a, b) => a[1] - b[1])[0][0];
         }
-
-        // For a target across screens, travel toward it even when its dock
-        // occupies the opposite edge of its own monitor.
-        if (crossMonitor) {
-            if (this.iconPosition === St.Side.LEFT || this.iconPosition === St.Side.RIGHT)
-                this.iconPosition = this.icon.x <= this.window.x ? St.Side.LEFT : St.Side.RIGHT;
-            else
-                this.iconPosition = this.icon.y <= this.window.y ? St.Side.TOP : St.Side.BOTTOM;
-        } else if (this.toTheBorder) {
-            switch (this.iconPosition) {
-                case St.Side.BOTTOM:
-                    this.icon.y = this.iconMonitor.y + this.iconMonitor.height - this.monitor.y;
-                    this.icon.height = 0;
-                    break;
-                case St.Side.LEFT:
-                    this.icon.x = this.iconMonitor.x - this.monitor.x;
-                    this.icon.width = 0;
-                    break;
-                case St.Side.RIGHT:
-                    this.icon.x = this.iconMonitor.x + this.iconMonitor.width - this.monitor.x;
-                    this.icon.width = 0;
-                    break;
-                case St.Side.TOP:
-                    this.icon.y = this.iconMonitor.y - this.monitor.y;
-                    this.icon.height = 0;
-                    break;
-            }
+        // A cross-output target may be behind the dock's nominal direction.
+        // Follow its actual position so the leading edge never crosses the tail.
+        if (this.iconMonitor !== this.monitor) {
+            const dx = (this.icon.x + this.icon.width / 2 - this.window.x - this.window.width / 2) / this.window.width;
+            const dy = (this.icon.y + this.icon.height / 2 - this.window.y - this.window.height / 2) / this.window.height;
+            this.iconPosition = Math.abs(dx) > Math.abs(dy)
+                ? (dx < 0 ? St.Side.LEFT : St.Side.RIGHT)
+                : (dy < 0 ? St.Side.TOP : St.Side.BOTTOM);
+        }
+        if (!this.fallback) {
+            const tip = funnelTarget(this.icon, this.iconPosition);
+            // Compare the aperture rather than the whole icon: an overlapping
+            // icon can have its incoming edge behind the window's trailing edge.
+            if ((this.iconPosition === St.Side.BOTTOM && tip.y + tip.height <= this.window.y) ||
+                (this.iconPosition === St.Side.TOP && tip.y >= this.window.y + this.window.height))
+                this.iconPosition = this.iconPosition === St.Side.BOTTOM ? St.Side.TOP : St.Side.BOTTOM;
+            if ((this.iconPosition === St.Side.RIGHT && tip.x + tip.width <= this.window.x) ||
+                (this.iconPosition === St.Side.LEFT && tip.x >= this.window.x + this.window.width))
+                this.iconPosition = this.iconPosition === St.Side.RIGHT ? St.Side.LEFT : St.Side.RIGHT;
+            this._funnelTarget = funnelTarget(this.icon, this.iconPosition);
         }
 
         this.set_n_tiles(this.X_TILES, this.Y_TILES);
-        
-        const areaDelay = Math.min(1000, (this.monitor.width * this.monitor.height) / (this.window.width * this.window.height));
-        this.timerId = new Clutter.Timeline({ actor: this.actor, duration: Math.round(this.DURATION + areaDelay) });
+        this._updateProgress(this.isMinimizeEffect ? 0 : 1);
+        this.timerId = new Clutter.Timeline({ actor, duration: this.fallback ? Math.min(160, this.DURATION) : this.DURATION });
         this.newFrameEvent = this.timerId.connect('new-frame', this.on_tick_elapsed.bind(this));
         this.completedEvent = this.timerId.connect('completed', () => this.destroy());
         this.timerId.start();
@@ -483,6 +484,8 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
                     actor.disconnect(this.paintEvent);
                     this.paintEvent = null;
                 }
+                if (this._animationOpacity !== undefined && !this._animationDestroyed)
+                    actor.opacity = this._animationOpacity;
 
                 const sourceActor = this.sourceActor || actor;
                 if (this.sourceActor) {
@@ -517,85 +520,51 @@ class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
     }
 
     vfunc_deform_vertex(w, h, v) {
-        if (this.initialized && !this._destroyed) {
-            let propX = w / this.window.width;
-            let propY = h / this.window.height;
+        if (!this.initialized || this._destroyed)
+            return;
+        const window = this.window;
+        const icon = this._funnelTarget || this.icon;
+        const sourceX = window.x + v.tx * window.width;
+        const sourceY = window.y + v.ty * window.height;
+        const targetX = icon.x + v.tx * icon.width;
+        const targetY = icon.y + v.ty * icon.height;
+        let x, y;
 
-            if (this.iconPosition == St.Side.LEFT) {
-                this.width = nonZero(this.window.width - this.icon.width + (this.window.x - this.icon.x) * this.k);
-
-                this.x = (this.width - this.j * this.width) * v.tx;  
-                this.y = v.ty * this.window.height * (this.x + (this.width - this.x) * (1 - this.k)) / this.width + 
-                        v.ty * this.icon.height * (this.width - this.x) / this.width;
-
-                this.offsetX = this.icon.width - (this.window.x - this.icon.x) * this.k;
-                this.offsetY = (this.icon.y - this.window.y) * ((this.width - this.x) / this.width) * this.k;
-
-                if (this.EFFECT === 'sine') {
-                    this.effectY = Math.sin(this.x / this.width * Math.PI * 4) * this.window.height / 14 * this.k;
-                } else {
-                    this.effectY = Math.sin((0.5 - (this.width - this.x) / this.width) * 2 * Math.PI) * (this.window.y + this.window.height * v.ty - (this.icon.y + this.icon.height * v.ty)) / 7 * this.k;
-                }
-            } else if (this.iconPosition == St.Side.TOP) {
-                this.height = nonZero(this.window.height - this.icon.height + (this.window.y - this.icon.y) * this.k);
-
-                this.y = (this.height - this.j * this.height) * v.ty;
-                this.x = v.tx * this.window.width * (this.y + (this.height - this.y) * (1 - this.k)) / this.height + 
-                        v.tx * this.icon.width * (this.height - this.y) / this.height;
-
-                this.offsetX = (this.icon.x - this.window.x) * ((this.height - this.y) / this.height) * this.k;
-                this.offsetY = this.icon.height - (this.window.y - this.icon.y) * this.k;
-
-                if (this.EFFECT === 'sine') {
-                    this.effectX = Math.sin(this.y / this.height * Math.PI * 4) * this.window.width / 14 * this.k;
-                } else {
-                    this.effectX = Math.sin((0.5 - (this.height - this.y) / this.height) * 2 * Math.PI) * (this.window.x + this.window.width * v.tx - (this.icon.x + this.icon.width * v.tx)) / 7 * this.k;
-                }
-            } else if (this.iconPosition == St.Side.RIGHT) {
-                this.expandWidth = (this.icon.x - this.icon.width - this.window.x - this.window.width);
-                this.fullWidth = nonZero((this.icon.x - this.icon.width - this.window.x) - this.expandWidth * (1 - this.k));
-                this.width = this.fullWidth - this.j * this.fullWidth;
-
-                this.x = v.tx * this.width;
-                this.y = v.ty * (this.icon.height) +
-                        v.ty * (this.window.height - this.icon.height) * (1 - this.j) * (1 - v.tx) +
-                        v.ty * (this.window.height - this.icon.height) * (1 - this.k) * (v.tx);
-                
-                this.offsetY = (this.icon.y - this.window.y) * (this.x / this.fullWidth) * this.k + (this.icon.y - this.window.y) * this.j;
-                this.offsetX = this.icon.x - this.icon.width - this.window.x - this.width - this.expandWidth * (1 - this.k);
-                
-                if (this.EFFECT === 'sine') {
-                    this.effectY = Math.sin((this.width - this.x) / this.fullWidth * Math.PI * 4) * this.window.height / 14 * this.k;
-                } else {
-                    this.effectY = Math.sin(((this.width - this.x) / this.fullWidth) * 2 * Math.PI + Math.PI) * (this.window.y + this.window.height * v.ty - (this.icon.y + this.icon.height * v.ty)) / 7 * this.k;
-                }
-            } else if (this.iconPosition == St.Side.BOTTOM) {
-                this.expandHeight = (this.icon.y - this.icon.height - this.window.y - this.window.height);
-                this.fullHeight = nonZero((this.icon.y - this.icon.height - this.window.y) - this.expandHeight * (1 - this.k));
-                this.height = this.fullHeight - this.j * this.fullHeight;
-                
-                this.y = v.ty * this.height;
-                this.x = v.tx * (this.icon.width) +
-                        v.tx * (this.window.width - this.icon.width) * (1 - this.j) * (1 - v.ty) +
-                        v.tx * (this.window.width - this.icon.width) * (1 - this.k) * (v.ty);
-
-                this.offsetX = (this.icon.x - this.window.x) * (this.y / this.fullHeight) * this.k + (this.icon.x - this.window.x) * this.j;
-                this.offsetY = this.icon.y - this.icon.height - this.window.y - this.height - this.expandHeight * (1 - this.k);
-
-                if (this.EFFECT === 'sine') {
-                    this.effectX = Math.sin((this.height - this.y) / this.fullHeight * Math.PI * 4) * this.window.width / 14 * this.k;
-                } else {
-                    this.effectX = Math.sin(((this.height - this.y) / this.fullHeight) * 2 * Math.PI + Math.PI) * (this.window.x + this.window.width * v.tx - (this.icon.x + this.icon.width * v.tx)) / 7 * this.k;
-                }
+        if (this.fallback) {
+            const shrink = smoothstep(this.progress);
+            x = mix(sourceX, targetX, shrink);
+            y = mix(sourceY, targetY, shrink);
+        } else {
+            const horizontal = this.iconPosition === St.Side.LEFT || this.iconPosition === St.Side.RIGHT;
+            const reverse = this.iconPosition === St.Side.LEFT || this.iconPosition === St.Side.TOP;
+            const slice = horizontal ? v.tx : v.ty;
+            const towardIcon = reverse ? 1 - slice : slice;
+            // Every slice remains a positive-width section of the same funnel.
+            // Smooth curvature replaces the old oscillations that bent edges
+            // outside the source/target envelope and visibly folded the mesh.
+            const curve = this.EFFECT === 'sine'
+                ? (1 - Math.cos(Math.PI * towardIcon)) / 2
+                : smoothstep(towardIcon);
+            const neck = this.j + (1 - this.j) * this.k * curve;
+            const start = reverse ? this.k : this.j;
+            const end = reverse ? this.j : this.k;
+            if (horizontal) {
+                x = mix(mix(window.x, icon.x, start),
+                    mix(window.x + window.width, icon.x + icon.width, end), v.tx);
+                y = mix(sourceY, targetY, neck);
+            } else {
+                x = mix(sourceX, targetX, neck);
+                y = mix(mix(window.y, icon.y, start),
+                    mix(window.y + window.height, icon.y + icon.height, end), v.ty);
             }
-            
-            v.x = (this.x + this.offsetX + this.effectX) * propX;
-            v.y = (this.y + this.offsetY + this.effectY) * propY;
-        }    
+        }
+        v.x = (x - window.x) * w / window.width;
+        v.y = (y - window.y) * h / window.height;
     }
+
 }
 
-class MagicLampMinimizeEffect extends AbstractCommonMagicLampEffect {
+export class MagicLampMinimizeEffect extends AbstractCommonMagicLampEffect {
     static {
         GObject.registerClass(this);
     }
@@ -615,7 +584,7 @@ class MagicLampMinimizeEffect extends AbstractCommonMagicLampEffect {
     }
 
     on_tick_elapsed(timer, msecs) {
-        if (Main.overview.visible) {
+        if (this._shouldStop()) {
             this.destroy();
             return;
         }
@@ -624,9 +593,7 @@ class MagicLampMinimizeEffect extends AbstractCommonMagicLampEffect {
             return;
         }
 
-        this.progress = timer.get_progress();
-        this.k = this.progress <= this.split ? this.progress * (1 / 1 / this.split) : 1;
-        this.j = this.progress > this.split ? (this.progress - this.split) * (1 / 1 / (1 - this.split)) : 0;
+        this._updateProgress(timer.get_progress());
 
         this.actor.get_parent().queue_redraw();
         this.invalidate();
@@ -637,7 +604,7 @@ class MagicLampMinimizeEffect extends AbstractCommonMagicLampEffect {
     }
 }
     
-class MagicLampUnminimizeEffect extends AbstractCommonMagicLampEffect {
+export class MagicLampUnminimizeEffect extends AbstractCommonMagicLampEffect {
     static {
         GObject.registerClass(this);
     }
@@ -656,7 +623,7 @@ class MagicLampUnminimizeEffect extends AbstractCommonMagicLampEffect {
     }
 
     on_tick_elapsed(timer, msecs) {
-        if (Main.overview.visible) {
+        if (this._shouldStop()) {
             this.destroy();
             return;
         }   
@@ -665,9 +632,7 @@ class MagicLampUnminimizeEffect extends AbstractCommonMagicLampEffect {
             return;
         }
 
-        this.progress = timer.get_progress();
-        this.k = 1 - (this.progress > (1 - this.split) ? (this.progress - (1 - this.split)) * (1 / 1 / (1 - (1 - this.split))) : 0);
-        this.j = 1 - (this.progress <= (1 - this.split) ? this.progress * (1 / 1 / (1 - this.split)) : 1);
+        this._updateProgress(1 - timer.get_progress());
 
         this.actor.get_parent().queue_redraw();
         this.invalidate();

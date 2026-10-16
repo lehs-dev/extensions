@@ -761,6 +761,39 @@
       </object>
     </child>
     <!-- ======================================================================================== -->
+    <!-- = Group: Thirds ======================================================================= -->
+    <!-- ======================================================================================== -->
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Thirds and Two Thirds</property>
+        <child>
+          <object class="ShortcutListener" id="tile_left_third">
+            <property name="title" translatable="yes">Tile to left third</property>
+          </object>
+        </child>
+        <child>
+          <object class="ShortcutListener" id="tile_center_third">
+            <property name="title" translatable="yes">Tile to center third</property>
+          </object>
+        </child>
+        <child>
+          <object class="ShortcutListener" id="tile_right_third">
+            <property name="title" translatable="yes">Tile to right third</property>
+          </object>
+        </child>
+        <child>
+          <object class="ShortcutListener" id="tile_left_two_thirds">
+            <property name="title" translatable="yes">Tile to left two thirds</property>
+          </object>
+        </child>
+        <child>
+          <object class="ShortcutListener" id="tile_right_two_thirds">
+            <property name="title" translatable="yes">Tile to right two thirds</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <!-- ======================================================================================== -->
     <!-- = Group: Corner Tiling ================================================================= -->
     <!-- ======================================================================================== -->
     <child>
@@ -816,6 +849,43 @@
         <child>
           <object class="ShortcutListener" id="tile_right_half_ignore_ta">
             <property name="title" translatable="yes" comments="Translators: This is a keybinding in the 'Edge Tiling without Tiling Assistant' preference group in the 'Keybindings' tab to tile window to the right screen half without spawning a Tiling Popup">Tile to right</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <!-- ======================================================================================== -->
+    <!-- = Group: Thirds - Ignore TA ============================================================ -->
+    <!-- ======================================================================================== -->
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Thirds without Tiling Assistant</property>
+        <property name="visible"
+                  bind-source="enable_advanced_experimental_features"
+                  bind-property="active"
+                  bind-flags="sync-create"/>
+        <child>
+          <object class="ShortcutListener" id="tile_left_third_ignore_ta">
+            <property name="title" translatable="yes">Tile to left third</property>
+          </object>
+        </child>
+        <child>
+          <object class="ShortcutListener" id="tile_center_third_ignore_ta">
+            <property name="title" translatable="yes">Tile to center third</property>
+          </object>
+        </child>
+        <child>
+          <object class="ShortcutListener" id="tile_right_third_ignore_ta">
+            <property name="title" translatable="yes">Tile to right third</property>
+          </object>
+        </child>
+        <child>
+          <object class="ShortcutListener" id="tile_left_two_thirds_ignore_ta">
+            <property name="title" translatable="yes">Tile to left two thirds</property>
+          </object>
+        </child>
+        <child>
+          <object class="ShortcutListener" id="tile_right_two_thirds_ignore_ta">
+            <property name="title" translatable="yes">Tile to right two thirds</property>
           </object>
         </child>
       </object>

@@ -12,6 +12,7 @@ import { Rect, Util } from './utility.js';
 export class TilingWindowManager {
     static initialize() {
         this._signals = new TilingSignals();
+        this._tileStateListeners = new Set();
 
         /**
          * @type {Map<number, number[]>} - {
@@ -78,6 +79,7 @@ export class TilingWindowManager {
 
         this._tileGroups.clear();
         this._tileStates.clear();
+        this._tileStateListeners.clear();
 
         if (this._openAppTiledTimerId) {
             GLib.Source.remove(this._openAppTiledTimerId);
@@ -93,6 +95,19 @@ export class TilingWindowManager {
             GLib.Source.remove(this._wsRemovedTimer);
             this._wsRemovedTimer = null;
         }
+    }
+
+    // isTiled/tiledRect are extension state, so Meta.Window doesn't emit a
+    // property notification when they change. Decorations subscribe here.
+    static addTileStateListener(callback) {
+        const listeners = this._tileStateListeners;
+        listeners.add(callback);
+        return () => listeners.delete(callback);
+    }
+
+    static _notifyTileStateChanged(window) {
+        for (const callback of this._tileStateListeners)
+            callback(window);
     }
 
     /**
@@ -259,6 +274,7 @@ export class TilingWindowManager {
         window.move_to_monitor(monitor);
         window.move_frame(true, x, y);
         window.move_resize_frame(true, x, y, width, height);
+        this._notifyTileStateChanged(window);
 
         // Maximized with gaps
         if (maximize) {
@@ -353,6 +369,7 @@ export class TilingWindowManager {
         window.isTiled = false;
         window.tiledRect = null;
         window.untiledRect = null;
+        this._notifyTileStateChanged(window);
 
         this.deleteTilingState(window);
     }
@@ -966,6 +983,29 @@ export class TilingWindowManager {
                 const { height } = bottom ?? workArea.getUnitAt(1, workArea.height / 2, Orientation.H);
                 const result = new Rect(workArea.x2 - width, workArea.y2 - height, width, height);
                 return getTile(result);
+            } case 'tile-left-third': {
+                const defaultRect = this.getDefaultTileFor('tile-left-third', workArea);
+                const left = screenRects.find(r => r.x === workArea.x && Math.abs(r.width - defaultRect.width) <= 2);
+                const width = left ? left.width : defaultRect.width;
+                return getTile(new Rect(workArea.x, workArea.y, width, workArea.height));
+            } case 'tile-right-third': {
+                const defaultRect = this.getDefaultTileFor('tile-right-third', workArea);
+                const right = screenRects.find(r => r.x2 === workArea.x2 && Math.abs(r.width - defaultRect.width) <= 2);
+                const width = right ? right.width : defaultRect.width;
+                return getTile(new Rect(workArea.x2 - width, workArea.y, width, workArea.height));
+            } case 'tile-center-third': {
+                const defaultRect = this.getDefaultTileFor('tile-center-third', workArea);
+                return getTile(defaultRect);
+            } case 'tile-left-two-thirds': {
+                const defaultRect = this.getDefaultTileFor('tile-left-two-thirds', workArea);
+                const left = screenRects.find(r => r.x === workArea.x && Math.abs(r.width - defaultRect.width) <= 2);
+                const width = left ? left.width : defaultRect.width;
+                return getTile(new Rect(workArea.x, workArea.y, width, workArea.height));
+            } case 'tile-right-two-thirds': {
+                const defaultRect = this.getDefaultTileFor('tile-right-two-thirds', workArea);
+                const right = screenRects.find(r => r.x2 === workArea.x2 && Math.abs(r.width - defaultRect.width) <= 2);
+                const width = right ? right.width : defaultRect.width;
+                return getTile(new Rect(workArea.x2 - width, workArea.y, width, workArea.height));
             }
         }
     }
@@ -1003,6 +1043,27 @@ export class TilingWindowManager {
             case 'tile-bottomright-quarter':
             case 'tile-bottomright-quarter-ignore-ta':
                 return workArea.getUnitAt(1, workArea.width / 2, Orientation.V).getUnitAt(1, workArea.height / 2, Orientation.H);
+            case 'tile-left-third':
+            case 'tile-left-third-ignore-ta': {
+                const thirdWidth = Math.round(workArea.width / 3);
+                return new Rect(workArea.x, workArea.y, thirdWidth, workArea.height);
+            } case 'tile-right-third':
+            case 'tile-right-third-ignore-ta': {
+                const thirdWidth = Math.round(workArea.width / 3);
+                return new Rect(workArea.x + workArea.width - thirdWidth, workArea.y, thirdWidth, workArea.height);
+            } case 'tile-center-third':
+            case 'tile-center-third-ignore-ta': {
+                const thirdWidth = Math.round(workArea.width / 3);
+                return new Rect(workArea.x + thirdWidth, workArea.y, workArea.width - 2 * thirdWidth, workArea.height);
+            } case 'tile-left-two-thirds':
+            case 'tile-left-two-thirds-ignore-ta': {
+                const thirdWidth = Math.round(workArea.width / 3);
+                return new Rect(workArea.x, workArea.y, workArea.width - thirdWidth, workArea.height);
+            } case 'tile-right-two-thirds':
+            case 'tile-right-two-thirds-ignore-ta': {
+                const thirdWidth = Math.round(workArea.width / 3);
+                return new Rect(workArea.x + thirdWidth, workArea.y, workArea.width - thirdWidth, workArea.height);
+            }
         }
     }
 

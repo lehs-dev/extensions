@@ -59,7 +59,8 @@ const DotCanvas = GObject.registerClass(
         this.state.rotate != s.rotate ||
         !equal(this.state.translate, s.translate) ||
         this.state.scale != s.scale ||
-        this.state.size != s.size
+        this.state.size != s.size ||
+        this.state.diameter != s.diameter
       ) {
         this.state = s;
         this.redraw();
@@ -350,6 +351,15 @@ const DotCanvas = GObject.registerClass(
 
     _draw_dot(ctx, state) {
       this._draw_dots(ctx, { ...state, count: 1 });
+    }
+
+    _draw_default(ctx, state) {
+      const [size] = this.get_surface_size();
+      const radius = (state.diameter || 8) / 2;
+      ctx.newSubPath();
+      ctx.arc(size / 2, size - radius * 2, radius, 0, 2 * Math.PI);
+      Drawing.set_color(ctx, state.color, state.color[3]);
+      ctx.fill();
     }
   }
 );

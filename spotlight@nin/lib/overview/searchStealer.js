@@ -15,6 +15,7 @@ export class OverviewSearchStealer {
         this._searchResults = null;
         this._originalActivateDefault = null;
         this._originalActivate = null;
+        this._originalHide = null;
         this._overviewKeyCaptureId = 0;
     }
 
@@ -34,16 +35,23 @@ export class OverviewSearchStealer {
         if (this._entry)
             return;
 
-        // Override the overview toggle so it does not dismiss the popup.
+        // Native result activation toggles the Overview even when it is closed.
         if (!Main.overview._originalToggle) {
             Main.overview._originalToggle = Main.overview.toggle;
             Main.overview.toggle = () => {
                 if (this._popup._visible)
-                    this._entry.grab_key_focus();
+                    this._popup.close();
                 else
                     Main.overview._originalToggle();
             };
         }
+        // App icons and system actions dismiss the Overview without toggling it.
+        this._originalHide = Main.overview.hide;
+        Main.overview.hide = (...args) => {
+            if (this._popup._visible)
+                this._popup.close();
+            return this._originalHide.call(Main.overview, ...args);
+        };
 
         // Steal the overview search entry.
         this._entry = Main.overview.searchEntry;
@@ -77,16 +85,14 @@ export class OverviewSearchStealer {
             };
         }
 
-        // Prevent the controller from cancelling itself when its entry hides.
+        // Keep native search state in sync without resetting the popup's focus.
         if (!this._search._originalSearchCancelled) {
             this._search._originalSearchCancelled = this._search._searchCancelled;
-            this._search._searchCancelled = () => {};
+            this._search._searchCancelled = () => this._search._setSearchActive(false);
         }
 
-        // Intercept printable keys when the overview is visible. The overview
-        // handler connects earlier and fires first in the capture chain, so
-        // EVENT_STOP from here cannot prevent it. We still need this to forward
-        // keys to our entry when open and consume them when closed.
+        // Keep Overview type-to-search away from the detached entry when closed.
+        // When open, forward keys only if the entry will not receive them itself.
         if (this._overviewKeyCaptureId === 0) {
             this._overviewKeyCaptureId = global.stage.connect(
                 'captured-event',
@@ -95,10 +101,22 @@ export class OverviewSearchStealer {
                         return Clutter.EVENT_PROPAGATE;
                     if (!Main.overview.visible)
                         return Clutter.EVENT_PROPAGATE;
-                    const unicode = Clutter.keysym_to_unicode(event.get_key_symbol());
+                    const key = event.get_key_symbol();
+                    const unicode = Clutter.keysym_to_unicode(key);
                     if (unicode >= 0x20) {
-                        if (this._popup._visible && this._entry)
-                            this._entry.event(event);
+                        const focus = global.stage.get_key_focus();
+                        for (let actor = focus; actor; actor = actor.get_parent()) {
+                            if (actor.has_style_class_name?.('popup-menu'))
+                                return Clutter.EVENT_PROPAGATE;
+                        }
+                        if (this._popup._visible && this._entry) {
+                            if (focus && (focus === this._entry || this._entry.contains(focus)))
+                                return Clutter.EVENT_PROPAGATE;
+                            if (key === Clutter.KEY_space && focus && this._search.contains(focus))
+                                return Clutter.EVENT_PROPAGATE;
+                            this._entry.grab_key_focus();
+                            this._search._text.event(event, false);
+                        }
                         return Clutter.EVENT_STOP;
                     }
                     return Clutter.EVENT_PROPAGATE;
@@ -142,6 +160,10 @@ export class OverviewSearchStealer {
         if (Main.overview._originalToggle) {
             Main.overview.toggle = Main.overview._originalToggle;
             Main.overview._originalToggle = null;
+        }
+        if (this._originalHide !== null) {
+            Main.overview.hide = this._originalHide;
+            this._originalHide = null;
         }
 
         if (this._overviewKeyCaptureId !== 0) {

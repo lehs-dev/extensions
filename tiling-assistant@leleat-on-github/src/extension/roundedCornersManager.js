@@ -2,7 +2,6 @@ import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
-import St from 'gi://St';
 
 const EFFECT_NAME = 'tiling-assistant-rounded-corners';
 // Match libadwaita's floating windows and the tile preview in stylesheet.css.
@@ -18,6 +17,7 @@ uniform float frame_right;
 uniform float frame_bottom;
 uniform float corner_radius;
 uniform float pixel_size;
+uniform float preserve_shadow;
 `;
 const FRAGMENT = `
 vec2 position = cogl_tex_coord_in[0].xy * vec2(buffer_width, buffer_height);
@@ -28,6 +28,11 @@ vec2 delta = abs(position - center) - half_size + vec2(corner_radius);
 float distance = length(max(delta, vec2(0.0)))
     + min(max(delta.x, delta.y), 0.0) - corner_radius;
 float coverage = 1.0 - smoothstep(-pixel_size * 0.5, pixel_size * 0.5, distance);
+// Tiled clients can include shadows outside their frame in the buffer. Keep
+// those pixels; only the window surface needs the 15px corner mask.
+if (preserve_shadow > 0.5 && (position.x < frame_left || position.y < frame_top
+    || position.x > frame_right || position.y > frame_bottom))
+    coverage = 1.0;
 cogl_color_out = texture2D(tex, cogl_tex_coord_in[0].xy) * cogl_color_in * coverage;
 `;
 
@@ -62,11 +67,10 @@ class RoundedCornersEffect extends Clutter.ShaderEffect {
             const frame = window.get_frame_rect();
             const buffer = window.get_buffer_rect();
             if (buffer.width > 0 && buffer.height > 0 && frame.width > 0 && frame.height > 0) {
-                const monitor = window.get_monitor();
-                const scale = monitor >= 0
-                    ? global.display.get_monitor_scale(monitor)
-                    : St.ThemeContext.get_for_stage(global.stage).scale_factor;
-                const radius = Math.min(RADIUS * scale, frame.width / 2, frame.height / 2);
+                // UVs are converted to buffer/frame coordinates below. Those
+                // share stage units, so scale only the AA pixel footprint,
+                // not the 15px radius a second time on a scaled Wayland stage.
+                const radius = Math.min(RADIUS, frame.width / 2, frame.height / 2);
                 const texture = this.get_texture();
                 this.set_uniform_value('tex', 0);
                 this._setFloat('buffer_width', buffer.width);
@@ -78,6 +82,7 @@ class RoundedCornersEffect extends Clutter.ShaderEffect {
                 this._setFloat('frame_bottom', frame.y + frame.height - buffer.y);
                 this._setFloat('corner_radius', radius);
                 this._setFloat('pixel_size', texture ? buffer.width / texture.get_width() : 1);
+                this._setFloat('preserve_shadow', window.tiledRect ? 1 : 0);
             }
         }
         super.vfunc_paint_target(paintNode, paintContext);
@@ -97,10 +102,11 @@ if (typeof Clutter.ShaderEffect.new_with_snippet === 'function') {
 }
 const Effect = GObject.registerClass({GTypeName: 'TilingAssistantRoundedCornersEffect'}, RoundedCornersEffect);
 
-/** Keep native maximize/fullscreen behavior while rounding their square surfaces. */
+/** Round snapped and maximized surfaces without changing their window state. */
 export default class RoundedCornersManager {
-    constructor() {
+    constructor(tilingManager = null) {
         this._windows = new Map();
+        this._disconnectTiling = tilingManager?.addTileStateListener(window => this._track(window));
         this._createdId = global.display.connect('window-created', (_, window) => this._track(window));
         // A newly created window may not have a compositor actor until it maps.
         this._mapId = global.window_manager.connect('map', (_, actor) => this._track(actor.meta_window));
@@ -145,7 +151,8 @@ export default class RoundedCornersManager {
         if (!actor)
             return;
 
-        const rounded = window.is_fullscreen() || window.maximizedHorizontally || window.maximizedVertically;
+        const rounded = Boolean(window.tiledRect) || window.is_fullscreen()
+            || window.maximizedHorizontally || window.maximizedVertically;
         if (rounded && !entry.effect) {
             entry.effect = new Effect();
             entry.effect.window = window;
@@ -181,6 +188,8 @@ export default class RoundedCornersManager {
     }
 
     destroy() {
+        this._disconnectTiling?.();
+        this._disconnectTiling = null;
         global.display.disconnect(this._createdId);
         global.window_manager.disconnect(this._mapId);
         for (const window of this._windows.keys())

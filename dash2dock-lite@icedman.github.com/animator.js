@@ -17,6 +17,7 @@ import {
   Linear,
   CubicEaseOut,
   QuadraticEaseOut,
+  SineEaseInOut,
 } from './effects/easing.js';
 import {
   get_distance_sqr,
@@ -274,9 +275,11 @@ export let Animator = class {
     let lastIcon = null;
     let iconTable = [];
 
-    let Ease = QuadraticEaseOut;
+    let Ease = SineEaseInOut;
     if (dock.extension.animation_rise_curve == 1) {
       Ease = CubicEaseOut;
+    } else if (dock.extension.animation_rise_curve == 2) {
+      Ease = QuadraticEaseOut;
     }
 
     animateIcons.forEach((icon) => {
@@ -448,16 +451,10 @@ export let Animator = class {
         icon._deltaVector = appliedVector;
       }
 
-      if (dock.animation_fps > 0) {
-        icon._icon.translationX = translationX;
-        icon._icon.translationY = translationY;
-      } else {
-        //! retain this for smoothness at high fps
-        icon._icon.translationX =
-          (icon._icon.translationX + translationX * 3) / 4;
-        icon._icon.translationY =
-          (icon._icon.translationY + translationY * 3) / 4;
-      }
+      // The interpolation above already uses elapsed time. A second blend
+      // per frame would give 120 Hz a different response from 60 Hz.
+      icon._icon.translationX = translationX;
+      icon._icon.translationY = translationY;
 
       // clear bounce animation
       if (icon._appwell) {
@@ -796,9 +793,9 @@ export let Animator = class {
         let thickness = dock.extension.separator_thickness || 0;
         if (vertical) {
           actor.width = iconSize * 0.5 * scaleFactor;
-          actor.height = thickness + 0.5;
+          actor.height = thickness * scaleFactor;
         } else {
-          actor.width = thickness + 0.5;
+          actor.width = thickness * scaleFactor;
           actor.height = iconSize * 0.75 * scaleFactor;
         }
         actor.visible = thickness > 0;

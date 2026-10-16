@@ -99,17 +99,18 @@ export class Util {
     }
 
     /**
-     * Get the window or screen gaps scaled to the monitor scale.
+     * Keep the historical helper name, but return gaps in stage coordinates,
+     * matching Meta.Window rectangles and Window Gap struts. Multiplying by
+     * the monitor scale again doubles the gap in a scaled Wayland stage.
      *
      * @param {String} settingsKey the key for the gap
-     * @param {number} monitor the number of the monitor to scale the gap to
-     * @returns {number} the scaled gap as a even number since the window gap
+     * @param {number} _monitor retained for callers using the former scaling API
+     * @returns {number} the gap as an even number since the window gap
      *      will be divided by 2.
      */
-    static getScaledGap(settingsKey, monitor) {
+    static getScaledGap(settingsKey, _monitor) {
         const gap = Settings.getInt(settingsKey);
-        const scaledGap = gap * global.display.get_monitor_scale(monitor);
-        return scaledGap % 2 === 0 ? scaledGap : scaledGap + 1;
+        return gap % 2 === 0 ? gap : gap + 1;
     }
 
     static useIndividualGaps(monitor) {

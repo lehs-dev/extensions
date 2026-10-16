@@ -133,7 +133,7 @@ export const Timer = class {
     });
   }
 
-  onUpdate() {
+  onUpdate(dt = this._resolution) {
     if (!this._timeoutId || this._paused) {
       return true;
     }
@@ -142,7 +142,7 @@ export const Timer = class {
       if (!this._timeoutId) break;
       if (s.onUpdate && this._subscribers.some((active) => active._id === s._id)) {
         try {
-          s.onUpdate(s, this._resolution);
+          s.onUpdate(s, dt);
         } catch (err) {
           this.unsubscribe(s);
           console.error(err);
@@ -150,11 +150,11 @@ export const Timer = class {
       }
     }
 
-    this._time += this._resolution;
+    this._time += dt;
 
     if (this._autoHibernate) {
       if (!this._subscribers.length) {
-        this._hibernatCounter += this._resolution;
+        this._hibernatCounter += dt;
         if (this._hibernatCounter >= this._hibernateWait) {
           this.hibernate();
         }
@@ -246,9 +246,12 @@ export const Timer = class {
       _func: func,
       onUpdate: (s, dt) => {
         s._time += dt;
-        if (s._time >= s._delay) {
-          s._func(s);
-          s._time -= s._delay;
+        // High quality animations follow every frame, including 120 Hz.
+        // Medium/low settings retain their requested cadence on frame edges.
+        if ((this._frameDriven && s._delay <= 15) || s._time >= s._delay) {
+          const elapsed = s._time;
+          s._time = this._frameDriven ? 0 : s._time - s._delay;
+          s._func(s, elapsed);
         }
       },
     };

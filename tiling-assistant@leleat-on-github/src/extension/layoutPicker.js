@@ -27,7 +27,12 @@ export const LayoutPickerTileType = Object.freeze({
     Q2: 6,
     Q3: 7,
     Q4: 8,
-    MAXIMIZE: 9
+    MAXIMIZE: 9,
+    LEFT_THIRD: 10,
+    RIGHT_TWO_THIRDS: 11,
+    LEFT_TWO_THIRDS: 12,
+    RIGHT_THIRD: 13,
+    CENTER_THIRD: 14
 });
 
 // omit '-symbolic.svg' as it is managed by iconPath function already
@@ -47,6 +52,25 @@ const ICONS = {
         states: {
             [LayoutPickerTileType.LEFT]: 'tile-left',
             [LayoutPickerTileType.RIGHT]: 'tile-right'
+        }
+    },
+
+    thirds: {
+        none: 'tile-thirds',
+
+        states: {
+            [LayoutPickerTileType.LEFT_THIRD]: 'tile-left-third',
+            [LayoutPickerTileType.CENTER_THIRD]: 'tile-center-third',
+            [LayoutPickerTileType.RIGHT_THIRD]: 'tile-right-third'
+        }
+    },
+
+    twoThirds: {
+        none: 'tile-two-thirds',
+
+        states: {
+            [LayoutPickerTileType.LEFT_TWO_THIRDS]: 'tile-left-two-thirds',
+            [LayoutPickerTileType.RIGHT_TWO_THIRDS]: 'tile-right-two-thirds'
         }
     },
 
@@ -76,7 +100,7 @@ export const LayoutPicker = GObject.registerClass({
             'tile-type', 'tile-type', 'tile-type',
             GObject.ParamFlags.READWRITE,
             LayoutPickerTileType.NONE,
-            LayoutPickerTileType.MAXIMIZE,
+            LayoutPickerTileType.CENTER_THIRD,
             LayoutPickerTileType.NONE
         )
     }
@@ -105,7 +129,6 @@ export const LayoutPicker = GObject.registerClass({
             // start with icons that appear to be not hovered
             const icon = this._createIcon(config.none);
 
-            config.icon = icon;
             this._icons[group] = icon;
 
             this._container.add_child(icon);
@@ -238,13 +261,13 @@ export const LayoutPicker = GObject.registerClass({
     _setLayoutPickerIcon(tileType) {
         this._clearIcons();
 
-        for (const config of Object.values(ICONS)) {
+        for (const [group, config] of Object.entries(ICONS)) {
             const iconName = config.states[tileType];
 
             if (!iconName)
                 continue;
 
-            this._updateIcon(config.icon, iconName);
+            this._updateIcon(this._icons[group], iconName);
             break;
         }
     }
@@ -279,8 +302,8 @@ export const LayoutPicker = GObject.registerClass({
     }
 
     _clearIcons() {
-        for (const config of Object.values(ICONS))
-            this._updateIcon(config.icon, config.none);
+        for (const [group, config] of Object.entries(ICONS))
+            this._updateIcon(this._icons[group], config.none);
     }
 
     _updateLayoutPickerTileType(curX, curY) {
@@ -304,6 +327,24 @@ export const LayoutPicker = GObject.registerClass({
                 ? LayoutPickerTileType.LEFT
                 : LayoutPickerTileType.RIGHT;
 
+            this._setLayoutPickerIcon(this.tileType);
+            return;
+        }
+
+        const thirds = rect(this._icons.thirds);
+        if (contains(thirds)) {
+            const portion = Math.min(2, Math.floor((curX - thirds.x) * 3 / thirds.w));
+            this.tileType = [LayoutPickerTileType.LEFT_THIRD,
+                LayoutPickerTileType.CENTER_THIRD, LayoutPickerTileType.RIGHT_THIRD][portion];
+            this._setLayoutPickerIcon(this.tileType);
+            return;
+        }
+
+        const twoThirds = rect(this._icons.twoThirds);
+        if (contains(twoThirds)) {
+            this.tileType = curX < twoThirds.x + twoThirds.w / 2
+                ? LayoutPickerTileType.LEFT_TWO_THIRDS
+                : LayoutPickerTileType.RIGHT_TWO_THIRDS;
             this._setLayoutPickerIcon(this.tileType);
             return;
         }
@@ -404,6 +445,7 @@ export const LayoutPicker = GObject.registerClass({
 
         global.display.disconnectObject(this);
         Main.layoutManager.disconnectObject(this);
+        global.disconnectObject(this);
 
         super.destroy();
     }

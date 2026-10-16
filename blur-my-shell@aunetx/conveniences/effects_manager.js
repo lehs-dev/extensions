@@ -1,4 +1,5 @@
 import { get_supported_effects } from '../effects/effects.js';
+import St from 'gi://St';
 
 /// An object to manage effects (by not destroying them all the time)
 export const EffectsManager = class EffectsManager {
@@ -75,9 +76,21 @@ export const EffectsManager = class EffectsManager {
     destroy_all() {
         const immutable_used_list = [...this.used];
         immutable_used_list.forEach(effect => this.remove(effect));
+        const effects = new Set();
         Object.keys(this.SUPPORTED_EFFECTS).forEach(effect_name => {
+            this[effect_name + '_effects'].forEach(effect => effects.add(effect));
             this[effect_name + '_effects'].splice(0, this[effect_name + '_effects'].length);
         });
+        if (effects.size > 0) {
+            const theme_context = St.ThemeContext.get_for_stage(global.stage);
+            effects.forEach(effect => {
+                // Effects are not destroyable actors, so connectObject() keeps
+                // scale handlers alive until they are explicitly disconnected.
+                theme_context.disconnectObject(effect);
+                this.connections.disconnect_all_for(effect);
+                effect.run_dispose();
+            });
+        }
     }
 
     _warn(str) {

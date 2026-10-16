@@ -28,10 +28,7 @@ export default class SpotlightExtension extends Extension {
     }
     _grabShortcut(accelerator) {
         this._keybindingManager.listenFor(accelerator, () => {
-            if (this._popup.visible)
-                this._popup.close();
-            else
-                this._popup.open();
+            this._popup.toggle();
         });
     }
     disable() {

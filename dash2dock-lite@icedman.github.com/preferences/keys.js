@@ -54,7 +54,7 @@ export const SettingsKeys = (patch) => {
       // test: { values: [0, 1] },
     },
     'lamp-app-animation': {
-      default_value: false,
+      default_value: true,
       widget_type: 'switch',
       key_maps: {},
       // test: { values: [0, 1] },
@@ -259,7 +259,7 @@ export const SettingsKeys = (patch) => {
     'animation-rise-curve': {
       default_value: 0,
       widget_type: 'dropdown',
-      test: { values: [0, 1] },
+      test: { values: [0, 1, 2] },
       themed: true,
     },
     'icon-shadow': {
@@ -272,29 +272,29 @@ export const SettingsKeys = (patch) => {
       test: { values: [-1, 0, 1] },
     },
     'border-radius': {
-      default_value: 0,
+      default_value: 3,
       widget_type: 'scale',
       themed: true,
     },
     'border-thickness': {
-      default_value: 0,
+      default_value: 1,
       widget_type: 'dropdown',
       test: { values: [0, 1, 2, 3] },
       themed: true,
     },
     'border-color': {
-      default_value: [1, 1, 1, 1],
+      default_value: [1, 1, 1, 0.25],
       widget_type: 'color',
       themed: true,
     },
     'separator-thickness': {
-      default_value: 0,
+      default_value: 1,
       widget_type: 'dropdown',
       test: { values: [0, 1, 2, 3] },
       themed: true,
     },
     'separator-color': {
-      default_value: [1, 1, 1, 1],
+      default_value: [1, 1, 1, 0.25],
       widget_type: 'color',
       themed: true,
     },

@@ -210,7 +210,10 @@ export default class TilingKeybindingHandler {
             'tile-left-half-ignore-ta', 'tile-right-half-ignore-ta',
             'tile-topleft-quarter-ignore-ta', 'tile-topright-quarter-ignore-ta',
             'tile-bottomleft-quarter-ignore-ta',
-            'tile-bottomright-quarter-ignore-ta'].includes(shortcutName)
+            'tile-bottomright-quarter-ignore-ta',
+            'tile-left-third-ignore-ta', 'tile-right-third-ignore-ta',
+            'tile-center-third-ignore-ta', 'tile-left-two-thirds-ignore-ta',
+            'tile-right-two-thirds-ignore-ta'].includes(shortcutName)
         ) {
             const workArea = new Rect(window.get_work_area_current_monitor());
             const rect = Twm.getDefaultTileFor(shortcutName, workArea);
@@ -269,10 +272,23 @@ export default class TilingKeybindingHandler {
                 direction = Direction.S;
                 break;
             case 'tile-left-half':
+            case 'tile-left-third':
+            case 'tile-left-two-thirds':
                 direction = Direction.W;
                 break;
             case 'tile-right-half':
+            case 'tile-right-third':
+            case 'tile-right-two-thirds':
                 direction = Direction.E;
+                break;
+        }
+
+        // Centering (and corner presets) has no focus direction. Apply that
+        // preset directly instead of asking for a neighbor on an undefined axis.
+        if (direction === undefined) {
+            const rect = Twm.getTileFor(shortcutName, workArea, window.get_monitor());
+            Twm.toggleTiling(window, rect);
+            return;
         }
 
         const nearestWindow = Twm.getNearestWindow(

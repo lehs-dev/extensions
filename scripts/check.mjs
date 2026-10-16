@@ -1,5 +1,6 @@
-import {readdirSync, readFileSync} from 'node:fs';
+import {existsSync, mkdtempSync, readdirSync, readFileSync, rmSync} from 'node:fs';
 import {join} from 'node:path';
+import {tmpdir} from 'node:os';
 import {spawnSync} from 'node:child_process';
 
 let failures = 0;
@@ -12,11 +13,22 @@ function walk(dir) {
         const path = join(dir, entry.name);
         if (entry.isDirectory()) {
             if (entry.name === 'schemas') {
-                const result = spawnSync('glib-compile-schemas', ['--strict', '--dry-run', path], {encoding: 'utf8'});
                 schemas++;
-                if (result.status !== 0) {
-                    console.error(path, result.error ?? result.stderr);
-                    failures++;
+                const target = mkdtempSync(join(tmpdir(), 'extension-schema-check-'));
+                try {
+                    const result = spawnSync('glib-compile-schemas', ['--strict', '--targetdir', target, path], {encoding: 'utf8'});
+                    if (result.status !== 0) {
+                        console.error(path, result.error ?? result.stderr);
+                        failures++;
+                    } else {
+                        const cache = join(path, 'gschemas.compiled');
+                        if (!existsSync(cache) || !readFileSync(cache).equals(readFileSync(join(target, 'gschemas.compiled')))) {
+                            console.error(`${cache}: stale or missing; run glib-compile-schemas --strict ${path}`);
+                            failures++;
+                        }
+                    }
+                } finally {
+                    rmSync(target, {recursive: true, force: true});
                 }
             }
             walk(path);

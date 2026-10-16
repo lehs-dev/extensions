@@ -65,7 +65,7 @@ export const Style = class {
   rgba(color) {
     let clr = color || [1, 1, 1, 1];
     let res = clr.map((r) => Math.floor(255 * r));
-    res[3] = clr[3].toFixed(1);
+    res[3] = Math.round(clr[3] * 1000) / 1000;
     return res.join(',');
   }
 

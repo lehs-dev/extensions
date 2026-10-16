@@ -590,6 +590,21 @@ export default class TilingMoveHandler {
         } else if (tileBottomRightQuarter) {
             this._tileRect = Twm.getTileFor('tile-bottomright-quarter', workArea, this._monitorNr);
             this._tilePreview.open(window, this._tileRect.meta, this._monitorNr);
+        } else if (layoutPickerTileType === LayoutPickerTileType.LEFT_THIRD) {
+            this._tileRect = Twm.getTileFor('tile-left-third', workArea, this._monitorNr);
+            this._tilePreview.open(window, this._tileRect.meta, this._monitorNr);
+        } else if (layoutPickerTileType === LayoutPickerTileType.RIGHT_THIRD) {
+            this._tileRect = Twm.getTileFor('tile-right-third', workArea, this._monitorNr);
+            this._tilePreview.open(window, this._tileRect.meta, this._monitorNr);
+        } else if (layoutPickerTileType === LayoutPickerTileType.CENTER_THIRD) {
+            this._tileRect = Twm.getTileFor('tile-center-third', workArea, this._monitorNr);
+            this._tilePreview.open(window, this._tileRect.meta, this._monitorNr);
+        } else if (layoutPickerTileType === LayoutPickerTileType.LEFT_TWO_THIRDS) {
+            this._tileRect = Twm.getTileFor('tile-left-two-thirds', workArea, this._monitorNr);
+            this._tilePreview.open(window, this._tileRect.meta, this._monitorNr);
+        } else if (layoutPickerTileType === LayoutPickerTileType.RIGHT_TWO_THIRDS) {
+            this._tileRect = Twm.getTileFor('tile-right-two-thirds', workArea, this._monitorNr);
+            this._tilePreview.open(window, this._tileRect.meta, this._monitorNr);
         } else if (pointerAtTopEdge) {
             // Switch between maximize & top tiling when keeping the mouse at the top edge.
             const monitorRect = global.display.get_monitor_geometry(this._monitorNr);

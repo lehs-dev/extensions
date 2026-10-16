@@ -1,5 +1,6 @@
 // Spotlight: theme decision logic
 // SPDX-License-Identifier: GPL-3.0-or-later
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 // Decides whether to use the light theme based on user preference and the
 // system color scheme when preference is set to default.
@@ -9,7 +10,9 @@ export function shouldUseLightTheme(settings, ifaceSettings) {
         return true;
     if (pref === 'dark')
         return false;
-    const scheme = ifaceSettings.get_string('color-scheme');
+    const forcedScheme = Main.sessionMode?.colorScheme;
+    const scheme = forcedScheme === 'prefer-light' || forcedScheme === 'prefer-dark'
+        ? forcedScheme : ifaceSettings.get_string('color-scheme');
     return scheme === 'prefer-light';
 }
 
