@@ -215,8 +215,8 @@ test('preset tiling preserves uniform gaps and native vertical maximization', as
     twm.destroy();
 });
 
-test('dual coordination with window-gap struts and tiling assistant inner gaps', async () => {
-    // Window Gap extension registers 16px struts, shrinking the monitor work area
+test('tiling respects reserved work area edges while applying inner gaps', async () => {
+    // Shell struts shrink the work area before tiling geometry is calculated.
     const struttedWorkArea = {x: 16, y: 48, width: 1888, height: 1008};
     const {twm, Rect, createWindow} = await setupTwm({'window-gap': 8, 'single-screen-gap': 0}, struttedWorkArea);
     const area = new Rect(struttedWorkArea);
@@ -243,51 +243,22 @@ test('dual coordination with window-gap struts and tiling assistant inner gaps',
     twm.destroy();
 });
 
-test('schema defaults give matching 12px logical inner and outer gaps without double scaling or extra outer margins', async () => {
-    const gapSchema = await readFile('window-gap@amirhosseinkarimi.github.io/schemas/org.gnome.shell.extensions.window-gap.gschema.xml', 'utf8');
+test('schema defaults give 12px logical inner gaps without double scaling or extra outer margins', async () => {
     const tilingSchema = await readFile('tiling-assistant@leleat-on-github/schemas/org.gnome.shell.extensions.tiling-assistant.gschema.xml', 'utf8');
     const defaultValue = (xml, key) => {
         const match = xml.match(new RegExp(`<key name="${key}"[^>]*>[\\s\\S]*?<default>([^<]+)</default>`));
         assert.ok(match, `schema defines ${key}`);
         return match[1].trim() === 'true' ? true : Number(match[1]);
     };
-    const gapDefaults = Object.fromEntries(['uniform', 'gap-size', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right']
-        .map(key => [key, defaultValue(gapSchema, key)]));
     const tilingDefaults = Object.fromEntries(['window-gap', 'single-screen-gap', 'screen-top-gap',
         'screen-bottom-gap', 'screen-left-gap', 'screen-right-gap']
         .map(key => [key, defaultValue(tilingSchema, key)]));
-    assert.equal(gapDefaults.uniform, true);
-    for (const key of ['gap-size', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right'])
-        assert.equal(gapDefaults[key], 12);
     assert.equal(tilingDefaults['window-gap'], 12);
     for (const key of ['single-screen-gap', 'screen-top-gap', 'screen-bottom-gap', 'screen-left-gap', 'screen-right-gap'])
-        assert.equal(tilingDefaults[key], 0, `${key} must not add margins inside Window Gap struts`);
+        assert.equal(tilingDefaults[key], 0, `${key} defaults to no additional work area margin`);
 
     for (const scale of [1, 1.25, 2]) {
-        const monitor = {x: -1920, y: -200, width: 1920, height: 1080, geometry_scale: scale};
-        const chrome = new Set();
-        const {GapManager} = await loadModule('window-gap@amirhosseinkarimi.github.io/gapManager.js', {
-            mocks: {
-                'gi://Clutter': {default: {Actor}},
-                'resource:///org/gnome/shell/ui/main.js': {layoutManager: {
-                    monitors: [monitor],
-                    addChrome: (actor, params) => {
-                        assert.equal(params.affectsStruts, true);
-                        chrome.add(actor);
-                    },
-                    removeChrome: actor => chrome.delete(actor),
-                }},
-            },
-        });
-        const gaps = new GapManager({
-            get_boolean: key => gapDefaults[key],
-            get_int: key => gapDefaults[key],
-        });
-        gaps.rebuild();
-        const [top, bottom, left, right] = gaps._actors;
-        assert.deepEqual([top.height, bottom.height, left.width, right.width], [12, 12, 12, 12]);
-        const area = {x: left.x + left.width, y: top.y + top.height,
-            width: right.x - left.x - left.width, height: bottom.y - top.y - top.height};
+        const area = {x: -1920, y: -168, width: 1920, height: 1048};
         const {twm, Rect, createWindow} = await setupTwm(tilingDefaults, area, scale);
         const first = createWindow();
         const second = createWindow();
@@ -296,13 +267,11 @@ test('schema defaults give matching 12px logical inner and outer gaps without do
         const a = first.get_frame_rect();
         const b = second.get_frame_rect();
         const inner = b.x - a.x - a.width;
-        assert.deepEqual([a.x - monitor.x, a.y - monitor.y,
-            monitor.x + monitor.width - b.x - b.width,
-            monitor.y + monitor.height - a.y - a.height], [12, 12, 12, 12], `${scale}x outer margins`);
+        assert.deepEqual([a.x - area.x, a.y - area.y,
+            area.x + area.width - b.x - b.width,
+            area.y + area.height - a.y - a.height], [0, 0, 0, 0], `${scale}x outer margins`);
         assert.equal(inner, 12, `${scale}x gap stays in logical stage coordinates`);
         twm.destroy();
-        gaps.destroy();
-        assert.equal(chrome.size, 0);
     }
 });
 

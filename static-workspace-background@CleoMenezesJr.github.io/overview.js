@@ -1,5 +1,6 @@
 import Clutter from 'gi://Clutter';
 import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
@@ -30,6 +31,7 @@ export class MissionControlOverview {
     this._workspaceOpacities = new Map();
     this._wallpapers = [];
     this._dashHeight = 0;
+    this._workspacesHiddenFromPick = false;
   }
 
   enable() {
@@ -50,6 +52,19 @@ export class MissionControlOverview {
       ];
     });
     this._showWorkspaceThumbnails();
+    this._patch(this._thumbnails, 'allocate', original => function (box, ...args) {
+      // ControlsManagerLayout already allocates this actor. Supply our box at
+      // that call, so ThumbnailsBox computes its target scale only once. A
+      // second allocation in _runPostAllocation can alternate target scales
+      // on a crowded strip and repeatedly queue native scale animations.
+      if (this.get_parent() !== controller._controls)
+        return original.call(this, box, ...args);
+      // Shell allocates the dash immediately before thumbnails, while its
+      // workspace-box helpers (which cache dashHeight) run afterward.
+      const rect = controller._getLayout(controller._layout._dash.height).workspaces;
+      controller._updateThumbnailScale(rect);
+      return original.call(this, actorBox(rect), ...args);
+    });
 
     this._card = new St.Widget({
       style_class: 'mission-control-app-grid',
@@ -103,6 +118,10 @@ export class MissionControlOverview {
         controller._layout.layout_changed();
       }
       const result = original.apply(this, args);
+      // Native allocation callbacks may disable extensions or finish hiding
+      // Overview synchronously. Do not touch actors released by disable().
+      if (!controller._active)
+        return result;
       const layout = controller._getLayout();
       controller._card.allocate(actorBox(layout.card));
       const monitor = Main.layoutManager.primaryMonitor;
@@ -113,7 +132,12 @@ export class MissionControlOverview {
         x: monitor ? 0 : layout.workspaceStrip.x,
         width: monitor?.width ?? layout.workspaceStrip.width,
       }));
-      controller._allocateThumbnails(layout.workspaces);
+      controller._updateThumbnailScale(layout.workspaces);
+      // A scale or monitor change can reallocate a paused gesture without
+      // changing its adjustment value. Recompute the same reveal position.
+      if (controller._workspaceRevealProgress() < 1 &&
+          !controller._controls._searchController.searchActive)
+        controller._thumbnails.translation_y = controller._controls._getThumbnailsBoxParams()[2];
       controller._syncWorkspaceStrip();
       return result;
     });
@@ -140,7 +164,13 @@ export class MissionControlOverview {
   }
 
   _connect(object, signal, callback) {
-    this._signals.push([object, object.connect(signal, callback)]);
+    const signals = this._signals;
+    signals.push([object, object.connect(signal, (...args) => {
+      // Keep retained callbacks from an old enable cycle inert, including
+      // after a later re-enable.
+      if (this._active && this._signals === signals)
+        callback(...args);
+    })]);
   }
 
   _patch(object, name, createOverride) {
@@ -267,7 +297,7 @@ export class MissionControlOverview {
     this._controls._updateThumbnailsBox();
   }
 
-  _allocateThumbnails(rect) {
+  _updateThumbnailScale(rect) {
     const thumbnails = this._thumbnails;
     const portholeHeight = thumbnails._porthole.height;
     const scale = portholeHeight > 0 ? rect.height / portholeHeight : 0;
@@ -275,12 +305,6 @@ export class MissionControlOverview {
       thumbnails._maxThumbnailScale = scale;
       thumbnails.queue_relayout();
     }
-    if (thumbnails.visible)
-      thumbnails.allocate(actorBox(rect));
-    // A scale or monitor change can reallocate a paused gesture without
-    // changing its adjustment value. Recompute the same reveal position.
-    if (this._workspaceRevealProgress() < 1 && !this._controls._searchController.searchActive)
-      thumbnails.translation_y = this._controls._getThumbnailsBoxParams()[2];
   }
 
   _restoreWorkspaceThumbnails() {
@@ -336,8 +360,21 @@ export class MissionControlOverview {
     return Math.max(0, Math.min(1, this._adjustment.value - 1));
   }
 
+  _setWorkspacesHiddenFromPick(hidden) {
+    if (this._workspacesHiddenFromPick === hidden)
+      return;
+    const workspaces = this._controls._workspacesDisplay;
+    // The enlarged display stacks above apps. Hiding its primary view or
+    // fading windows leaves reactive parents/children in Clutter's pick tree.
+    // Suppress the whole subtree while apps overlap it, including DND picks.
+    Shell.util_set_hidden_from_pick(workspaces, hidden);
+    this._workspacesHiddenFromPick = hidden;
+    workspaces.queue_redraw();
+  }
+
   _syncState() {
     const progress = this._gridProgress();
+    this._setWorkspacesHiddenFromPick(progress > 0);
     for (const actor of this._backgrounds.keys())
       actor.opacity = 0;
     this._controls._workspacesDisplay.setPrimaryWorkspaceVisible(this._primaryWorkspaceRequested);
@@ -450,6 +487,7 @@ export class MissionControlOverview {
       workspace.opacity = record.opacity;
     }
     this._workspaceOpacities.clear();
+    this._setWorkspacesHiddenFromPick(false);
     this._controls._workspacesDisplay.setPrimaryWorkspaceVisible(this._primaryWorkspaceRequested);
     this._refreshWorkspaceViews();
     this._restoreWorkspaceThumbnails();

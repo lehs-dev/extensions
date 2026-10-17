@@ -57,7 +57,9 @@ const PaintCallbackEffect = GObject.registerClass(
         }
 
         vfunc_paint(node, paint_context, paint_flags) {
-            this._callback();
+            // An in-flight paint may still reach the effect after its actor's
+            // destroy handler has cleared the callback.
+            this._callback?.();
             super.vfunc_paint(node, paint_context, paint_flags);
         }
     }

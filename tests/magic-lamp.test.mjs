@@ -70,17 +70,20 @@ test('minimize and restore complete without deformation during reduced motion or
     extension.enable();
     let animated = 0;
     extension.animate = () => animated++;
-    for (const reason of ['reducedMotion', 'animationsDisabled', 'gesture', 'overview']) {
+    const reasons = ['reducedMotion', 'animationsDisabled', 'gesture', 'heldGesture', 'keyboardSwitch', 'overview'];
+    for (const reason of reasons) {
         settings.reducedMotion = reason === 'reducedMotion' ? 1 : 0;
         settings.enable_animations = reason !== 'animationsDisabled';
         Main.wm._workspaceAnimation.gestureActive = reason === 'gesture';
+        Main.wm._workspaceAnimation._switchData = ['heldGesture', 'keyboardSwitch'].includes(reason)
+            ? {gestureActivated: false, inProgress: reason === 'keyboardSwitch'} : null;
         Main.overview.visible = reason === 'overview';
         windowManager.emit('minimize', new Actor());
         windowManager.emit('unminimize', new Actor());
     }
     assert.equal(animated, 0);
-    assert.equal(minimized, 4);
-    assert.equal(restored, 4);
+    assert.equal(minimized, reasons.length);
+    assert.equal(restored, reasons.length);
     Main.overview.visible = false;
     windowManager.emit('minimize', new Actor());
     assert.equal(animated, 1);
@@ -552,7 +555,8 @@ test('cross-monitor effects stop on gestures and disable drains detached snapsho
     extension.getIcon = () => target;
     extension.enable();
 
-    for (const [signal, stopReason] of [['minimize', 'gesture'], ['unminimize', 'reducedMotion']]) {
+    for (const [signal, stopReason] of [['minimize', 'gesture'], ['unminimize', 'heldGesture'],
+        ['minimize', 'keyboardSwitch'], ['unminimize', 'reducedMotion']]) {
         manager.emit(signal, source);
         const [effect] = extension._activeEffects;
         const snapshot = effect._animationActor;
@@ -563,6 +567,8 @@ test('cross-monitor effects stop on gestures and disable drains detached snapsho
         timeline.emit('new-frame', 16);
         assert.equal(effect.invalidations, 1);
         Main.wm._workspaceAnimation.gestureActive = stopReason === 'gesture';
+        Main.wm._workspaceAnimation._switchData = ['heldGesture', 'keyboardSwitch'].includes(stopReason)
+            ? {gestureActivated: false, inProgress: stopReason === 'keyboardSwitch'} : null;
         settings.reducedMotion = stopReason === 'reducedMotion' ? 1 : 0;
         timeline.emit('new-frame', 32);
         assert.equal(extension._activeEffects.size, 0);
@@ -572,10 +578,11 @@ test('cross-monitor effects stop on gestures and disable drains detached snapsho
         assert.equal(timeline.signals.size, 0);
         assert.equal(timeline.playing, false);
         Main.wm._workspaceAnimation.gestureActive = false;
+        Main.wm._workspaceAnimation._switchData = null;
         settings.reducedMotion = 0;
     }
-    assert.equal(minimized, 1);
-    assert.equal(restored, 1);
+    assert.equal(minimized, 2);
+    assert.equal(restored, 2);
 
     // Restore must retrace the very same geometry and opacity, including a
     // fallback on the original surface rather than a detached texture actor.
@@ -615,8 +622,8 @@ test('cross-monitor effects stop on gestures and disable drains detached snapsho
             assert.equal(source.signals.size, 0);
         }
     }
-    assert.equal(minimized, 3);
-    assert.equal(restored, 3);
+    assert.equal(minimized, 4);
+    assert.equal(restored, 4);
 
     target = dockIcon;
     manager.emit('minimize', source);
@@ -629,9 +636,9 @@ test('cross-monitor effects stop on gestures and disable drains detached snapsho
     assert.equal(idles.size, 0, 'Disable drains deferred cleanup');
     assert.equal(snapshot.destroyed, true);
     assert.equal(source.opacity, 230);
-    assert.equal(minimized, 4);
+    assert.equal(minimized, 5);
     detached.destroy();
-    assert.equal(minimized, 4, 'Completion runs exactly once');
+    assert.equal(minimized, 5, 'Completion runs exactly once');
     assert.equal(manager.signals.size, 0);
     assert.equal(source.signals.size, 0);
     assert.equal(uiGroup.children.length, 1, 'Only the original window group remains');

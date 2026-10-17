@@ -5,7 +5,7 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
 ## Architecture
 - **Workspace Root**: `/workspaces/extensions`
 - **Target Platform**: GNOME Shell 51 (Mutter 51 Wayland session, 60Hz/120Hz frame pacing, Cogl.Snippet fragment shaders)
-- **11 Extensions**:
+- **10 Extensions**:
   1. `blur-my-shell@aunetx` — Screen/overview/window blur using Cogl.Snippet fragment shaders.
   2. `clipboard-history@alexsaveau.dev` — Async clipboard storage with Gio and native GJS migration.
   3. `compiz-alike-magic-lamp-effect@hermes83.github.com` — Clutter.DeformEffect mesh genie window minimization/restoration.
@@ -16,7 +16,6 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
   8. `spotlight@nin` — Compact floating search panel with search stealer and transparent outside-click surface.
   9. `static-workspace-background@CleoMenezesJr.github.io` — Fixed wallpaper during workspace switch transitions.
   10. `tiling-assistant@leleat-on-github` — Window snap presets (halves, quarters, 1/3-2/3), native window corners, gap coordination.
-  11. `window-gap@amirhosseinkarimi.github.io` — Screen margin struts (`affectsStruts: true`) for uniform window spacing.
 
 ## Overview appearance
 
@@ -47,7 +46,7 @@ the first allocation. Normal Overview access remains available after login.
 | 1 | Dash2Dock Lite Cosine Bell Curve | Refine magnification to follow smooth continuous raised cosine bell curve $0.5 \times (1 - \cos(\pi p))$ | M1 | ORIGINAL_REQUEST § R2 |
 | 2 | Magic Lamp Dynamic Dock Target | Coordinate Compiz Magic Lamp minimize/unminimize trajectory with dynamic Dash2Dock Lite icon coordinates | M1 | ORIGINAL_REQUEST § R2 |
 | 3 | Tiling Assistant 1/3 & 2/3 Presets | Harmonize Tiling Assistant with macOS Sequoia-style 1/3 and 2/3 window snap presets | M2 | ORIGINAL_REQUEST § R3 |
-| 4 | Native Window Corners & Gaps | Leave window corner shape to applications and GNOME; support panel-aware screen gaps and configurable edges alongside Window Gap | M2 | User feedback 2026-10-17 |
+| 4 | Native Window Corners & Gaps | Leave window corner shape to applications and GNOME; support panel-aware screen gaps and configurable edges | M2 | User feedback 2026-10-17 |
 | 5 | Spotlight Compact Panel | Compact light/dark popup with transparent outside-click surface; full-screen blur/dim removed per user feedback | M2 | User feedback 2026-10-16 |
 | 6 | Spotlight Instant Typing & Navigation | Eliminate input latency (<16ms, synchronous focus grab) and add keyboard navigation (arrows) | M2 | ORIGINAL_REQUEST § R3 |
 | 7 | Fixed Wallpaper Swipe | Keep workspace wallpaper stationary during multi-touch swipe transitions | M2 | ORIGINAL_REQUEST § R3 |
@@ -78,8 +77,8 @@ the first allocation. Normal Overview access remains available after login.
   ```
 - **Magic Lamp Contract**: `this.toTheBorder = false;` in `compiz-alike-magic-lamp-effect/extension.js`. Use the received `icon.x, icon.y, icon.width, icon.height` to compute vertex deformation trajectory toward the actual dock icon.
 
-### Tiling Assistant ↔ Window Gap
-- **Work Area Contract**: Window Gap provides outer screen struts via `Main.layoutManager.addChrome(actor, { affectsStruts: true })`.
+### Tiling Assistant screen gaps
+- **Work Area Contract**: Use GNOME's monitor work area, including any existing panel or dock struts. Window Gap has been removed.
 - **Inner Gap Contract**: Tiling Assistant applies `windowGap / 2` between adjacent tiles and respects `singleScreenGap` at outer boundaries.
 - **Panel Edge Gap**: Uniform screen gaps use `panel-edge-gap` (default 0) only beside the visible panel on its actual monitor. Displays without a panel keep the uniform gap. Custom screen edges support four independent values, scoped to panel displays by default; legacy custom settings retain their previous scope. Tile, preview and resize share the same effective gaps.
 - **Window Corners**: Applications and GNOME determine window corner shape; Tiling Assistant does not attach a rounding shader. Normal tile edge constraints and partial maximization are restored after removing the corner-preserving workaround.
@@ -91,5 +90,4 @@ the first allocation. Normal Overview access remains available after login.
 - `tiling-assistant@leleat-on-github/` — Owned by M2 (`src/extension/tilingWindowManager.js`, `src/extension/layoutPicker.js`, `src/extension/tilingPopup.js`, schemas)
 - `spotlight@nin/` — Owned by M2 (`lib/popup/widget/spotlightPopup.js`, `lib/popup/components/positioner.js`, `lib/popup/components/backdrop.js`, `lib/overview/defense.js`, `stylesheet.css`)
 - `static-workspace-background@CleoMenezesJr.github.io/` — Owned by M2 (`extension.js`)
-- `window-gap@amirhosseinkarimi.github.io/` — Owned by M2 (`gapManager.js`)
 - `tests/` — Owned by M3 / Final Milestone

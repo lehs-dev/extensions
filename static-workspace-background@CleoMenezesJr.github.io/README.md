@@ -50,8 +50,9 @@ Just Perfection.
   emerge below the panel, reverse smoothly when a gesture is cancelled, and
   remain clipped below the panel during its reveal.
 - Enter the app grid directly and from the window picker. Only apps and page
-  controls should be inside the translucent panel; test an app folder, keyboard
-  focus and moving an icon between pages.
+  controls should be inside the translucent panel. Hover an icon, click to
+  launch an app, then test an app folder, page controls, keyboard focus and
+  moving an icon between pages. Repeat after reversing a touchpad transition.
 - With populated workspaces on either side, check that neighboring windows do
   not peek in at rest. Open the app grid slowly with a gesture and reverse it:
   window previews should fade at their picker positions throughout.

@@ -239,18 +239,30 @@ class Hint {
     }
 
     _overrideWorkspaceAnimationSwitch() {
-        this._originalWorkspaceAnimationSwitch =
-            Main.wm._workspaceAnimation.animateSwitch;
+        const animation = Main.wm._workspaceAnimation;
+        const override = this._workspaceAnimationOverride = {
+            owner: animation,
+            original: animation.animateSwitch,
+            hint: this
+        };
 
-        const that = this;
-
-        Main.wm._workspaceAnimation.animateSwitch = function (
+        override.wrapper = function (
                 from,
                 to,
                 direction,
                 onComplete
         ) {
-            that._originalWorkspaceAnimationSwitch.call(
+            const that = override.hint;
+
+            // A second switch can arrive before the deferred focus lookup.
+            // Keep only the current destination, including moves that do not
+            // schedule a hint, and leave a single source for destroy to cancel.
+            if (that?._workspaceSwitchTimer) {
+                GLib.Source.remove(that._workspaceSwitchTimer);
+                that._workspaceSwitchTimer = 0;
+            }
+
+            const result = override.original.call(
                 this,
                 from,
                 to,
@@ -261,8 +273,10 @@ class Hint {
             // This is set if the focused window moved to the new workspace
             // along with the workspace switch animation. E. g. when using
             // Shift + Super + Alt + Arrow_Keys.
-            if (this.movingWindow)
-                return;
+            // A later extension may retain this wrapper after disable. Keep
+            // that call chain working while dropping the disabled hint owner.
+            if (!that || override.hint !== that || this.movingWindow)
+                return result;
 
             // There are 2 different 'focus behaviors' during a workspace
             // animation. 1: When the workspace switch is initiated by an app or
@@ -286,9 +300,15 @@ class Hint {
                         that.indicate(newFocus);
                     else
                         that.resetAnimation();
+
+                    return GLib.SOURCE_REMOVE;
                 }
             );
+
+            return result;
         };
+
+        animation.animateSwitch = override.wrapper;
     }
 
     shouldIndicate(window) {
@@ -341,10 +361,15 @@ class Hint {
     }
 
     _restoreWorkspaceAnimationSwitch() {
-        Main.wm._workspaceAnimation.animateSwitch =
-            this._originalWorkspaceAnimationSwitch;
+        const override = this._workspaceAnimationOverride;
+        if (!override)
+            return;
 
-        this._originalWorkspaceAnimationSwitch = null;
+        override.hint = null;
+        if (override.owner.animateSwitch === override.wrapper)
+            override.owner.animateSwitch = override.original;
+
+        this._workspaceAnimationOverride = null;
     }
 
     _stopIndicatingOnWindowClose() {
@@ -595,9 +620,16 @@ class StaticOutlineHint extends AnimatedOutlineHint {
 
         global.display.disconnectObject(this);
 
-        GLib.Source.remove(this._resetTimer);
-
         super.destroy();
+    }
+
+    resetAnimation() {
+        if (this._resetTimer) {
+            GLib.Source.remove(this._resetTimer);
+            this._resetTimer = 0;
+        }
+
+        super.resetAnimation();
     }
 
     /**
@@ -649,8 +681,9 @@ class StaticOutlineHint extends AnimatedOutlineHint {
             GLib.PRIORITY_DEFAULT,
             workspaceSwitchAnimationDuration,
             () => {
-                this.resetAnimation();
                 this._resetTimer = 0;
+                this.resetAnimation();
+                return GLib.SOURCE_REMOVE;
             }
         );
     }

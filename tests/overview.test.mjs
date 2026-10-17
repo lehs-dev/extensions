@@ -22,6 +22,7 @@ class OverviewActor extends Actor {
     get_clip() { return this.clip; }
     remove_clip() { this.clip = null; this.has_clip = false; }
     queue_relayout() { this.relayouts = (this.relayouts ?? 0) + 1; }
+    queue_redraw() { this.redraws = (this.redraws ?? 0) + 1; }
     insert_child_below(actor, sibling) {
         this.insert_child_at_index(actor, sibling ? this.children.indexOf(sibling) : 0);
     }
@@ -56,7 +57,7 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
     }
     class NativeWorkspacesView extends WorkspacesViewBase {
         constructor(monitorIndex, overviewAdjustment, fitAdjustment) {
-            super({mapped: true});
+            super({mapped: true, reactive: true});
             this._monitorIndex = monitorIndex;
             this._overviewAdjustment = overviewAdjustment;
             this._fitModeAdjustment = fitAdjustment;
@@ -149,18 +150,22 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
     const uiGroup = new OverviewActor();
     const overviewGroup = new OverviewActor();
     const controls = new OverviewActor();
-    const workspaceContainer = new OverviewActor();
+    const workspaceContainer = new OverviewActor({reactive: true});
     workspaceContainer._primaryVisible = true;
     workspaceContainer.setPrimaryWorkspaceVisible = function (visible) {
         assert.equal(this, workspaceContainer);
+        if (this._primaryVisible === visible)
+            return;
         this._primaryVisible = visible;
+        const primary = this._getPrimaryView?.();
+        if (primary)
+            primary.visible = visible;
     };
     const pickerBackground = new WorkspaceBackground();
     pickerBackground._init({opacity: 173});
     const foreignBackground = new BackgroundGroup({opacity: 137});
     const thumbnailBackground = new OverviewActor({opacity: 117});
     workspaceContainer.add_child(pickerBackground);
-    controls.add_child(workspaceContainer);
     overviewGroup.add_child(foreignBackground);
     overviewGroup.add_child(controls);
     uiGroup.add_child(overviewGroup);
@@ -185,6 +190,8 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
     controls._workspacesDisplay = workspaceContainer;
     controls.add_child(appDisplay);
     controls.add_child(thumbnails);
+    // Native ControlsManager stacks the reactive display above AppDisplay.
+    controls.add_child(workspaceContainer);
     const adjustment = new Actor({value: 0});
     controls._stateAdjustment = adjustment;
     const fitAdjustment = new Actor({value: 0});
@@ -243,10 +250,18 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
     const nativeAppBox = new ActorBox({x1: 90, y1: 200, x2: 1830, y2: 1100});
     const layout = {
         _workAreaBox: new ActorBox({x1: 0, y1: 32, x2: 1920, y2: 1200}),
+        _dash: new OverviewActor({height: 72}),
         changes: 0,
         postCalls: 0,
         postCallback: null,
         layout_changed() { this.changes++; },
+        allocate(...args) {
+            // ControlsManagerLayout allocates thumbnails before running its
+            // post-allocation callbacks. Keep both steps observable here.
+            if (thumbnails.visible)
+                thumbnails.allocate(new ActorBox({x1: 0, y1: 100, x2: 1920, y2: 236}));
+            return this._runPostAllocation(...args);
+        },
         _computeWorkspacesBoxForState() {
             assert.equal(this, layout, 'native workspace layout receives its instance');
             return nativeWorkspaceBox;
@@ -281,9 +296,36 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
     const Main = {uiGroup, overview, layoutManager};
     const stage = new Actor();
     const theme = {scaleFactor: 1};
+    const hiddenFromPick = new Set();
+    const pickChanges = [];
+    // Model Clutter picking at explicit GI boundaries: last sibling wins,
+    // non-reactive parents still traverse children, and opacity is ignored.
+    // Shell's stop-pick handler skips the entire subtree, also in PICK_ALL.
+    const pick = (actor, x, y, all = false) => {
+        if (!actor.visible || actor.destroyed || hiddenFromPick.has(actor))
+            return null;
+        x -= actor.x;
+        y -= actor.y;
+        for (const child of actor.get_children().reverse()) {
+            const target = pick(child, x, y, all);
+            if (target)
+                return target;
+        }
+        return (all || actor.reactive) && x >= 0 && y >= 0 && x < actor.width && y < actor.height
+            ? actor : null;
+    };
     const mocks = {
         'gi://Clutter': {default: {ActorBox, BinLayout}},
         'gi://Meta': {default: {BackgroundGroup}},
+        'gi://Shell': {default: {
+            util_set_hidden_from_pick(actor, hidden) {
+                pickChanges.push([actor, hidden]);
+                if (hidden)
+                    hiddenFromPick.add(actor);
+                else
+                    hiddenFromPick.delete(actor);
+            },
+        }},
         'gi://St': {default: {
             Widget: OverviewActor,
             ThemeContext: {get_for_stage: current => {
@@ -335,6 +377,7 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
         nativeAppBox, overview, layoutManager, uiGroup, theme, state, appDisplay,
         thumbnails, allocateGrid, allocate, NativeWorkspacesView, primaryView,
         workspaceManager, fitAdjustment,
+        pick: (x, y, all = false) => pick(uiGroup, x, y, all), hiddenFromPick, pickChanges,
     };
 }
 
@@ -426,7 +469,7 @@ test('the native strip overrides hidden thumbnails and retains search fades and 
     assert.equal(controls._updateThumbnailsBox, originals.updateThumbnails);
     assert.equal(thumbnails.shouldShow, true, 'first-Super strip overrides Just Perfection visibility');
     state(1);
-    layout._runPostAllocation();
+    layout.allocate();
     assert.equal(thumbnails.visible, true);
     assert.equal(thumbnails.expandFraction, 1);
     assert.equal(thumbnails.opacity, 255);
@@ -470,11 +513,11 @@ test('the native strip overrides hidden thumbnails and retains search fades and 
 test('workspace strip drops below the panel with Overview progress and reverses with a gesture', async () => {
     const {subject, state, thumbnails, layout, theme} = await setup();
     subject.enable();
-    layout._runPostAllocation();
+    layout.allocate();
     assert.equal(subject._workspaceStrip.visible, false, 'desktop starts with no visible strip');
     for (const progress of [0.1, 0.5, 0.25, 1, 0.75, 0]) {
         state(progress);
-        layout._runPostAllocation();
+        layout.allocate();
         const strip = subject._workspaceStrip;
         const offset = -strip.height * (1 - progress);
         assert.equal(strip.translation_y, offset);
@@ -493,9 +536,9 @@ test('workspace strip drops below the panel with Overview progress and reverses 
         }
     }
     state(0.5);
-    layout._runPostAllocation();
+    layout.allocate();
     theme.scaleFactor = 1.5;
-    layout._runPostAllocation();
+    layout.allocate();
     assert.equal(thumbnails.translation_y, -subject._workspaceStrip.height / 2,
         'a paused gesture retains its reveal progress across scale changes');
     subject.disable();
@@ -508,7 +551,7 @@ test('disabling during a reveal and search restores thumbnail clipping and nativ
     subject.enable();
     const retainedParams = controls._getThumbnailsBoxParams;
     state(0.5);
-    layout._runPostAllocation();
+    layout.allocate();
     assert.equal(thumbnails.get_clip()[0], originalClip[0]);
     assert.equal(thumbnails.get_clip()[2], originalClip[2]);
     assert.ok(thumbnails.get_clip()[1] > originalClip[1]);
@@ -532,10 +575,10 @@ test('thumbnail scale follows work-area changes and restores the latest requeste
     const originalDescriptor = Object.getOwnPropertyDescriptor(thumbnails, '_shouldShow');
     subject.enable();
     state(1);
-    layout._runPostAllocation();
+    layout.allocate();
     const initialScale = thumbnails._maxThumbnailScale;
     theme.scaleFactor = 1.5;
-    layout._runPostAllocation();
+    layout.allocate();
     assert.ok(thumbnails._maxThumbnailScale > initialScale);
     assert.equal(thumbnails._maxThumbnailScale, thumbnails.height / thumbnails._porthole.height);
     thumbnails.settingsShouldShow = true;
@@ -546,6 +589,88 @@ test('thumbnail scale follows work-area changes and restores the latest requeste
         ...originalDescriptor, value: true,
     });
     assert.equal(thumbnails._maxThumbnailScale, 0.05);
+});
+
+test('crowded thumbnails receive one allocation and one stable native target scale during gesture reversals', async () => {
+    const {subject, thumbnails, state, layout} = await setup();
+    const nativeAllocate = thumbnails.allocate;
+    const allocations = [];
+    const targetScales = [];
+    thumbnails.allocate = function (box, ...args) {
+        allocations.push(box);
+        // GNOME 51 ThumbnailsBox.vfunc_allocate bounds the native target scale
+        // by available width and maxThumbnailScale. Twelve workspaces make
+        // our inset strip narrower than the full-width native allocation.
+        const target = Math.min(box.get_width() / 12 / this._porthole.width,
+            this._maxThumbnailScale);
+        if (target !== targetScales.at(-1))
+            targetScales.push(target);
+        return nativeAllocate.call(this, box, ...args);
+    };
+    const observedNativeAllocate = thumbnails.allocate;
+    subject.enable();
+    for (const progress of [0.2, 0.7, 0.35, 1, 0.6, 0.05]) {
+        state(progress);
+        const before = allocations.length;
+        layout.allocate();
+        assert.equal(allocations.length - before, 1,
+            'one parent allocation must not allocate thumbnails twice');
+        assert.equal(thumbnails.y, subject._getLayout().workspaces.y);
+    }
+    assert.equal(targetScales.length, 1,
+        'unchanged geometry must not restart native thumbnail scale animation');
+    subject.disable();
+    assert.equal(thumbnails.allocate, observedNativeAllocate,
+        'the prior allocation method is restored');
+});
+
+test('thumbnail allocation uses the dash height from the current layout pass', async () => {
+    const {subject, thumbnails, state, layout} = await setup();
+    subject.enable();
+    state(0.5);
+    layout._workAreaBox = new ActorBox({x1: 0, y1: 32, x2: 1366, y2: 768});
+    layout._dash.height = 110;
+    // Workspace helpers run after thumbnail allocation in native Shell.
+    layout.postCallback = () => layout._computeWorkspacesBoxForState(1, null, 0, 110);
+    layout.allocate();
+    assert.ok(Math.abs(thumbnails.height - subject._getLayout().workspaces.height) < 1e-7);
+    assert.equal(thumbnails.y, subject._workspaceStrip.y + 8);
+    subject.disable();
+});
+
+test('native post-allocation callbacks can disable during a gesture without touching released actors', async () => {
+    const {subject, state, layout, originals, managers} = await setup();
+    subject.enable();
+    state(0.35);
+    const retainedPostAllocation = layout._runPostAllocation;
+    layout.postCallback = () => subject.disable();
+    assert.equal(layout.allocate(), 'native-post-allocation');
+    assert.equal(subject._card, null);
+    assert.equal(subject._workspaceStrip, null);
+    assert.equal(layout._runPostAllocation, originals.postAllocation);
+    assert.ok(managers.every(manager => manager.destroyCalls === 1));
+    layout.postCallback = null;
+    assert.equal(retainedPostAllocation.call(layout), 'native-post-allocation');
+});
+
+test('callbacks retained by a signal emission stay inactive after disable and re-enable', async () => {
+    const {subject, state, adjustment, overview} = await setup();
+    // The adapter retains a handler snapshot during emission. Also retain one
+    // explicitly to check that callbacks cannot outlive their enable cycle.
+    const stop = adjustment.connect('notify::value', () => subject.disable());
+    subject.enable();
+    const retainedShowing = [...overview.signals.values()]
+        .find(signal => signal.name === 'showing').callback;
+    assert.doesNotThrow(() => state(0.4));
+    adjustment.disconnect(stop);
+    subject.enable();
+    let scans = 0;
+    subject._scanBackgrounds = () => scans++;
+    retainedShowing();
+    assert.equal(scans, 0, 'a callback from an old enable cycle remains inert');
+    overview.emit('showing');
+    assert.equal(scans, 1, 'the current handler still runs');
+    subject.disable();
 });
 
 test('app grid hides primary workspace previews while retaining native visibility requests', async () => {
@@ -571,6 +696,87 @@ test('app grid hides primary workspace previews while retaining native visibilit
     subject.disable();
     assert.equal(workspaceContainer.setPrimaryWorkspaceVisible, original);
     assert.equal(workspaceContainer._primaryVisible, true, 'disable restores the last native visibility request');
+});
+
+test('app grid icons, folders and page controls receive pointer input above the workspace display', async () => {
+    const {subject, state, allocateGrid, appDisplay, workspaceContainer, primaryView, pick} = await setup();
+    subject.enable();
+    state(2);
+    allocateGrid();
+    assert.equal(primaryView.visible, false, 'native visibility hides the primary child');
+    assert.equal(workspaceContainer.reactive, true, 'native parent remains reactive');
+    for (const [name, x, y] of [['app', 80, 120], ['folder', 280, 300], ['page', 600, 750]]) {
+        const target = new OverviewActor({name, x, y, width: 80, height: 80, reactive: true});
+        appDisplay.add_child(target);
+        const events = [];
+        target.connect('enter-event', () => events.push('hover'));
+        target.connect('button-release-event', () => events.push('click'));
+        const [screenX, screenY] = target.get_transformed_position();
+        const picked = pick(screenX + 40, screenY + 40);
+        assert.equal(picked, target, `${name} must receive input through the invisible workspace parent`);
+        picked.emit('enter-event');
+        picked.emit('button-release-event');
+        assert.deepEqual(events, ['hover', 'click']);
+    }
+    // Native search cleanup writes reactive=true again before requesting the
+    // primary workspace. It must not put the blocker back over app icons.
+    workspaceContainer.reactive = false;
+    workspaceContainer.setPrimaryWorkspaceVisible(false);
+    workspaceContainer.reactive = true;
+    workspaceContainer.setPrimaryWorkspaceVisible(true);
+    const target = appDisplay.get_children()[0];
+    const [x, y] = target.get_transformed_position();
+    assert.equal(pick(x + 40, y + 40), target);
+    subject.disable();
+});
+
+test('fading workspace descendants cannot intercept app input and gesture reversal restores window picking', async () => {
+    const {subject, state, allocateGrid, appDisplay, workspaceContainer, primaryView, pick,
+        NativeWorkspacesView, adjustment, fitAdjustment, overviewGroup} = await setup();
+    const target = new OverviewActor({x: 80, y: 120, width: 80, height: 80, reactive: true});
+    appDisplay.add_child(target);
+    const secondary = new NativeWorkspacesView(1, adjustment, fitAdjustment);
+    secondary.allocate(new ActorBox({x1: -1600, y1: -200, x2: 0, y2: 700}));
+    overviewGroup.add_child(secondary);
+    subject.enable();
+    allocateGrid();
+    primaryView.allocate(new ActorBox({x2: workspaceContainer.width, y2: workspaceContainer.height}));
+    for (const value of [1.1, 1.5, 2, 1.7, 1.2]) {
+        state(value);
+        // Non-reactive parents alone do not prevent their children being
+        // picked. Include DND's PICK_ALL mode, which also ignores reactive.
+        workspaceContainer.reactive = false;
+        const [x, y] = target.get_transformed_position();
+        assert.equal(pick(x + 40, y + 40), target, `app input at overview progress ${value}`);
+        assert.equal(pick(x + 40, y + 40, true), target, `drag target at overview progress ${value}`);
+        assert.equal(pick(-800, 250), secondary, 'secondary monitor keeps its native input');
+    }
+    state(1);
+    appDisplay.visible = false; // Native AppDisplay hides at the window picker.
+    const [x, y] = workspaceContainer.get_transformed_position();
+    assert.equal(pick(x + 400, y + 400), primaryView, 'reversing restores the workspace subtree');
+    assert.equal(primaryView.visible, true);
+    subject.disable();
+});
+
+test('disable and re-enable clear workspace pick suppression in partial and full app grid states', async () => {
+    const {subject, state, workspaceContainer, hiddenFromPick, pickChanges} = await setup();
+    subject.enable();
+    state(1);
+    assert.equal(pickChanges.length, 0, 'picker input needs no pick override');
+    subject.disable();
+    for (const value of [1.5, 2, 1.5, 2]) {
+        state(value);
+        subject.enable();
+        assert.equal(hiddenFromPick.has(workspaceContainer), true);
+        const changes = pickChanges.length;
+        const redraws = workspaceContainer.redraws;
+        state(value);
+        assert.equal(pickChanges.length, changes, 'unchanged progress does not reconnect the native pick handler');
+        subject.disable();
+        assert.equal(hiddenFromPick.size, 0);
+        assert.equal(workspaceContainer.redraws, redraws + 1, 'picking is invalidated after cleanup');
+    }
 });
 
 test('idle Overview excludes neighboring windows and retains native swipe and drag visibility', async () => {
@@ -680,7 +886,7 @@ test('native thumbnails occupy the first-Super strip and the app grid card conta
         assert.equal(layout._getAppDisplayBoxForState(value, null, 0, 72), nativeAppBox);
     state(1);
     layout.postCallback = () => allocate(1, 96);
-    layout._runPostAllocation();
+    layout.allocate();
     assert.equal(thumbnails.visible, true);
     assert.equal(thumbnails.opacity, 255);
     assert.equal(subject._card.visible, false);
@@ -694,7 +900,7 @@ test('native thumbnails occupy the first-Super strip and the app grid card conta
     assert.ok(workspaceContainer.y + workspaceContainer.height <= 1200 - 96);
     state(2);
     layout.postCallback = () => allocateGrid(96);
-    assert.equal(layout._runPostAllocation('allocation-token'), 'native-post-allocation');
+    assert.equal(layout.allocate('allocation-token'), 'native-post-allocation');
     assert.deepEqual(layout.lastPostArgs, ['allocation-token']);
     assert.equal(layout.postCalls, 2);
     assert.equal(thumbnails.visible, false);
@@ -708,7 +914,7 @@ test('native thumbnails occupy the first-Super strip and the app grid card conta
     layout._workAreaBox = new ActorBox({x1: 12, y1: 32, x2: 1908, y2: 1200});
     state(1);
     layout.postCallback = () => allocate(1, 96);
-    layout._runPostAllocation();
+    layout.allocate();
     assert.equal(subject._workspaceStrip.x, 0);
     assert.equal(subject._workspaceStrip.width, 1920);
     assertInside(rect(thumbnails), rect(subject._workspaceStrip));
@@ -728,7 +934,7 @@ test('a late Just Perfection workspace override is repaired and restored without
     };
     layout._computeWorkspacesBoxForState = jpOverride;
     state(2);
-    layout._runPostAllocation();
+    layout.allocate();
     assert.notEqual(layout._computeWorkspacesBoxForState, jpOverride);
     const gridBox = layout._computeWorkspacesBoxForState(2, null, 0, 72);
     assert.ok(gridBox.get_height() > 0);

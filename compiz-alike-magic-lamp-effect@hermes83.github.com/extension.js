@@ -41,6 +41,14 @@ const clamp = value => Math.max(0, Math.min(1, value));
 const smoothstep = value => { const t = clamp(value); return t * t * (3 - 2 * t); };
 const mix = (from, to, progress) => from + (to - from) * progress;
 
+// gestureActive only becomes true after the fingers are released. The native
+// switch data also covers the interactive drag and keyboard transitions, when
+// Shell owns window clones and the real window actors must remain stable.
+function workspaceAnimationActive() {
+    const animation = Main.wm._workspaceAnimation;
+    return !!(animation?._switchData || animation?.gestureActive);
+}
+
 // Icon geometry is optional on Wayland. Missing or stale geometry must never
 // send a window to an arbitrary screen corner or an invisible Overview icon.
 function iconTarget(icon, monitors = []) {
@@ -191,7 +199,7 @@ export default class CompizMagicLampEffectExtension extends Extension {
         const settings = St.Settings.get();
         return settings.enable_animations &&
             !(St.ReducedMotion && settings.reducedMotion === St.ReducedMotion.REDUCE) &&
-            !Main.overview.visible && !Main.wm._workspaceAnimation?.gestureActive;
+            !Main.overview.visible && !workspaceAnimationActive();
     }
 
     getIcon(actor) {
@@ -362,7 +370,7 @@ export class AbstractCommonMagicLampEffect extends Clutter.DeformEffect {
         const settings = St.Settings.get();
         return !settings.enable_animations ||
             (St.ReducedMotion && settings.reducedMotion === St.ReducedMotion.REDUCE) ||
-            Main.overview.visible || Main.wm._workspaceAnimation?.gestureActive;
+            Main.overview.visible || workspaceAnimationActive();
     }
 
     _updateProgress(progress) {

@@ -1,5 +1,66 @@
 # Kết quả tiếp quản GNOME 51 / macOS Sequoia
 
+## Sửa App Grid không nhận hover/click
+
+Lớp `WorkspacesDisplay` nằm trên `AppDisplay` và được mở rộng để giữ vị trí
+cửa sổ khi fade. Ẩn riêng primary view không tắt khả năng nhận input của lớp
+cha; các actor trong suốt cũng vẫn có thể được Clutter chọn làm đích chuột.
+Vì vậy icon vẫn hiện nhưng hover/click bị lớp workspace chặn.
+
+Đã dùng [API native `Shell.util_set_hidden_from_pick`](https://github.com/GNOME/gnome-shell/blob/51.0/src/shell-util.c)
+để loại toàn bộ cây workspace chính khỏi hit-test khi tiến độ Overview lớn
+hơn Window Picker, gồm cả DND. Khi vuốt ngược về Window Picker hoặc disable,
+hook này được gỡ và cache picking được làm mới qua redraw. Native search
+reactivity và workspace trên monitor phụ tiếp tục do Shell quản lý.
+
+Fixture test nay mô phỏng đúng thứ tự lớp native, parent `reactive: true` và
+việc hide primary child. Ba regression mới kiểm tra icon/folder/page control,
+actor con trong lúc fade, đảo gesture, native search writes, monitor phụ và
+disable/re-enable. Source trước bản sửa: **23/26 PASS, 3 FAIL** đúng các ca
+mới; source sửa: **26/26 PASS**. Chưa xác minh trực tiếp trong phiên GNOME.
+
+## Rà soát bổ sung đường chạy touchpad
+
+Người dùng xác nhận chưa gặp crash ở thời điểm rà soát. Các thay đổi dưới đây
+sửa những lỗi logic tái hiện bằng test; chưa xác nhận chúng là nguyên nhân
+của một crash compositor trên thiết bị thật.
+
+- **Overview:** cấp geometry thumbnail ngay trong allocation native, bỏ lần
+  allocate thứ hai có thể làm đích scale đổi qua lại khi nhiều workspace.
+  Dùng chiều cao Dock của frame hiện tại; callback post-allocation và signal
+  cũ không truy cập actor sau disable hoặc sau một chu kỳ enable mới.
+- **Magic Lamp:** tránh chạy hiệu ứng trong toàn bộ vòng đời đổi workspace,
+  gồm lúc ngón tay còn giữ trên touchpad. Hiệu ứng đang chạy dừng và phục hồi
+  actor/completion đúng một lần khi workspace animation bắt đầu.
+- **Blur my Shell:** paint callback đã dọn không còn bị gọi; cleanup hủy cả
+  widget chứa wallpaper và wallpaper cũ đang fade. Đổi thứ tự lớp nền bằng
+  restack, tránh gỡ/gắn lại actor khi chrome được thêm trong Overview.
+- **Tiling Assistant:** hủy timer focus hint bị thay thế khi đổi workspace
+  liên tiếp, dọn timer static hint khi ngắt animation, và giữ hook của extension
+  khác hoạt động khi disable/re-enable.
+- **Bộ test:** xóa test riêng của Window Gap đã bị gỡ khỏi repo, chuyển test
+  schema/gap sang Tiling Assistant hiện tại. Giữ kiểm tra work area có strut,
+  monitor tọa độ âm và gap theo logical coordinates ở scale 100/125/200%.
+
+Đã đối chiếu các implementation native của
+[ControlsManagerLayout](https://github.com/GNOME/gnome-shell/blob/51.0/js/ui/overviewControls.js),
+[ThumbnailsBox](https://github.com/GNOME/gnome-shell/blob/51.0/js/ui/workspaceThumbnail.js),
+[workspace animation](https://github.com/GNOME/gnome-shell/blob/51.0/js/ui/workspaceAnimation.js)
+và [BackgroundManager](https://github.com/GNOME/gnome-shell/blob/51.0/js/ui/background.js).
+Các regression mới cho allocation, callback muộn, cleanup và timer/hook đã
+được chạy với source cũ trong thư mục tạm: FAIL đúng lỗi; source sửa PASS.
+
+Kết quả hiện tại thay thế số liệu của các lần nghiệm thu cũ bên dưới:
+
+- **221/221 Node tests PASS**, gồm các ca App Grid nhận input, 100 lần đảo chiều/đổi workspace,
+  gesture đang giữ ngón tay, animation bị ngắt và disable/re-enable.
+- Native GJS/Gio clipboard regression PASS.
+- `node scripts/check.mjs`: **199 JavaScript files, 8 schema directories,
+  0 failures**; `git diff --check` PASS.
+- Chưa có phiên GNOME Shell/Mutter 51, GPU hoặc touchpad trong container.
+  Cần kiểm tra trên desktop: vuốt lên/xuống dở rồi đảo chiều, vuốt ngang liên
+  tiếp, minimize/restore trong lúc giữ gesture, nhiều monitor và thay đổi scale.
+
 ## Overview kiểu Mission Control
 
 Static Workspace Background nay thêm wallpaper toàn màn hình trong Overview,
