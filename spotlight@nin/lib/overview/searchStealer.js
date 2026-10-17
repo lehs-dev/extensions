@@ -10,6 +10,7 @@ export class OverviewSearchStealer {
         this._popup = popup;
         this._entry = null;
         this._entryParent = null;
+        this._entryOpacity = null;
         this._search = null;
         this._searchParent = null;
         this._searchResults = null;
@@ -56,6 +57,7 @@ export class OverviewSearchStealer {
         // Steal the overview search entry.
         this._entry = Main.overview.searchEntry;
         this._entryParent = this._entry.get_parent();
+        this._entryOpacity = this._entry.opacity;
         this._entry.add_style_class_name('spotlight-entry-stolen');
         if (this._entry.get_parent())
             this._entry.get_parent().remove_child(this._entry);
@@ -128,12 +130,14 @@ export class OverviewSearchStealer {
     restore() {
         if (this._entry) {
             this._entry.remove_style_class_name('spotlight-entry-stolen');
+            this._entry.opacity = this._entryOpacity;
             this._entry.visible = true;
             if (this._entry.get_parent())
                 this._entry.get_parent().remove_child(this._entry);
             this._entryParent.add_child(this._entry);
             this._entry = null;
             this._entryParent = null;
+            this._entryOpacity = null;
         }
 
         if (this._search) {

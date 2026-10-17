@@ -74,6 +74,9 @@ class SpotlightPopup extends St.Widget {
 
         if (entry.get_parent())
             entry.get_parent().remove_child(entry);
+        // The Overview may have faded the entry out before it was detached.
+        entry.remove_transition('opacity');
+        entry.opacity = 255;
         entry.visible = true;
         this._content.add_child(entry);
 

@@ -257,7 +257,7 @@ async function createHarness(options = {}) {
     const Clutter = {
         BinLayout: class {},
         Orientation: {VERTICAL: 1},
-        AnimationMode: {EASE_OUT_QUAD: 1},
+        AnimationMode: {EASE_OUT_QUAD: 1, EASE: 2},
         EventType: {KEY_PRESS: 1, BUTTON_PRESS: 2},
         KEY_Escape: 0xff1b,
         KEY_Return: 0xff0d,
@@ -412,6 +412,7 @@ async function createHarness(options = {}) {
     });
 
     const popup = new SpotlightPopup(settings);
+    await options.beforeSteal?.({entry, entryParent: bin, Main, Clutter});
     popup.stealOverviewSearch();
 
     return {
@@ -438,6 +439,53 @@ async function createHarness(options = {}) {
 // rendering and native key navigation still require a desktop session.
 // SUITE 1: SYNCHRONOUS FOCUS CONTROL FLOW
 // ---------------------------------------------------------------------------
+for (const completed of [true, false]) {
+    test(`[Interop] borrowed entry recovers from a ${completed ? 'completed' : 'pending'} Overview hide`, async () => {
+        const {API} = await loadModule('just-perfection-desktop@just-perfection/lib/API.js');
+        const borrowedOpacity = completed ? 0 : 127;
+        const {popup, entry, entryParent, search, Clutter, dispatchKey} = await createHarness({
+            beforeSteal: ({entry, entryParent, Main, Clutter}) => {
+                Main.overview._overview.controls.layout_manager = {
+                    _computeWorkspacesBoxForState: (_state, box) => box,
+                };
+                Main.overview.dash = {showAppsButton: new TestActorWithObjectSignals()};
+                const api = new API({Main, Clutter}, 51);
+                assert.equal(entry.get_parent(), entryParent);
+                api.searchEntryHide(false);
+                assert.equal(entry.transitions.get('ease').opacity, 0);
+                if (completed)
+                    entry.complete();
+                else
+                    entry.opacity = borrowedOpacity;
+                assert.equal(entry.opacity, borrowedOpacity);
+            },
+        });
+
+        try {
+            popup.open();
+            assert.equal(entry.transitions.size, 0, 'the inherited opacity fade must be cancelled');
+            assert.equal(entry.opacity, 255, 'the entire entry must be opaque while Spotlight owns it');
+
+            entry.connect('key-press-event', (_, event) => {
+                assert.equal(event.get_key_symbol(), Clutter.KEY_a);
+                search._text.set_text('a');
+            });
+            assert.equal(dispatchKey({
+                type: () => Clutter.EventType.KEY_PRESS,
+                get_key_symbol: () => Clutter.KEY_a,
+            }), Clutter.EVENT_PROPAGATE);
+            assert.equal(search._text.get_text(), 'a');
+            assert.equal(search.visible, true, 'typing still exposes search results');
+
+            popup.returnOverviewSearch();
+            assert.equal(entry.get_parent(), entryParent);
+            assert.equal(entry.opacity, borrowedOpacity, 'returning the entry restores its borrowed opacity');
+        } finally {
+            popup.destroy();
+        }
+    });
+}
+
 test('[Focus] open requests focus synchronously without an idle', async () => {
     const {popup, stage, entry, idleQueue} = await createHarness();
 
