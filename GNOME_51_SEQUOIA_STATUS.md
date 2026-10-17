@@ -11,6 +11,11 @@ dải nền phủ hết chiều ngang monitor chính và fade/ẩn theo thumbnai
 Dải nền và thumbnail sổ xuống từ dưới panel theo tiến độ Overview (Super và
 vuốt ba ngón), đảo chiều khi hủy gesture; clip không cho vẽ đè lên panel.
 Bo góc dải nền dùng chung 24 px với App Grid.
+Overview đứng yên chỉ hiện cửa sổ của workspace đang chọn, tránh cửa sổ hai
+workspace bên cạnh lẹm vào mép. Chuyển sang App Grid giữ nguyên geometry, chế độ
+SINGLE và bố cục cửa sổ của Window Picker, rồi fade riêng actor workspace; không
+gom cửa sổ lên hàng thumbnail. Vuốt ngang, kéo cửa sổ và opacity tìm kiếm native
+được giữ; disable khôi phục ngay fit mode, bố cục, visibility và opacity.
 Just Perfection Startup Status = Desktop chặn riêng animation Overview lúc
 đăng nhập. Nếu GNOME đã bắt đầu animation trước khi extension nạp xong, che
 Overview và kết thúc native hide ngay sau allocation đầu để trả lại desktop;
@@ -24,10 +29,10 @@ disable. Hướng dẫn nạp source và kiểm tra desktop nằm trong
 
 Xác minh lần thay đổi này:
 
-- **41/41** test Overview, cửa sổ minimize, hình học, workspace và desktop spaces PASS;
+- **45/45** test Overview, cửa sổ minimize, hình học, workspace và desktop spaces PASS;
   **25/25** test Just Perfection, gồm startup sớm/muộn, allocation, animation
   bị hủy và khôi phục sau disable PASS.
-- Toàn bộ Node suite: **201/203 PASS**. Hai lỗi còn lại là test tham chiếu
+- Toàn bộ Node suite: **205/207 PASS**. Hai lỗi còn lại là test tham chiếu
   `window-gap@amirhosseinkarimi.github.io` đã không còn trong repo; đã chạy lại
   đúng hai test trên bản `HEAD` trước thay đổi và xác nhận cùng lỗi ENOENT.
 - Native GJS/Gio clipboard regression PASS.

@@ -5,6 +5,7 @@ import St from 'gi://St';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Workspace from 'resource:///org/gnome/shell/ui/workspace.js';
+import * as WorkspacesView from 'resource:///org/gnome/shell/ui/workspacesView.js';
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {computeOverviewLayout} from './overviewLayout.js';
@@ -26,6 +27,7 @@ export class MissionControlOverview {
     this._patches = [];
     this._signals = [];
     this._backgrounds = new Map();
+    this._workspaceOpacities = new Map();
     this._wallpapers = [];
     this._dashHeight = 0;
   }
@@ -85,6 +87,7 @@ export class MissionControlOverview {
       controller._primaryWorkspaceRequested = visible;
       return original.call(this, visible && controller._adjustment.value < APP_GRID);
     });
+    this._installWorkspacePreviews();
     this._installWorkspaceLayout();
     this._patch(this._layout, '_getAppDisplayBoxForState', original => function (...args) {
       const box = original.apply(this, args);
@@ -124,9 +127,14 @@ export class MissionControlOverview {
       this._scanBackgrounds(Main.layoutManager.overviewGroup);
       this._syncState();
     });
+    // Views already open when enabled retain their originally bound handlers.
+    // Refresh after those handlers as well as patching future view instances.
+    for (const signal of ['window-drag-begin', 'window-drag-end'])
+      this._connect(Main.overview, signal, () => this._refreshWorkspaceVisibility());
     this._connect(Main.layoutManager, 'monitors-changed', () => this._rebuildWallpapers());
     this._rebuildWallpapers();
     this._scanBackgrounds(Main.layoutManager.overviewGroup);
+    this._refreshWorkspaceViews();
     this._syncState();
     this._layout.layout_changed();
   }
@@ -160,12 +168,83 @@ export class MissionControlOverview {
         if (args[0] !== WINDOW_PICKER && args[0] !== APP_GRID)
           return box;
         const layout = controller._getLayout(args[3]);
-        if (args[0] === WINDOW_PICKER)
-          return actorBox(layout.picker);
-        // Keep a positive allocation for native workspace/window calculations.
-        // The primary view is hidden when the app grid finishes opening.
-        return actorBox(layout.workspaces);
+        // Keep the picker allocation throughout the app-grid fade. A small
+        // app-grid allocation pulls every preview up into the thumbnail strip.
+        return actorBox(layout.picker);
       });
+  }
+
+  _installWorkspacePreviews() {
+    const controller = this;
+    this._patch(this._controls, '_getFitModeForState', original => function (state, ...args) {
+      return original.call(this, state === APP_GRID ? WINDOW_PICKER : state, ...args);
+    });
+    const prototype = WorkspacesView.WorkspacesView.prototype;
+    for (const method of ['_getFitModeForState', '_getWorkspaceModeForOverviewState']) {
+      this._patch(prototype, method, original => function (state, ...args) {
+        const primary = this._monitorIndex === Main.layoutManager.primaryIndex;
+        return original.call(this, primary && state === APP_GRID ? WINDOW_PICKER : state, ...args);
+      });
+    }
+    this._patch(prototype, '_updateWorkspacesState', original => function (...args) {
+      const result = original.apply(this, args);
+      controller._syncWorkspacePreviews(this);
+      return result;
+    });
+    this._patch(prototype, '_updateVisibility', original => function (...args) {
+      const result = original.apply(this, args);
+      if (!this._animating && !this._gestureActive && !this._inDrag &&
+          this._fitModeAdjustment.value === WorkspacesView.FitMode.SINGLE) {
+        const active = this.getActiveWorkspace();
+        for (const workspace of this._workspaces)
+          workspace.visible = workspace === active;
+      }
+      return result;
+    });
+    for (const method of ['_dragBegin', '_dragEnd']) {
+      this._patch(prototype, method, original => function (...args) {
+        const wasDragging = this._inDrag;
+        const result = original.apply(this, args);
+        if (this._inDrag !== wasDragging && this.mapped)
+          this._updateVisibility();
+        return result;
+      });
+    }
+  }
+
+  _syncWorkspacePreviews(view) {
+    if (!view)
+      return;
+    const primary = view._monitorIndex === Main.layoutManager.primaryIndex;
+    const opacity = primary ? 1 - this._gridProgress() : 1;
+    for (const workspace of view._workspaces) {
+      let record = this._workspaceOpacities.get(workspace);
+      if (!record) {
+        if (!primary)
+          continue;
+        record = {opacity: workspace.opacity};
+        record.destroyId = workspace.connect('destroy', () => this._workspaceOpacities.delete(workspace));
+        this._workspaceOpacities.set(workspace, record);
+      }
+      // Search opacity belongs to the native parent binding. Fade its child
+      // workspace instead, so search and the app-grid fade compose naturally.
+      workspace.opacity = Math.round(record.opacity * opacity);
+    }
+  }
+
+  _refreshWorkspaceViews() {
+    this._controls._update();
+    for (const display of this._controls._workspacesDisplay._workspacesViews) {
+      const view = display._workspacesView ?? display;
+      view._updateWorkspacesState?.();
+      view._updateVisibility?.();
+      view.queue_relayout();
+    }
+  }
+
+  _refreshWorkspaceVisibility() {
+    for (const display of this._controls._workspacesDisplay._workspacesViews)
+      (display._workspacesView ?? display)._updateVisibility?.();
   }
 
   _showWorkspaceThumbnails() {
@@ -262,6 +341,7 @@ export class MissionControlOverview {
     for (const actor of this._backgrounds.keys())
       actor.opacity = 0;
     this._controls._workspacesDisplay.setPrimaryWorkspaceVisible(this._primaryWorkspaceRequested);
+    this._syncWorkspacePreviews(this._controls._workspacesDisplay._getPrimaryView());
     const apps = this._controls._appDisplay;
     this._card.visible = progress > 0 && apps.visible;
     this._card.opacity = Math.round(apps.opacity * progress);
@@ -365,7 +445,13 @@ export class MissionControlOverview {
       actor.opacity = record.opacity;
     }
     this._backgrounds.clear();
+    for (const [workspace, record] of this._workspaceOpacities) {
+      workspace.disconnect(record.destroyId);
+      workspace.opacity = record.opacity;
+    }
+    this._workspaceOpacities.clear();
     this._controls._workspacesDisplay.setPrimaryWorkspaceVisible(this._primaryWorkspaceRequested);
+    this._refreshWorkspaceViews();
     this._restoreWorkspaceThumbnails();
     this._destroyWallpapers();
     this._card.destroy();

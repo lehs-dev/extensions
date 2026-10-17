@@ -6,6 +6,11 @@ of a scaled desktop card. Minimized windows fade in at their Overview positions
 instead of flying out from the top-left corner, and remain minimized when
 Overview closes unless selected.
 
+At rest, only the selected workspace's windows are visible. Neighboring
+workspaces remain available during swipes and window dragging. Opening the app
+grid fades the primary workspace's windows in place, without shrinking them
+toward the workspace strip; reversing the transition restores the same layout.
+
 The first Super press shows the native workspace thumbnail strip above the
 window previews. Thumbnails are 15% smaller than the original layout (136 px
 high at 100% scale), with an 8 px top inset below the panel. Their translucent
@@ -47,6 +52,9 @@ Just Perfection.
 - Enter the app grid directly and from the window picker. Only apps and page
   controls should be inside the translucent panel; test an app folder, keyboard
   focus and moving an icon between pages.
+- With populated workspaces on either side, check that neighboring windows do
+  not peek in at rest. Open the app grid slowly with a gesture and reverse it:
+  window previews should fade at their picker positions throughout.
 - Drag a window to another workspace, reverse a workspace swipe, and add/remove
   a workspace. Check multiple monitors and display scale changes.
 - Disable the extension while Overview is open, then enable it again. Check

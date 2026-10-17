@@ -27,6 +27,9 @@ The thumbnails are 15% smaller, sit 8 logical pixels below the panel, and have
 a translucent background spanning the primary monitor's full width.
 The strip slides down from the panel with Overview progress, including gesture
 reversals, and shares the app grid's 24 px corner radius.
+Only the active workspace's windows appear at rest. App-grid transitions keep
+the picker layout fixed and fade its windows in place, while workspace swipes
+and window dragging retain native visibility and navigation.
 The app grid uses a separate centered panel with a white tint at 20% opacity,
 slightly denser than the tiling preview. Layout hooks compose with Just
 Perfection, and disabling the extension restores the previous methods and

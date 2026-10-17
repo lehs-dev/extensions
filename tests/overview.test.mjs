@@ -49,6 +49,45 @@ function assertInside(inner, outer) {
 }
 
 async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
+    const workspaceManager = {activeIndex: 1};
+    class WorkspacesViewBase extends OverviewActor {
+        _dragBegin() { this._inDrag = true; }
+        _dragEnd() { this._inDrag = false; }
+    }
+    class NativeWorkspacesView extends WorkspacesViewBase {
+        constructor(monitorIndex, overviewAdjustment, fitAdjustment) {
+            super({mapped: true});
+            this._monitorIndex = monitorIndex;
+            this._overviewAdjustment = overviewAdjustment;
+            this._fitModeAdjustment = fitAdjustment;
+            this._animating = this._gestureActive = this._inDrag = false;
+            this._workspaces = [255, 181, 213].map(opacity => {
+                const workspace = new OverviewActor({opacity});
+                workspace.stateAdjustment = new Actor({value: 0});
+                this.add_child(workspace);
+                return workspace;
+            });
+        }
+        _getFitModeForState(state) { return state === 2 ? 1 : 0; }
+        _getWorkspaceModeForOverviewState(state) { return state === 1 ? 1 : 0; }
+        _updateWorkspacesState() {
+            const value = this._overviewAdjustment.value;
+            const initial = Math.floor(value);
+            const final = Math.ceil(value);
+            const progress = value - initial;
+            const mode = this._getWorkspaceModeForOverviewState(initial) * (1 - progress) +
+                this._getWorkspaceModeForOverviewState(final) * progress;
+            for (const workspace of this._workspaces)
+                workspace.stateAdjustment.value = (1 - this._fitModeAdjustment.value) * mode;
+        }
+        _updateVisibility() {
+            this._workspaces.forEach((workspace, index) => {
+                workspace.visible = this._animating || this._gestureActive ||
+                    this._fitModeAdjustment.value !== 0 || Math.abs(index - workspaceManager.activeIndex) <= 1;
+            });
+        }
+        getActiveWorkspace() { return this._workspaces[workspaceManager.activeIndex]; }
+    }
     const vfuncHooks = new Map();
     class InjectionManager {
         overrideMethod(prototype, name, createOverride) {
@@ -148,6 +187,26 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
     controls.add_child(thumbnails);
     const adjustment = new Actor({value: 0});
     controls._stateAdjustment = adjustment;
+    const fitAdjustment = new Actor({value: 0});
+    const primaryView = new NativeWorkspacesView(0, adjustment, fitAdjustment);
+    workspaceContainer.add_child(primaryView);
+    workspaceContainer._workspacesViews = [primaryView];
+    workspaceContainer._getPrimaryView = () => primaryView;
+    workspaceContainer.fitModeAdjustment = fitAdjustment;
+    controls._getFitModeForState = state => state === 2 ? 1 : 0;
+    controls._update = function () {
+        const initial = Math.floor(adjustment.value);
+        const final = Math.ceil(adjustment.value);
+        const progress = adjustment.value - initial;
+        fitAdjustment.value = this._getFitModeForState(initial) * (1 - progress) +
+            this._getFitModeForState(final) * progress;
+        this._updateThumbnailsBox();
+        for (const display of workspaceContainer._workspacesViews) {
+            const view = display._workspacesView ?? display;
+            view._updateWorkspacesState();
+            view._updateVisibility();
+        }
+    };
     controls._searchController = new Actor({searchActive: false});
     controls._getThumbnailsBoxParams = function () {
         assert.equal(this, controls);
@@ -210,6 +269,7 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
     const layoutManager = new OverviewActor();
     Object.assign(layoutManager, {
         overviewGroup,
+        primaryIndex: 0,
         monitors: [
             {index: 0, x: 0, y: 0, width: 1920, height: 1200},
             {index: 1, x: -1600, y: -200, width: 1600, height: 900},
@@ -234,6 +294,9 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
         'resource:///org/gnome/shell/ui/main.js': Main,
         'resource:///org/gnome/shell/ui/background.js': {BackgroundManager},
         'resource:///org/gnome/shell/ui/workspace.js': {WorkspaceBackground, WorkspaceLayout},
+        'resource:///org/gnome/shell/ui/workspacesView.js': {
+            WorkspacesView: NativeWorkspacesView, FitMode: {SINGLE: 0, ALL: 1},
+        },
         'resource:///org/gnome/shell/ui/workspaceAnimation.js': {MonitorGroup},
         'resource:///org/gnome/shell/extensions/extension.js': {InjectionManager},
     };
@@ -249,10 +312,15 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
         monitorInit: MonitorGroup.prototype._init,
         updateThumbnails: controls._updateThumbnailsBox,
         thumbnailParams: controls._getThumbnailsBoxParams,
+        fitMode: controls._getFitModeForState,
+        viewFitMode: NativeWorkspacesView.prototype._getFitModeForState,
+        workspaceMode: NativeWorkspacesView.prototype._getWorkspaceModeForOverviewState,
+        workspaceState: NativeWorkspacesView.prototype._updateWorkspacesState,
+        workspaceVisibility: NativeWorkspacesView.prototype._updateVisibility,
     };
     const state = value => {
         adjustment.value = value;
-        controls._updateThumbnailsBox();
+        controls._update();
         adjustment.emit('notify::value');
     };
     const allocate = (value, dashHeight = 72) => {
@@ -265,7 +333,8 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
         managers, controls, overviewGroup, workspaceContainer, pickerBackground,
         foreignBackground, thumbnailBackground, adjustment, layout, nativeWorkspaceBox,
         nativeAppBox, overview, layoutManager, uiGroup, theme, state, appDisplay,
-        thumbnails, allocateGrid, allocate,
+        thumbnails, allocateGrid, allocate, NativeWorkspacesView, primaryView,
+        workspaceManager, fitAdjustment,
     };
 }
 
@@ -502,6 +571,104 @@ test('app grid hides primary workspace previews while retaining native visibilit
     subject.disable();
     assert.equal(workspaceContainer.setPrimaryWorkspaceVisible, original);
     assert.equal(workspaceContainer._primaryVisible, true, 'disable restores the last native visibility request');
+});
+
+test('idle Overview excludes neighboring windows and retains native swipe and drag visibility', async () => {
+    const {subject, state, primaryView, workspaceManager, overview} = await setup();
+    const visible = () => primaryView._workspaces.map(workspace => workspace.visible);
+    // Existing native views bind these methods before the extension is enabled.
+    const beginSignal = overview.connect('window-drag-begin', primaryView._dragBegin.bind(primaryView));
+    const endSignal = overview.connect('window-drag-end', primaryView._dragEnd.bind(primaryView));
+    subject.enable();
+    state(1);
+    assert.deepEqual(visible(), [false, true, false]);
+    for (const flag of ['_animating', '_gestureActive']) {
+        primaryView[flag] = true;
+        primaryView._updateVisibility();
+        assert.deepEqual(visible(), [true, true, true], 'native transitions retain their neighboring actors');
+        primaryView[flag] = false;
+        primaryView._updateVisibility();
+        assert.deepEqual(visible(), [false, true, false]);
+    }
+    overview.emit('window-drag-begin');
+    assert.deepEqual(visible(), [true, true, true]);
+    overview.emit('window-drag-end');
+    assert.deepEqual(visible(), [false, true, false]);
+    workspaceManager.activeIndex = 2;
+    primaryView._updateVisibility();
+    assert.deepEqual(visible(), [false, false, true]);
+    subject.disable();
+    assert.deepEqual(visible(), [false, true, true], 'disable restores native adjacent previews immediately');
+    assert.equal(Object.hasOwn(Object.getPrototypeOf(primaryView), '_dragBegin'), false);
+    assert.equal(Object.hasOwn(Object.getPrototypeOf(primaryView), '_dragEnd'), false);
+    overview.disconnect(beginSignal);
+    overview.disconnect(endSignal);
+});
+
+test('app-grid transitions fade windows at unchanged picker positions and compose with search', async () => {
+    const {subject, state, layout, primaryView, workspaceContainer, fitAdjustment} = await setup();
+    const opacities = primaryView._workspaces.map(workspace => workspace.opacity);
+    subject.enable();
+    state(1);
+    const pickerBox = layout._computeWorkspacesBoxForState(1, null, 0, 72);
+    for (const value of [1.1, 1.5, 1.9, 2, 1.6, 1.2, 1]) {
+        state(value);
+        const gridBox = layout._computeWorkspacesBoxForState(2, null, 0, 72);
+        assert.ok(gridBox.equal(pickerBox), 'the workspace allocation cannot pull windows toward the top');
+        assert.equal(fitAdjustment.value, 0, 'workspaces never switch to the all-workspaces row');
+        assert.equal(primaryView._getFitModeForState(2), 0);
+        primaryView._workspaces.forEach((workspace, index) => {
+            assert.equal(workspace.stateAdjustment.value, 1,
+                'window slots remain spread instead of returning to desktop positions');
+            assert.equal(workspace.opacity, Math.round(opacities[index] * (2 - value)));
+        });
+        // GNOME binds display opacity onto the primary view during search.
+        workspaceContainer.opacity = primaryView.opacity = 102;
+        workspaceContainer.emit('notify::opacity');
+        primaryView.emit('notify::opacity');
+        assert.equal(primaryView.opacity, 102, 'the native search binding is never overwritten');
+    }
+    subject.disable();
+    assert.deepEqual(primaryView._workspaces.map(workspace => workspace.opacity), opacities);
+    assert.equal(primaryView.opacity, 102);
+});
+
+test('enabling and disabling in app grid restores native fit, window mode and visibility', async () => {
+    const {subject, state, primaryView, fitAdjustment, controls, originals} = await setup();
+    state(2);
+    assert.equal(fitAdjustment.value, 1);
+    subject.enable();
+    assert.equal(fitAdjustment.value, 0);
+    assert.ok(primaryView._workspaces.every(workspace => workspace.stateAdjustment.value === 1));
+    assert.ok(primaryView._workspaces.every(workspace => workspace.opacity === 0));
+    subject.disable();
+    assert.equal(fitAdjustment.value, 1);
+    assert.ok(primaryView._workspaces.every(workspace => workspace.stateAdjustment.value === 0));
+    assert.ok(primaryView._workspaces.every(workspace => workspace.visible));
+    assert.equal(controls._getFitModeForState, originals.fitMode);
+    assert.equal(Object.getPrototypeOf(primaryView)._getFitModeForState, originals.viewFitMode);
+    assert.equal(Object.getPrototypeOf(primaryView)._getWorkspaceModeForOverviewState, originals.workspaceMode);
+});
+
+test('new and destroyed workspace actors respect a paused fade without affecting secondary monitor opacity', async () => {
+    const {subject, state, primaryView, NativeWorkspacesView, adjustment, fitAdjustment} = await setup();
+    subject.enable();
+    state(1.5);
+    const added = new OverviewActor({opacity: 94});
+    added.stateAdjustment = new Actor({value: 0});
+    primaryView._workspaces.push(added);
+    primaryView._updateWorkspacesState();
+    assert.equal(added.opacity, 47);
+    assert.equal(added.stateAdjustment.value, 1);
+    added.destroy();
+    primaryView._workspaces.pop();
+    assert.equal(subject._workspaceOpacities.has(added), false);
+    const secondary = new NativeWorkspacesView(1, adjustment, fitAdjustment);
+    const opacities = secondary._workspaces.map(workspace => workspace.opacity);
+    secondary._updateWorkspacesState();
+    assert.deepEqual(secondary._workspaces.map(workspace => workspace.opacity), opacities);
+    subject.disable();
+    assert.equal(subject._workspaceOpacities.size, 0);
 });
 
 test('native thumbnails occupy the first-Super strip and the app grid card contains apps alone', async () => {
