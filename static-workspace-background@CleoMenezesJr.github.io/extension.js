@@ -14,6 +14,8 @@ import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import Meta from 'gi://Meta';
 
+import {MissionControlOverview} from './overview.js';
+
 function _createStaticBackground(monitor) {
   const container = new Meta.BackgroundGroup();
 
@@ -108,10 +110,15 @@ export default class Extension {
       }
     });
 
+    this._overview = new MissionControlOverview();
+    this._overview.enable();
+
     console.log(`[static-workspace-background] enabled`);
   }
 
   disable() {
+    this._overview?.disable();
+    this._overview = null;
     _generation++;
     if (_childAddedId) {
       Main.uiGroup.disconnect(_childAddedId);

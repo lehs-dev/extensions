@@ -18,6 +18,26 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
   10. `tiling-assistant@leleat-on-github` — Window snap presets (halves, quarters, 1/3-2/3), native window corners, gap coordination.
   11. `window-gap@amirhosseinkarimi.github.io` — Screen margin struts (`affectsStruts: true`) for uniform window spacing.
 
+## Overview appearance
+
+`static-workspace-background@CleoMenezesJr.github.io` also provides a full-screen
+wallpaper in Overview. Minimized window previews fade at their Overview slots;
+the first Super press shows the native workspace strip above the window picker.
+The thumbnails are 15% smaller, sit 8 logical pixels below the panel, and have
+a translucent background spanning the primary monitor's full width.
+The strip slides down from the panel with Overview progress, including gesture
+reversals, and shares the app grid's 24 px corner radius.
+The app grid uses a separate centered panel with a white tint at 20% opacity,
+slightly denser than the tiling preview. Layout hooks compose with Just
+Perfection, and disabling the extension restores the previous methods and
+workspace background opacity. See the extension's README for loading and
+desktop verification.
+
+Just Perfection's Desktop startup preference intercepts GNOME's startup
+Overview animation. If extension loading overlaps an animation already in
+progress, it suppresses that view and completes the native hide cleanup after
+the first allocation. Normal Overview access remains available after login.
+
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|

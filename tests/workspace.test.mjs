@@ -21,6 +21,7 @@ async function setup() {
     const {default: Extension} = await loadModule(
         'static-workspace-background@CleoMenezesJr.github.io/extension.js', {
             mocks: {
+                './overview.js': {MissionControlOverview: class { enable() {} disable() {} }},
                 'resource:///org/gnome/shell/ui/workspaceAnimation.js': {MonitorGroup},
                 'resource:///org/gnome/shell/ui/background.js': {BackgroundManager},
                 'resource:///org/gnome/shell/ui/main.js': {uiGroup},

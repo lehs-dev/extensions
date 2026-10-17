@@ -180,6 +180,8 @@ export class API
      */
     close()
     {
+        this.startupStatusSetDefault();
+
         for (let [name, id] of Object.entries(this.#timeoutIds)) {
             if (id) {
                 this._glib.source_remove(id);
@@ -1743,40 +1745,87 @@ export class API
      */
     startupStatusSet(status)
     {
-        let sessionMode = this._main.sessionMode;
-        let layoutManager = this._main.layoutManager;
+        const {sessionMode, layoutManager, overview} = this._main;
 
         if (!layoutManager._startingUp) {
             return;
         }
 
-        if (this.#originals['sessionModeHasOverview'] === undefined) {
-            this.#originals['sessionModeHasOverview'] = sessionMode.hasOverview;
+        this.startupStatusSetDefault();
+
+        if (status !== SHELL_STATUS.NONE || !sessionMode.hasOverview
+            || sessionMode.isGreeter || sessionMode.isLocked) {
+            return;
         }
 
-        let ControlsState = this._overviewControls.ControlsState;
-        let Controls = this._main.overview._overview.controls;
+        // Shell starts loading extensions asynchronously while the layout
+        // startup animation is already running. Changing hasOverview or the
+        // controls adjustment cannot cancel a startup call already in flight.
+        // Intercept only the startup entry point, leaving session capabilities
+        // and all subsequent Overview actions under Shell's control.
+        const startup = {
+            active: true,
+            overview,
+            layoutManager,
+            originalAnimation: overview.runStartupAnimation,
+            hadOwnAnimation: Object.hasOwn(overview, 'runStartupAnimation'),
+        };
 
-        switch (status) {
+        startup.animation = function (...args) {
+            if (!startup.active || !layoutManager._startingUp || !sessionMode.hasOverview
+                || sessionMode.isGreeter || sessionMode.isLocked) {
+                return startup.originalAnimation.apply(this, args);
+            }
 
-            case SHELL_STATUS.NONE:
-                sessionMode.hasOverview = false;
-                layoutManager.startInOverview = false;
-                Controls._stateAdjustment.value = ControlsState.HIDDEN;
-                break;
+            // Older Shell versions complete startup with a callback; current
+            // versions await the returned promise. Both must finish layout's
+            // cleanup (input cover, window clip and secondary backgrounds).
+            if (typeof args[0] === 'function') {
+                args[0]();
+            }
+            return Promise.resolve();
+        };
 
-            case SHELL_STATUS.OVERVIEW:
-            default:
-                sessionMode.hasOverview = true;
-                layoutManager.startInOverview = true;
-                break;
-        }
+        this._startupStatus = startup;
+        overview.runStartupAnimation = startup.animation;
+        const hideStartupOverview = () => {
+            if (!startup.active || !sessionMode.hasOverview
+                || sessionMode.isGreeter || sessionMode.isLocked) {
+                return;
+            }
 
-        if (!this._startupCompleteSignal) {
-            this._startupCompleteSignal
-            = layoutManager.connect('startup-complete', () => {
-                sessionMode.hasOverview = this.#originals['sessionModeHasOverview'];
-            });
+            overview.hide();
+            const controls = overview._overview.controls;
+            // Native animateFromOverview uses onStopped for _hideDone().
+            // Finish that transition now so desktop actors are restored before
+            // removing our mask, even if startup finishes on the same frame.
+            controls._stateAdjustment.remove_transition('value');
+            controls._stateAdjustment.value = this._overviewControls.ControlsState.HIDDEN;
+        };
+        startup.completeSignal = layoutManager.connect('startup-complete', () => {
+            if (overview.visible || overview._shown) {
+                hideStartupOverview();
+            }
+            this.startupStatusSetDefault();
+        });
+
+        if (overview.visible || overview._shown) {
+            // Native startup can be suspended in ensureAllocation(). Keep the
+            // group allocated, but invisible, while native hide and the pending
+            // startup promises drain. Hiding the group immediately can strand
+            // that allocation promise and leave the session input cover up.
+            startup.overviewOpacity = layoutManager.overviewGroup.opacity;
+            layoutManager.overviewGroup.opacity = 0;
+            const controls = overview._overview.controls;
+            if (controls.layout_manager._postAllocationCallbacks?.length > 0) {
+                controls.layout_manager.ensureAllocation().then(() => {
+                    if (this._startupStatus === startup && layoutManager._startingUp) {
+                        hideStartupOverview();
+                    }
+                });
+            } else {
+                hideStartupOverview();
+            }
         }
     }
 
@@ -1787,12 +1836,25 @@ export class API
      */
     startupStatusSetDefault()
     {
-        if (this.#originals['sessionModeHasOverview'] === undefined) {
+        const startup = this._startupStatus;
+        if (!startup) {
             return;
         }
 
-        if (this._startupCompleteSignal) {
-            this._main.layoutManager.disconnect(this._startupCompleteSignal);
+        startup.active = false;
+        delete this._startupStatus;
+        startup.layoutManager.disconnect(startup.completeSignal);
+
+        if (startup.overview.runStartupAnimation === startup.animation) {
+            if (startup.hadOwnAnimation) {
+                startup.overview.runStartupAnimation = startup.originalAnimation;
+            } else {
+                delete startup.overview.runStartupAnimation;
+            }
+        }
+
+        if (startup.overviewOpacity !== undefined) {
+            startup.layoutManager.overviewGroup.opacity = startup.overviewOpacity;
         }
     }
 

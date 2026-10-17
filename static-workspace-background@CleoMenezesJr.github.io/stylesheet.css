@@ -1,0 +1,15 @@
+.mission-control-app-grid,
+.mission-control-workspace-strip {
+  /* Same white tint as .tile-preview (0.12), with a little more opacity. */
+  background-color: rgba(255, 255, 255, 0.20);
+  border-radius: 24px;
+}
+
+.mission-control-app-grid {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4);
+}
+
+.mission-control-workspace-strip {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}

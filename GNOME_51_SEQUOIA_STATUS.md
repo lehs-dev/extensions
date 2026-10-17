@@ -1,5 +1,41 @@
 # Kết quả tiếp quản GNOME 51 / macOS Sequoia
 
+## Overview kiểu Mission Control
+
+Static Workspace Background nay thêm wallpaper toàn màn hình trong Overview,
+ẩn riêng nền thu nhỏ của native workspace. Cửa sổ đang minimize fade tại slot
+Overview, không còn bay ra từ góc trái trên. Dải workspace native xuất hiện phía
+trên Window Picker ngay lần Super đầu tiên; App Grid không còn chứa dải này.
+Thumbnail giảm 15% (160→136 px ở scale 100%), cách panel 8 px thay vì 24 px;
+dải nền phủ hết chiều ngang monitor chính và fade/ẩn theo thumbnail native.
+Dải nền và thumbnail sổ xuống từ dưới panel theo tiến độ Overview (Super và
+vuốt ba ngón), đảo chiều khi hủy gesture; clip không cho vẽ đè lên panel.
+Bo góc dải nền dùng chung 24 px với App Grid.
+Just Perfection Startup Status = Desktop chặn riêng animation Overview lúc
+đăng nhập. Nếu GNOME đã bắt đầu animation trước khi extension nạp xong, che
+Overview và kết thúc native hide ngay sau allocation đầu để trả lại desktop;
+không sửa capability của session hay chặn Super sau khi startup hoàn tất.
+Panel App Grid bo góc dùng tint trắng giống tiling preview, opacity 20% so với
+12% của preview theo phản hồi muốn trong hơn, chỉ đậm thêm một chút. Ở
+1920×1200, scale 100%, panel tối đa 1400×960. Cửa sổ, thumbnail và ứng dụng vẫn
+là actor native; các hook bố cục nối tiếp Just Perfection và được khôi phục khi
+disable. Hướng dẫn nạp source và kiểm tra desktop nằm trong
+`static-workspace-background@CleoMenezesJr.github.io/README.md`.
+
+Xác minh lần thay đổi này:
+
+- **41/41** test Overview, cửa sổ minimize, hình học, workspace và desktop spaces PASS;
+  **25/25** test Just Perfection, gồm startup sớm/muộn, allocation, animation
+  bị hủy và khôi phục sau disable PASS.
+- Toàn bộ Node suite: **201/203 PASS**. Hai lỗi còn lại là test tham chiếu
+  `window-gap@amirhosseinkarimi.github.io` đã không còn trong repo; đã chạy lại
+  đúng hai test trên bản `HEAD` trước thay đổi và xác nhận cùng lỗi ENOENT.
+- Native GJS/Gio clipboard regression PASS.
+- `node scripts/check.mjs`: **197 JavaScript files, 8 schema directories,
+  0 failures**; `git diff --check` PASS.
+- Chưa chạy trực quan trong GNOME Shell/Wayland. Animation, kéo thả, app folder,
+  nhiều monitor và chất lượng hình ảnh vẫn cần nghiệm thu trên desktop thật.
+
 Ngày: 16/10/2026. Tiếp tục trên working tree của Antigravity; giữ các thay đổi đã có.
 
 Cập nhật 17/10/2026: bỏ shader cưỡng chế bo góc cửa sổ và workaround constraint nhằm giữ góc bo của Tiling Assistant theo yêu cầu người dùng; khôi phục tile edge constraint và maximize từng trục bình thường, để ứng dụng và GNOME quyết định hình dạng góc. Bảng nghiệm thu bên dưới ghi lại lần chạy ngày 16/10/2026.
