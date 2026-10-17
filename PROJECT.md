@@ -23,7 +23,10 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
 wallpaper in Overview. Minimized window previews fade at their Overview slots;
 the first Super press shows the native workspace strip above the window picker.
 The thumbnails are 15% smaller, sit 8 logical pixels below the panel, and have
-a translucent background spanning the primary monitor's full width.
+a translucent background starting at half the primary monitor's work-area
+width. The background stays centered and grows equally to both sides with
+the workspace count. At full width, thumbnails shrink to fit the strip,
+including theme spacing and selection chrome.
 The strip slides down from the panel with Overview progress, including gesture
 reversals, and shares the app grid's 24 px corner radius.
 Only the active workspace's windows appear at rest. App-grid transitions keep

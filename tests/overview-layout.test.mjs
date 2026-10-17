@@ -32,10 +32,9 @@ function assertLayout(area, layout) {
     assertContained(layout.apps, layout.card);
     assert.ok(bottom(layout.workspaceStrip) < layout.picker.y,
         'the workspace strip stays above the window previews');
-    near(layout.workspaceStrip.x, area.x);
-    near(layout.workspaceStrip.width, area.width);
-    near(layout.workspaces.x, layout.picker.x);
-    near(layout.workspaces.width, layout.picker.width);
+    near(layout.workspaceStrip.x - area.x, right(area) - right(layout.workspaceStrip));
+    near(layout.workspaces.x - area.x, right(area) - right(layout.workspaces));
+    near(layout.picker.x - area.x, right(area) - right(layout.picker));
     near(layout.apps.y - layout.card.y, bottom(layout.card) - bottom(layout.apps));
     near(layout.card.x - area.x, right(area) - right(layout.card));
 }
@@ -47,6 +46,8 @@ test('1920x1200 separates picker thumbnails from an app-only card above the Dock
     assert.equal(layout.card.width, 1400);
     assert.equal(layout.card.height, 960);
     assert.equal(layout.workspaces.height, 136);
+    assert.equal(layout.workspaceStrip.width, 960);
+    assert.equal(layout.workspaceStrip.x, 480);
     assert.equal(layout.workspaces.y - area.y, 8);
     near(layout.card.y - area.y, bottom(area) - 72 - bottom(layout.card));
     assert.ok(bottom(layout.card) <= bottom(area) - 72 - 24);
@@ -55,6 +56,24 @@ test('1920x1200 separates picker thumbnails from an app-only card above the Dock
     assert.ok(layout.workspaces.y < layout.card.y,
         'picker thumbnails start at the top of Overview independently of the card');
     assert.ok(bottom(layout.picker) <= bottom(area) - 72 - 24);
+});
+
+test('the half-width workspace strip expands equally at both edges and stops at the work area', () => {
+    const area = {x: -1600, y: 32, width: 1600, height: 1168};
+    const compact = computeOverviewLayout(area);
+    let previous = compact;
+    for (const workspaceNaturalWidth of [200, 900, 1200, 1600, 4000]) {
+        const layout = computeOverviewLayout(area, {workspaceNaturalWidth});
+        assertLayout(area, layout);
+        near(layout.workspaceStrip.width, Math.min(1600, Math.max(800, workspaceNaturalWidth + 48)));
+        near(previous.workspaceStrip.x - layout.workspaceStrip.x,
+            right(layout.workspaceStrip) - right(previous.workspaceStrip));
+        assert.deepEqual(layout.picker, compact.picker,
+            'strip growth does not move or resize the window previews');
+        assert.equal(layout.workspaces.height, compact.workspaces.height,
+            'the preferred thumbnail height is unchanged');
+        previous = layout;
+    }
 });
 
 test('1366x768 preserves margins and usable grid space with a taller Dock', () => {

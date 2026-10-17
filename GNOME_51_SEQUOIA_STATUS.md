@@ -1,5 +1,18 @@
 # Kết quả tiếp quản GNOME 51 / macOS Sequoia
 
+## Dải workspace thu gọn và giãn đều hai phía — 18/10/2026
+
+Dải nền bắt đầu bằng nửa chiều rộng work area của monitor chính, luôn căn
+giữa và giữ kích thước thumbnail hiện tại. Thêm workspace làm nền giãn đều
+sang hai phía; xóa workspace thu nền theo animation native. Khi nền đã đạt
+chiều rộng tối đa, thumbnail co vừa phần còn lại, có tính spacing và padding
+của theme, tránh tràn thumbnail và viền chọn ở hai đầu.
+
+Đã bổ sung regression cho 9/12 workspace, đổi độ phân giải/scale, thêm/xóa
+workspace và độ đối xứng của nền. **225/225 Node tests PASS**, native GJS/Gio
+PASS; syntax/schema check: **199 JavaScript files, 8 schema directories,
+0 failures**; `git diff --check` PASS. Chưa kiểm tra trực quan trong GNOME Shell.
+
 ## Sửa App Grid không nhận hover/click
 
 Lớp `WorkspacesDisplay` nằm trên `AppDisplay` và được mở rộng để giữ vị trí

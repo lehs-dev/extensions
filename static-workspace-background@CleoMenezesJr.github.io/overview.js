@@ -124,14 +124,7 @@ export class MissionControlOverview {
         return result;
       const layout = controller._getLayout();
       controller._card.allocate(actorBox(layout.card));
-      const monitor = Main.layoutManager.primaryMonitor;
-      controller._workspaceStrip.allocate(actorBox({
-        ...layout.workspaceStrip,
-        // Controls coordinates are relative to the primary monitor. Extend
-        // the backdrop across side struts while keeping thumbnails inset.
-        x: monitor ? 0 : layout.workspaceStrip.x,
-        width: monitor?.width ?? layout.workspaceStrip.width,
-      }));
+      controller._workspaceStrip.allocate(actorBox(layout.workspaceStrip));
       controller._updateThumbnailScale(layout.workspaces);
       // A scale or monitor change can reallocate a paused gesture without
       // changing its adjustment value. Recompute the same reveal position.
@@ -299,8 +292,18 @@ export class MissionControlOverview {
 
   _updateThumbnailScale(rect) {
     const thumbnails = this._thumbnails;
-    const portholeHeight = thumbnails._porthole.height;
-    const scale = portholeHeight > 0 ? rect.height / portholeHeight : 0;
+    const {width, height} = thumbnails._porthole;
+    const themeNode = thumbnails.get_theme_node();
+    const contentBox = themeNode.get_content_box(actorBox(rect));
+    const count = Math.max(1, thumbnails._thumbnails.length);
+    const spacing = themeNode.get_length('spacing') * (count - 1);
+    // Native allocation centers smaller thumbnails against this maximum.
+    // Cap it by the actual strip width too, or crowded workspaces retain a
+    // centering offset for thumbnails that no longer fit and overflow right.
+    const scale = width > 0 && height > 0
+      ? Math.max(0, Math.min(rect.height / height,
+        (contentBox.get_width() - spacing) / (count * width)))
+      : 0;
     if (thumbnails._maxThumbnailScale !== scale) {
       thumbnails._maxThumbnailScale = scale;
       thumbnails.queue_relayout();
@@ -334,10 +337,33 @@ export class MissionControlOverview {
     this._dashHeight = dashHeight;
     const box = this._layout._workAreaBox;
     const {scaleFactor} = St.ThemeContext.get_for_stage(global.stage);
-    return computeOverviewLayout({
+    const area = {
       x: box.x1, y: box.y1,
       width: box.get_width(), height: box.get_height(),
-    }, {scale: scaleFactor, dashHeight});
+    };
+    const options = {scale: scaleFactor, dashHeight};
+    const layout = computeOverviewLayout(area, options);
+    const thumbnails = this._thumbnails;
+    const {width, height} = thumbnails._porthole;
+    const count = thumbnails._thumbnails.length;
+    const themeNode = thumbnails.get_theme_node();
+    // Request the usual thumbnail size before constraining a crowded strip.
+    // Match native pixel rounding so adding a workspace grows both edges
+    // evenly, while the picker below retains its full allocation.
+    const thumbnailWidth = height > 0
+      ? Math.max(layout.workspaces.height * width / height,
+        Math.round(Math.round(layout.workspaces.height) * width / height))
+      : 0;
+    const spacing = themeNode.get_length('spacing');
+    const naturalWidth = thumbnails._thumbnails.reduce((total, thumbnail, index) => {
+      const adjacentSpacing = (index > 0 ? spacing / 2 : 0) +
+        (index < count - 1 ? spacing / 2 : 0);
+      // Follow Shell's add/remove animation instead of jumping the backdrop
+      // straight to its final width when a thumbnail starts expanding.
+      return total + (thumbnailWidth + adjacentSpacing) * (1 - thumbnail.collapse_fraction);
+    }, 0);
+    const [, workspaceNaturalWidth] = themeNode.adjust_preferred_width(0, naturalWidth);
+    return computeOverviewLayout(area, {...options, workspaceNaturalWidth});
   }
 
   _trackBackground(actor) {

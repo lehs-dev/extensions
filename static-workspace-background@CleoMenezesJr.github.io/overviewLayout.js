@@ -6,7 +6,9 @@ const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
  * Return rectangles in the area's coordinates without rounding fractional scales.
  * Spacing compresses on small allocations; zero-sized allocations stay empty.
  */
-export function computeOverviewLayout(area, {scale = 1, dashHeight = 0} = {}) {
+export function computeOverviewLayout(area, {
+  scale = 1, dashHeight = 0, workspaceNaturalWidth = 0,
+} = {}) {
   const unit = Number.isFinite(scale) && scale > 0 ? scale : 1;
   const x = finite(area.x, 0);
   const y = finite(area.y, 0);
@@ -36,20 +38,24 @@ export function computeOverviewLayout(area, {scale = 1, dashHeight = 0} = {}) {
   const stripHeight = Math.min(160 * unit, availableHeight * 0.2) * 0.85;
   const stripPadding = Math.min(8 * unit, availableHeight * 0.1);
   const gap = Math.min(20 * unit, availableHeight * 0.05);
+  const stripWidth = Math.min(width, Math.max(width / 2,
+    Math.max(0, finite(workspaceNaturalWidth, 0)) + 2 * marginX));
   const workspaceStrip = {
-    x, y, width,
+    x: x + (width - stripWidth) / 2,
+    y, width: stripWidth,
     height: stripHeight + 2 * stripPadding,
   };
+  const stripMargin = Math.min(marginX, stripWidth / 4);
   const workspaces = {
-    x: x + marginX,
+    x: workspaceStrip.x + stripMargin,
     y: y + stripPadding,
-    width: width - 2 * marginX,
+    width: stripWidth - 2 * stripMargin,
     height: stripHeight,
   };
   const picker = {
-    x: workspaces.x,
+    x: x + marginX,
     y: y + workspaceStrip.height + gap,
-    width: workspaces.width,
+    width: width - 2 * marginX,
     height: availableHeight - marginY - workspaceStrip.height - gap,
   };
   const apps = {

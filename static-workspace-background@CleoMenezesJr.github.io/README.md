@@ -13,8 +13,13 @@ toward the workspace strip; reversing the transition restores the same layout.
 
 The first Super press shows the native workspace thumbnail strip above the
 window previews. Thumbnails are 15% smaller than the original layout (136 px
-high at 100% scale), with an 8 px top inset below the panel. Their translucent
-backdrop spans the primary monitor's full width. Both thumbnails and backdrop
+high at 100% scale), with an 8 px top inset below the panel. The translucent
+backdrop starts at half the primary monitor's work-area width and stays
+centered. It grows equally on both sides as workspaces are added, following
+native add/remove animations while preserving the usual thumbnail size.
+Once the backdrop reaches the work-area edges, thumbnails shrink to fit,
+including theme spacing, so both ends and the selection outline stay on screen.
+Both thumbnails and backdrop
 slide down from below the panel with Overview progress, including reversible
 touchpad gestures, and follow native search fades. The backdrop shares the app
 grid's 24 px corner radius. The app grid has its own rounded panel, without workspace
@@ -46,6 +51,10 @@ Just Perfection.
   their Overview positions and the windows should remain minimized on exit.
 - Press Super once. The workspace strip should be above the window previews;
   click a workspace and drag a window onto another thumbnail.
+- Start with a few workspaces: the backdrop should occupy half the available
+  width. Add and remove workspaces; both edges should expand/shrink equally.
+  With 9–12 workspaces, check that every thumbnail and the selection outline
+  remain on screen after resizing the display or changing scale.
 - Open and close Overview with Super and three-finger swipes. The strip should
   emerge below the panel, reverse smoothly when a gesture is cancelled, and
   remain clipped below the panel during its reveal.

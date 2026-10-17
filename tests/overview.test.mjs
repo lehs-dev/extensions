@@ -49,7 +49,7 @@ function assertInside(inner, outer) {
     assert.ok(inner.width > 0 && inner.height > 0);
 }
 
-async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
+async function setup({entry = false, thumbnailsShouldShow = false, thumbnailCount = 3} = {}) {
     const workspaceManager = {activeIndex: 1};
     class WorkspacesViewBase extends OverviewActor {
         _dragBegin() { this._inDrag = true; }
@@ -171,15 +171,36 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
     uiGroup.add_child(overviewGroup);
 
     const appDisplay = new OverviewActor();
+    const thumbnailTheme = {
+        spacing: 6,
+        left: 0, right: 0, top: 0, bottom: 0,
+        get_length(name) {
+            assert.equal(name, 'spacing');
+            return this.spacing;
+        },
+        adjust_preferred_width(minimum, natural) {
+            const chrome = this.left + this.right;
+            return [minimum + chrome, natural + chrome];
+        },
+        get_content_box(box) {
+            return new ActorBox({
+                x1: this.left, y1: this.top,
+                x2: box.get_width() - this.right,
+                y2: box.get_height() - this.bottom,
+            });
+        },
+    };
     const thumbnails = new OverviewActor({
         _shouldShow: thumbnailsShouldShow,
         _maxThumbnailScale: 0.05,
+        _thumbnails: Array.from({length: thumbnailCount}, () => new OverviewActor({collapse_fraction: 0})),
         _porthole: {width: 1920, height: 1168},
         expandFraction: thumbnailsShouldShow ? 1 : 0,
         visible: thumbnailsShouldShow,
         x_align: 'center',
         settingsShouldShow: thumbnailsShouldShow,
     });
+    thumbnails.get_theme_node = () => thumbnailTheme;
     Object.defineProperty(thumbnails, 'shouldShow', {get() { return this._shouldShow; }});
     thumbnails._updateShouldShow = function () {
         this._shouldShow = this.settingsShouldShow;
@@ -375,7 +396,7 @@ async function setup({entry = false, thumbnailsShouldShow = false} = {}) {
         managers, controls, overviewGroup, workspaceContainer, pickerBackground,
         foreignBackground, thumbnailBackground, adjustment, layout, nativeWorkspaceBox,
         nativeAppBox, overview, layoutManager, uiGroup, theme, state, appDisplay,
-        thumbnails, allocateGrid, allocate, NativeWorkspacesView, primaryView,
+        thumbnails, thumbnailTheme, allocateGrid, allocate, NativeWorkspacesView, primaryView,
         workspaceManager, fitAdjustment,
         pick: (x, y, all = false) => pick(uiGroup, x, y, all), hiddenFromPick, pickChanges,
     };
@@ -591,6 +612,56 @@ test('thumbnail scale follows work-area changes and restores the latest requeste
     assert.equal(thumbnails._maxThumbnailScale, 0.05);
 });
 
+test('workspace backdrop starts at half width and expands equally to both sides as workspaces are added', async () => {
+    const {subject, thumbnails, thumbnailTheme, state, layout} = await setup();
+    subject.enable();
+    state(1);
+    const count = amount => {
+        thumbnails._thumbnails = Array.from({length: amount}, () => new OverviewActor({collapse_fraction: 0}));
+        layout.allocate();
+        const strip = rect(subject._workspaceStrip);
+        assert.equal(strip.x + strip.width / 2, 960,
+            'the strip stays centered instead of extending from one edge');
+        assertInside(rect(thumbnails), strip);
+        return strip;
+    };
+    const initial = count(3);
+    const initialScale = thumbnails._maxThumbnailScale;
+    assert.equal(initial.width, 960);
+    let previous = initial;
+    for (const amount of [5, 7, 12]) {
+        const current = count(amount);
+        assert.ok(current.width > previous.width, 'more workspaces expand the backdrop');
+        assert.equal(previous.x - current.x,
+            current.x + current.width - previous.x - previous.width,
+            'left and right edges expand by the same distance');
+        assert.ok(current.width <= 1920);
+        previous = current;
+    }
+    assert.equal(previous.width, 1920, 'a crowded strip stops expanding at the monitor edges');
+    const crowdedScale = thumbnails._maxThumbnailScale;
+    assert.ok(crowdedScale < initialScale,
+        'native thumbnails shrink after the backdrop reaches its width limit');
+    assert.deepEqual(count(3), initial, 'removing workspaces restores the compact backdrop');
+    const expanded = count(5);
+    thumbnails._thumbnails.at(-1).collapse_fraction = 0.5;
+    layout.allocate();
+    const partlyCollapsed = rect(subject._workspaceStrip);
+    thumbnails._thumbnails.at(-1).collapse_fraction = 1;
+    layout.allocate();
+    const fullyCollapsed = rect(subject._workspaceStrip);
+    assert.ok(expanded.width > partlyCollapsed.width && partlyCollapsed.width > fullyCollapsed.width,
+        'the backdrop follows native workspace removal animation instead of jumping at the end');
+    for (const strip of [partlyCollapsed, fullyCollapsed])
+        assert.equal(strip.x + strip.width / 2, 960);
+    const unpadded = count(5);
+    Object.assign(thumbnailTheme, {left: 13, right: 17, spacing: 10});
+    const padded = count(5);
+    assert.ok(padded.width > unpadded.width,
+        'native theme spacing and horizontal chrome also reserve backdrop space');
+    subject.disable();
+});
+
 test('crowded thumbnails receive one allocation and one stable native target scale during gesture reversals', async () => {
     const {subject, thumbnails, state, layout} = await setup();
     const nativeAllocate = thumbnails.allocate;
@@ -623,6 +694,96 @@ test('crowded thumbnails receive one allocation and one stable native target sca
     assert.equal(thumbnails.allocate, observedNativeAllocate,
         'the prior allocation method is restored');
 });
+
+for (const thumbnailCount of [9, 12]) {
+    test(`${thumbnailCount} native thumbnails and their selection stay inside the strip after resize and workspace changes`, async () => {
+        const {subject, thumbnails, thumbnailTheme, state, layout, theme, layoutManager} =
+            await setup({thumbnailCount});
+        const nativeAllocate = thumbnails.allocate;
+        const rendered = [];
+        let indicatorBorder = 3;
+        thumbnails.allocate = function (box) {
+            const count = this._thumbnails.length;
+            const {width: portholeWidth, height: portholeHeight} = this._porthole;
+            const totalSpacing = (count - 1) * thumbnailTheme.spacing;
+            const horizontalChrome = thumbnailTheme.left + thumbnailTheme.right;
+            const verticalChrome = thumbnailTheme.top + thumbnailTheme.bottom;
+            // Clutter applies the native CENTER alignment to the preferred
+            // width before ThumbnailsBox receives its actual allocation.
+            const naturalWidth = count * portholeWidth * this._maxThumbnailScale +
+                totalSpacing + horizontalChrome;
+            const width = Math.min(box.get_width(), naturalWidth);
+            const x = box.x1 + (box.get_width() - width) / 2;
+            const alignedBox = new ActorBox({
+                x1: x, x2: x + width, y1: box.y1, y2: box.y2,
+            });
+            nativeAllocate.call(this, alignedBox);
+
+            // GNOME 51 computes its native scale from the content allocation,
+            // then rounds height before deriving width. Its extraWidth offset
+            // assumes that the requested maximum scale fits the allocation.
+            const content = thumbnailTheme.get_content_box(alignedBox);
+            const naturalHeight = Math.round(portholeHeight * this._maxThumbnailScale) + verticalChrome;
+            const availableHeight = Math.min(naturalHeight,
+                portholeHeight * this._maxThumbnailScale) - verticalChrome;
+            const scale = Math.min((content.get_width() - totalSpacing) / count / portholeWidth,
+                availableHeight / portholeHeight);
+            const thumbnailHeight = Math.round(portholeHeight * scale);
+            const thumbnailWidth = Math.round(thumbnailHeight * portholeWidth / portholeHeight);
+            const extraWidth = (this._maxThumbnailScale * portholeWidth - thumbnailWidth) * count;
+            let childX = content.x1 + Math.round(extraWidth / 2);
+            rendered.length = 0;
+            for (let index = 0; index < count; index++) {
+                rendered.push({
+                    x: this.x + Math.round(childX), y: this.y + content.y1,
+                    width: thumbnailWidth, height: thumbnailHeight,
+                });
+                childX += thumbnailWidth + thumbnailTheme.spacing;
+            }
+        };
+        subject.enable();
+        state(1);
+        const verify = () => {
+            layout.allocate();
+            const strip = rect(subject._workspaceStrip);
+            for (const thumbnail of rendered)
+                assertInside(thumbnail, strip);
+            // The active indicator can be on either end, and native chrome
+            // extends beyond the selected thumbnail by its border/padding.
+            for (const index of [0, rendered.length - 1]) {
+                const selected = rendered[index];
+                assertInside({
+                    x: selected.x - indicatorBorder,
+                    y: selected.y - indicatorBorder,
+                    width: selected.width + 2 * indicatorBorder,
+                    height: selected.height + 2 * indicatorBorder,
+                }, strip);
+            }
+        };
+        for (const [width, height, scale] of [
+            [1920, 1200, 1], [1366, 768, 1], [2880, 1800, 1.5], [2400, 1500, 1.25],
+        ]) {
+            theme.scaleFactor = scale;
+            Object.assign(layoutManager.monitors[0], {width, height});
+            layout._workAreaBox = new ActorBox({x1: 0, y1: 32 * scale, x2: width, y2: height});
+            thumbnails._porthole = {width, height: height - 32 * scale};
+            Object.assign(thumbnailTheme, {spacing: 6 * scale, left: 8 * scale, right: 10 * scale});
+            indicatorBorder = 3 * scale;
+            verify();
+            // Removing workspaces should let uncrowded thumbnails reach the
+            // requested height again, without retaining the crowded scale.
+            const crowded = thumbnails._thumbnails;
+            thumbnails._thumbnails = crowded.slice(0, 3);
+            verify();
+            assert.equal(thumbnails._maxThumbnailScale,
+                subject._getLayout().workspaces.height / thumbnails._porthole.height);
+            thumbnails._thumbnails = [...crowded, new OverviewActor({collapse_fraction: 0})];
+            verify();
+            thumbnails._thumbnails = crowded;
+        }
+        subject.disable();
+    });
+}
 
 test('thumbnail allocation uses the dash height from the current layout pass', async () => {
     const {subject, thumbnails, state, layout} = await setup();
@@ -893,8 +1054,8 @@ test('native thumbnails occupy the first-Super strip and the app grid card conta
     assert.equal(thumbnails.get_parent(), subject._controls);
     assert.equal(thumbnails.x_align, 'center');
     assertInside(rect(thumbnails), rect(subject._workspaceStrip));
-    assert.equal(subject._workspaceStrip.x, 0);
-    assert.equal(subject._workspaceStrip.width, 1920);
+    assert.equal(subject._workspaceStrip.x, 480);
+    assert.equal(subject._workspaceStrip.width, 960);
     assert.ok(thumbnails.y + thumbnails.height < workspaceContainer.y);
     assert.equal(thumbnails._maxThumbnailScale, thumbnails.height / 1168);
     assert.ok(workspaceContainer.y + workspaceContainer.height <= 1200 - 96);
@@ -909,14 +1070,14 @@ test('native thumbnails occupy the first-Super strip and the app grid card conta
     assertInside(rect(appDisplay), rect(subject._card));
     assert.equal(appDisplay.y, subject._card.y + 28);
     assert.ok(subject._card.y + subject._card.height <= 1200 - 96);
-    // Desktop struts can narrow the work area; the backdrop still reaches
-    // both physical monitor edges and stays in monitor-local coordinates.
+    // Desktop struts can narrow the work area; the compact backdrop remains
+    // centered in those coordinates with the same proportional minimum.
     layout._workAreaBox = new ActorBox({x1: 12, y1: 32, x2: 1908, y2: 1200});
     state(1);
     layout.postCallback = () => allocate(1, 96);
     layout.allocate();
-    assert.equal(subject._workspaceStrip.x, 0);
-    assert.equal(subject._workspaceStrip.width, 1920);
+    assert.equal(subject._workspaceStrip.x, 486);
+    assert.equal(subject._workspaceStrip.width, 948);
     assertInside(rect(thumbnails), rect(subject._workspaceStrip));
     subject.disable();
 });
