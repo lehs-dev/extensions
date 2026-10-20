@@ -21,7 +21,7 @@ async function setup(windowActor = new Actor()) {
         get_n_workspaces: () => 2,
         get_workspace_by_index: index => index === 1 ? {list_windows: () => [window]} : null};
     const Main = {uiGroup, layoutManager: {overviewGroup: new Actor(), monitors: [], primaryIndex: 0}};
-    const {OverviewBlur} = await loadModule('blur-my-shell@aunetx/components/overview.js', {
+    const {OverviewBlur} = await loadModule('blur-my-shell@custom/components/overview.js', {
         globals: {global: {workspace_manager: workspaceManager, window_group: new Actor()}},
         mocks: {
             'gi://Meta': {default: {BackgroundGroup: Actor, WindowType: {DESKTOP: 1},
@@ -133,7 +133,7 @@ async function setupBackgrounds() {
         }
         destroy() { this.actor = null; }
     }
-    const {OverviewBlur} = await loadModule('blur-my-shell@aunetx/components/overview.js', {
+    const {OverviewBlur} = await loadModule('blur-my-shell@custom/components/overview.js', {
         globals: {global: {blur_my_shell: {_pipelines_manager: {}}}},
         mocks: {
             'gi://Meta': {default: {BackgroundGroup: Actor}},

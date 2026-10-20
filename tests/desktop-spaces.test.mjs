@@ -49,7 +49,7 @@ async function setupSpaces() {
     const uiGroup = new Actor();
 
     const {default: Extension} = await loadModule(
-        'static-workspace-background@CleoMenezesJr.github.io/extension.js', {
+        'static-workspace-background@custom/extension.js', {
             mocks: {
                 './overview.js': {MissionControlOverview: class { enable() {} disable() {} }},
                 'resource:///org/gnome/shell/ui/workspaceAnimation.js': {MonitorGroup},
@@ -244,7 +244,7 @@ for (const spacesFirst of [true, false]) {
                 return 'finished';
             }
         }
-        const {OverviewBlur} = await loadModule('blur-my-shell@aunetx/components/overview.js', {
+        const {OverviewBlur} = await loadModule('blur-my-shell@custom/components/overview.js', {
             globals: {global: {window_group: new Actor(), workspace_manager: {
                 get_active_workspace_index: () => 0, get_n_workspaces: () => 2,
                 get_workspace_by_index: () => null,

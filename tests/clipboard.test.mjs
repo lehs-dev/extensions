@@ -15,7 +15,7 @@ async function setup() {
     }
     const Main = {wm: {removeKeybinding() {}}, layoutManager: {
         primaryMonitor: {width: 1920}, findMonitorForActor: () => ({width: 1280})}};
-    await loadModule('clipboard-history@alexsaveau.dev/extension.js', {
+    await loadModule('clipboard-history@custom/extension.js', {
         globals: {global: {}},
         mocks: {
             'gi://Clutter': {default: {ActorAlign: {CENTER: 0}}},

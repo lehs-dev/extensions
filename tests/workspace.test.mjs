@@ -19,7 +19,7 @@ async function setup() {
     }
     const uiGroup = new Actor();
     const {default: Extension} = await loadModule(
-        'static-workspace-background@CleoMenezesJr.github.io/extension.js', {
+        'static-workspace-background@custom/extension.js', {
             mocks: {
                 './overview.js': {MissionControlOverview: class { enable() {} disable() {} }},
                 'resource:///org/gnome/shell/ui/workspaceAnimation.js': {MonitorGroup},

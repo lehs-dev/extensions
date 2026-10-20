@@ -9,7 +9,7 @@ async function setup(position = 'bottom') {
     const settings = {enable_animations: true, reducedMotion: 0};
     const distanceSquared = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
     class Overlay extends Actor { update() {} }
-    const {Animator} = await loadModule('dash2dock-lite@icedman.github.com/animator.js', {
+    const {Animator} = await loadModule('dash2dock-lite@custom/animator.js', {
         globals: {global: {get_pointer: () => pointer}},
         mocks: {
             'resource:///org/gnome/shell/ui/main.js': {},
@@ -107,7 +107,7 @@ test('reduced motion disables magnification while retaining usable renderers', a
 });
 
 test('timer animation objects can be reused without treating them as frame arrays', async () => {
-    const {Timer} = await loadModule('dash2dock-lite@icedman.github.com/timer.js', {
+    const {Timer} = await loadModule('dash2dock-lite@custom/timer.js', {
         mocks: {'gi://GLib': {default: {}}},
     });
     const timer = new Timer('test');
@@ -118,7 +118,7 @@ test('timer animation objects can be reused without treating them as frame array
 
 test('SineEaseInOut / CosineBell satisfies macOS Sequoia boundary and crest derivatives', async () => {
     const {SineEaseInOut, CosineBell} = await loadModule(
-        'dash2dock-lite@icedman.github.com/effects/easing.js'
+        'dash2dock-lite@custom/effects/easing.js'
     );
 
     assert.equal(SineEaseInOut, CosineBell);
@@ -175,7 +175,7 @@ test('compiz_getIcon returns stage coordinates and positive 2D bounding box', as
         layoutManager: {monitors, primaryIndex: 0},
         extensionManager: {
             lookup(id) {
-                if (id === 'compiz-alike-magic-lamp-effect@hermes83.github.com')
+                if (id === 'compiz-alike-magic-lamp-effect@custom')
                     return registeredCompiz;
                 return null;
             },
@@ -194,7 +194,7 @@ test('compiz_getIcon returns stage coordinates and positive 2D bounding box', as
         },
     };
 
-    const {Integrations} = await loadModule('dash2dock-lite@icedman.github.com/integrations.js', {
+    const {Integrations} = await loadModule('dash2dock-lite@custom/integrations.js', {
         mocks: {
             'resource:///org/gnome/shell/ui/main.js': Main,
             'gi://Shell': {default: ShellMock},
@@ -284,7 +284,7 @@ test('Compiz integration falls back once with no docks and releases its retained
         layoutManager: {monitors: [], primaryIndex: 0},
         extensionManager: {lookup: () => current},
     };
-    const {Integrations} = await loadModule('dash2dock-lite@icedman.github.com/integrations.js', {
+    const {Integrations} = await loadModule('dash2dock-lite@custom/integrations.js', {
         mocks: {
             'resource:///org/gnome/shell/ui/main.js': Main,
             'gi://Shell': {default: {}},
@@ -335,7 +335,7 @@ test('Compiz targets require a matched app icon with real stage geometry', async
     let fallbackCount = 0;
     const fallback = {x: 120, y: 1020, width: 48, height: 48};
     const owner = {getIcon() { fallbackCount++; return fallback; }};
-    const {Integrations} = await loadModule('dash2dock-lite@icedman.github.com/integrations.js', {
+    const {Integrations} = await loadModule('dash2dock-lite@custom/integrations.js', {
         mocks: {
             'resource:///org/gnome/shell/ui/main.js': {
                 layoutManager: {monitors: [monitor], primaryIndex: 0},
@@ -388,7 +388,7 @@ test('dynamic icon geometry follows scaled renderers, hidden dock edges and moni
         {index: 1, x: -1280, y: -100, width: 1280, height: 1024, geometry_scale: 2},
     ];
     const app = {get_id: () => 'app.desktop'};
-    const {Integrations} = await loadModule('dash2dock-lite@icedman.github.com/integrations.js', {
+    const {Integrations} = await loadModule('dash2dock-lite@custom/integrations.js', {
         mocks: {
             'resource:///org/gnome/shell/ui/main.js': {
                 layoutManager: {monitors, primaryIndex: 0},
@@ -449,7 +449,7 @@ test('frame timer advances animations by elapsed time at 60/120 Hz and releases 
         tick(delta) { this.delta = delta; this.emit('new-frame'); }
     }
     const stage = new Actor();
-    const {FrameTimer} = await loadModule('dash2dock-lite@icedman.github.com/frameTimer.js', {
+    const {FrameTimer} = await loadModule('dash2dock-lite@custom/frameTimer.js', {
         mocks: {
             'gi://Clutter': {default: {Timeline}},
             'gi://GLib': {default: {timeout_add() { throw new Error('Unexpected GLib animation timer'); }}},
@@ -487,7 +487,7 @@ test('frame timer advances animations by elapsed time at 60/120 Hz and releases 
 });
 
 test('Sequoia colors follow light/dark mode while explicit user colors retain their alpha', async () => {
-    const {dockColor} = await loadModule('dash2dock-lite@icedman.github.com/appearance.js');
+    const {dockColor} = await loadModule('dash2dock-lite@custom/appearance.js');
     const custom = [0.1, 0.2, 0.3, 0.125];
     for (const name of ['background-color', 'border-color', 'separator-color', 'running-indicator-color']) {
         for (const scheme of ['dark', 'light'])
@@ -498,7 +498,7 @@ test('Sequoia colors follow light/dark mode while explicit user colors retain th
     assert.ok(dark[0] > light[0], 'Indicators contrast with the light/dark dock');
     assert.equal(dockColor('border-color', custom, 'dark')[3], 0.25);
 
-    const {Style} = await loadModule('dash2dock-lite@icedman.github.com/style.js', {
+    const {Style} = await loadModule('dash2dock-lite@custom/style.js', {
         mocks: {
             'gi://Gio': {default: {}}, 'gi://GLib': {default: {}}, 'gi://St': {default: {}},
             './utils.js': {tempPath() {}},
@@ -523,7 +523,7 @@ test('default running indicator paints one 4px dot and repaints only when appear
         get_surface_size() { return [this.width, this.height]; }
         queue_repaint() { this.repaints = (this.repaints || 0) + 1; }
     }
-    const {Dot} = await loadModule('dash2dock-lite@icedman.github.com/apps/dot.js', {
+    const {Dot} = await loadModule('dash2dock-lite@custom/apps/dot.js', {
         mocks: {
             'gi://GObject': {default: {registerClass: (...args) => args.at(-1)}},
             'gi://Clutter': {default: {}},
@@ -580,7 +580,7 @@ test('Dock follows real light-style St notifications over interface preferences 
         'resource:///org/gnome/shell/ui/main.js': Main,
         'gi://St': {default: St},
     };
-    const {default: DockExtension} = await loadModule('dash2dock-lite@icedman.github.com/extension.js', {
+    const {default: DockExtension} = await loadModule('dash2dock-lite@custom/extension.js', {
         globals: {global: globalMock},
         mocks: {
             ...sharedMocks,
@@ -597,7 +597,7 @@ test('Dock follows real light-style St notifications over interface preferences 
         },
     });
     const {default: LightStyle} = await loadModule(
-        'light-style@gnome-shell-extensions.gcampax.github.com/extension.js', {mocks: sharedMocks});
+        'light-style@custom/extension.js', {mocks: sharedMocks});
     const dock = new DockExtension();
     let interfacePreference = 'prefer-dark';
     dock._interfaceSettings = {get_string: () => interfacePreference};
@@ -661,7 +661,7 @@ test('DockItemMenu initializes completely hidden with zero opacity and stays inv
         launch_action: () => {},
     };
 
-    const dockItemsModule = await loadModule('dash2dock-lite@icedman.github.com/dockItems.js', {
+    const dockItemsModule = await loadModule('dash2dock-lite@custom/dockItems.js', {
         mocks: {
             'resource:///org/gnome/shell/ui/main.js': Main,
             'resource:///org/gnome/shell/ui/boxpointer.js': {PopupAnimation: {FULL: 1}},

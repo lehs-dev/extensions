@@ -1,6 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import * as Store from '../clipboard-history@alexsaveau.dev/store.js';
+import * as Store from '../clipboard-history@custom/store.js';
 
 function assert(condition, message) {
     if (!condition)

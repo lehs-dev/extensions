@@ -69,9 +69,9 @@ async function setupEffects() {
         },
     };
     const {NativeStaticBlurEffect} = await loadModule(
-        'blur-my-shell@aunetx/effects/native_static_gaussian_blur.js', nativeOptions);
+        'blur-my-shell@custom/effects/native_static_gaussian_blur.js', nativeOptions);
     const {NativeDynamicBlurEffect} = await loadModule(
-        'blur-my-shell@aunetx/effects/native_dynamic_gaussian_blur.js', nativeOptions);
+        'blur-my-shell@custom/effects/native_dynamic_gaussian_blur.js', nativeOptions);
     // Some custom effects keep the context in a local, without _theme_context.
     class LocalContextEffect extends NativeBlur {
         static get default_params() { return {radius: 12}; }
@@ -82,11 +82,11 @@ async function setupEffects() {
             }, this);
         }
     }
-    const {Connections} = await loadModule('blur-my-shell@aunetx/conveniences/connections.js', {
+    const {Connections} = await loadModule('blur-my-shell@custom/conveniences/connections.js', {
         mocks: {'gi://GObject': {default: GObject}},
     });
     const connections = new Connections();
-    const {EffectsManager} = await loadModule('blur-my-shell@aunetx/conveniences/effects_manager.js', {
+    const {EffectsManager} = await loadModule('blur-my-shell@custom/conveniences/effects_manager.js', {
         globals: {global: {stage: {}}},
         mocks: {
             'gi://St': {default: St},

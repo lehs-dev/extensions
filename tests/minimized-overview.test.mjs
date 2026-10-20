@@ -14,7 +14,7 @@ class ActorBox {
 }
 
 const {alignMinimizedWindowPreviews} = await loadModule(
-    'static-workspace-background@CleoMenezesJr.github.io/minimizedWindowPreviews.js', {
+    'static-workspace-background@custom/minimizedWindowPreviews.js', {
         mocks: {'gi://Clutter': {default: {ActorBox}}},
     });
 

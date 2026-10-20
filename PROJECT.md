@@ -6,20 +6,20 @@ Implementation resumed and hardened on 2026-10-16. See [verification and desktop
 - **Workspace Root**: `/workspaces/extensions`
 - **Target Platform**: GNOME Shell 51 (Mutter 51 Wayland session, 60Hz/120Hz frame pacing, Cogl.Snippet fragment shaders)
 - **10 Extensions**:
-  1. `blur-my-shell@aunetx` — Screen/overview/window blur using Cogl.Snippet fragment shaders.
-  2. `clipboard-history@alexsaveau.dev` — Async clipboard storage with Gio and native GJS migration.
-  3. `compiz-alike-magic-lamp-effect@hermes83.github.com` — Clutter.DeformEffect mesh genie window minimization/restoration.
-  4. `dash2dock-lite@icedman.github.com` — macOS-style dock with magnified icons, centered expansion, and Cogl.Snippet shaders.
-  5. `just-perfection-desktop@just-perfection` — Shell customization, UI toggles, GNOME 51 chrome compatibility.
-  6. `kimpanel@kde.org` — Input method panel with DBus lifecycle.
-  7. `light-style@gnome-shell-extensions.gcampax.github.com` — GNOME 51 color scheme switcher.
-  8. `spotlight@nin` — Compact floating search panel with search stealer and transparent outside-click surface.
-  9. `static-workspace-background@CleoMenezesJr.github.io` — Fixed wallpaper during workspace switch transitions.
-  10. `tiling-assistant@leleat-on-github` — Window snap presets (halves, quarters, 1/3-2/3), native window corners, gap coordination.
+  1. `blur-my-shell@custom` — Screen/overview/window blur using Cogl.Snippet fragment shaders.
+  2. `clipboard-history@custom` — Async clipboard storage with Gio and native GJS migration.
+  3. `compiz-alike-magic-lamp-effect@custom` — Clutter.DeformEffect mesh genie window minimization/restoration.
+  4. `dash2dock-lite@custom` — macOS-style dock with magnified icons, centered expansion, and Cogl.Snippet shaders.
+  5. `just-perfection-desktop@custom` — Shell customization, UI toggles, GNOME 51 chrome compatibility.
+  6. `kimpanel@custom` — Input method panel with DBus lifecycle.
+  7. `light-style@custom` — GNOME 51 color scheme switcher.
+  8. `spotlight@custom` — Compact floating search panel with search stealer and transparent outside-click surface.
+  9. `static-workspace-background@custom` — Fixed wallpaper during workspace switch transitions.
+  10. `tiling-assistant@custom` — Window snap presets (halves, quarters, 1/3-2/3), native window corners, gap coordination.
 
 ## Overview appearance
 
-`static-workspace-background@CleoMenezesJr.github.io` also provides a full-screen
+`static-workspace-background@custom` also provides a full-screen
 wallpaper in Overview. Minimized window previews fade at their Overview slots;
 the first Super press shows the native workspace strip above the window picker.
 The thumbnails are 15% smaller, sit 8 logical pixels below the panel, and have
@@ -88,9 +88,9 @@ the first allocation. Normal Overview access remains available after login.
 - **Snap Presets**: Halves (50%), Quarters (25%), Left/Right Third (33.33%), Left/Right Two-Thirds (66.67%), Center Third (33.33%).
 
 ## Code Layout
-- `dash2dock-lite@icedman.github.com/` — Owned by M1 (`animator.js`, `integrations.js`, `effects/easing.js`)
-- `compiz-alike-magic-lamp-effect@hermes83.github.com/` — Owned by M1 (`extension.js`)
-- `tiling-assistant@leleat-on-github/` — Owned by M2 (`src/extension/tilingWindowManager.js`, `src/extension/layoutPicker.js`, `src/extension/tilingPopup.js`, schemas)
-- `spotlight@nin/` — Owned by M2 (`lib/popup/widget/spotlightPopup.js`, `lib/popup/components/positioner.js`, `lib/popup/components/backdrop.js`, `lib/overview/defense.js`, `stylesheet.css`)
-- `static-workspace-background@CleoMenezesJr.github.io/` — Owned by M2 (`extension.js`)
+- `dash2dock-lite@custom/` — Owned by M1 (`animator.js`, `integrations.js`, `effects/easing.js`)
+- `compiz-alike-magic-lamp-effect@custom/` — Owned by M1 (`extension.js`)
+- `tiling-assistant@custom/` — Owned by M2 (`src/extension/tilingWindowManager.js`, `src/extension/layoutPicker.js`, `src/extension/tilingPopup.js`, schemas)
+- `spotlight@custom/` — Owned by M2 (`lib/popup/widget/spotlightPopup.js`, `lib/popup/components/positioner.js`, `lib/popup/components/backdrop.js`, `lib/overview/defense.js`, `stylesheet.css`)
+- `static-workspace-background@custom/` — Owned by M2 (`extension.js`)
 - `tests/` — Owned by M3 / Final Milestone

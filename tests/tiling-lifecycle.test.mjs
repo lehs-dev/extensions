@@ -4,7 +4,7 @@ import {resolve} from 'node:path';
 import {loadModule} from './helpers/shell.mjs';
 
 async function setup() {
-    const root = 'tiling-assistant@leleat-on-github';
+    const root = 'tiling-assistant@custom';
     class Cancellable {
         cancel() { this.cancelled = true; }
         is_cancelled() { return Boolean(this.cancelled); }

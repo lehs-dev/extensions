@@ -34,7 +34,7 @@ async function setup(preferences = {}) {
     }
     const settings = {'window-gap': 8, ...preferences};
     let Preview;
-    await loadModule('tiling-assistant@leleat-on-github/src/extension/moveHandler.js', {
+    await loadModule('tiling-assistant@custom/src/extension/moveHandler.js', {
         mocks: {
             '../dependencies/gi.js': {
                 Clutter: {AnimationMode: {EASE_OUT_QUAD: 1}}, GLib: {}, Meta: {}, St: {},

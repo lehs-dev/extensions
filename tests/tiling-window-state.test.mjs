@@ -53,9 +53,9 @@ async function setup(backend = 'ubuntu', preferences = {}) {
         }},
     };
     const utility = await loadModule(
-        'tiling-assistant@leleat-on-github/src/extension/utility.js', {mocks, globals: {global}});
+        'tiling-assistant@custom/src/extension/utility.js', {mocks, globals: {global}});
     const {TilingWindowManager: twm} = await loadModule(
-        'tiling-assistant@leleat-on-github/src/extension/tilingWindowManager.js', {
+        'tiling-assistant@custom/src/extension/tilingWindowManager.js', {
             mocks: {...mocks, './utility.js': utility}, globals: {global},
         });
     twm.initialize();
@@ -248,7 +248,7 @@ test('dragging a tile restores its size immediately even with untile animations 
         'disable-tile-groups': true, 'enable-untile-animations': true,
     });
     const {default: MoveHandler} = await loadModule(
-        'tiling-assistant@leleat-on-github/src/extension/moveHandler.js', {
+        'tiling-assistant@custom/src/extension/moveHandler.js', {
             mocks: {
                 '../dependencies/gi.js': {Clutter: {}, GLib: {}, Gio: {}, Meta: {}, Mtk: {},
                     GObject: {registerClass: cls => cls}},

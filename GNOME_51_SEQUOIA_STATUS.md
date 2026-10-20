@@ -99,7 +99,7 @@ Panel App Grid bo góc dùng tint trắng giống tiling preview, opacity 20% so
 1920×1200, scale 100%, panel tối đa 1400×960. Cửa sổ, thumbnail và ứng dụng vẫn
 là actor native; các hook bố cục nối tiếp Just Perfection và được khôi phục khi
 disable. Hướng dẫn nạp source và kiểm tra desktop nằm trong
-`static-workspace-background@CleoMenezesJr.github.io/README.md`.
+`static-workspace-background@custom/README.md`.
 
 Xác minh lần thay đổi này:
 

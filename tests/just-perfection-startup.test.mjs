@@ -12,7 +12,7 @@ function deferred() {
 }
 
 async function setup({startingUp = true, ownAnimation = false, immediateHide = false} = {}) {
-    const {API} = await loadModule('just-perfection-desktop@just-perfection/lib/API.js');
+    const {API} = await loadModule('just-perfection-desktop@custom/lib/API.js');
     // Like ControlsLayout, every ensureAllocation call queues a fresh promise;
     // allocations resolve the whole current batch, then clear that batch.
     const controlsLayout = {

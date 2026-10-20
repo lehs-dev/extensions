@@ -13,7 +13,7 @@ test('target resolution prefers the live dock, rejects stale geometry and ignore
         extensionManager: {lookup: () => ({stateObj: {integrations: {compiz_getIcon: actor => provider(actor)}}})},
     };
     const {default: Extension} = await loadModule(
-        'compiz-alike-magic-lamp-effect@hermes83.github.com/extension.js', {
+        'compiz-alike-magic-lamp-effect@custom/extension.js', {
             mocks: {
                 'gi://GObject': {default: {registerClass() {}}},
                 'gi://Clutter': {default: {DeformEffect: class {}}},
@@ -53,7 +53,7 @@ test('minimize and restore complete without deformation during reduced motion or
         _shellwm: {completed_minimize: () => minimized++, completed_unminimize: () => restored++},
     }};
     const {default: Extension} = await loadModule(
-        'compiz-alike-magic-lamp-effect@hermes83.github.com/extension.js', {
+        'compiz-alike-magic-lamp-effect@custom/extension.js', {
             globals: {global: {window_manager: windowManager, get_window_actors: () => []}},
             mocks: {
                 'gi://GObject': {default: {registerClass() {}}},
@@ -101,7 +101,7 @@ test('MagicLamp narrows the funnel to the incoming icon edge without folding on 
     const StSide = {TOP: 0, RIGHT: 1, BOTTOM: 2, LEFT: 3};
     const dockPositions = ['top', 'right', 'bottom', 'left'];
     const {MagicLampMinimizeEffect} = await loadModule(
-        'compiz-alike-magic-lamp-effect@hermes83.github.com/extension.js', {
+        'compiz-alike-magic-lamp-effect@custom/extension.js', {
             mocks: {
                 'gi://GObject': {default: {registerClass() {}}},
                 'gi://Clutter': {
@@ -319,7 +319,7 @@ test('invalid or missing targets use a short local shrink and fade instead of an
         {x: 1920, y: 0, width: 1920, height: 1080},
     ];
     const {MagicLampMinimizeEffect} = await loadModule(
-        'compiz-alike-magic-lamp-effect@hermes83.github.com/extension.js', {
+        'compiz-alike-magic-lamp-effect@custom/extension.js', {
             mocks: {
                 'gi://GObject': {default: {registerClass() {}}},
                 'gi://Clutter': {
@@ -528,7 +528,7 @@ test('cross-monitor effects stop on gestures and disable drains detached snapsho
             _shellwm: {completed_minimize: originalMinimize, completed_unminimize: originalUnminimize}},
     };
     const {default: Extension} = await loadModule(
-        'compiz-alike-magic-lamp-effect@hermes83.github.com/extension.js', {
+        'compiz-alike-magic-lamp-effect@custom/extension.js', {
             globals: {global: {window_manager: manager, window_group: windowGroup,
                 get_window_actors: () => [source]}},
             mocks: {
@@ -711,7 +711,7 @@ test('animating window in tiled layout is raised above siblings and kept on top 
     };
 
     const {default: Extension} = await loadModule(
-        'compiz-alike-magic-lamp-effect@hermes83.github.com/extension.js', {
+        'compiz-alike-magic-lamp-effect@custom/extension.js', {
             globals: {
                 global: {
                     window_manager: manager,

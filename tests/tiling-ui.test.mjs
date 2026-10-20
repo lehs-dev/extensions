@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {Actor, loadModule} from './helpers/shell.mjs';
 
-const root = 'tiling-assistant@leleat-on-github';
+const root = 'tiling-assistant@custom';
 const presets = ['left-third', 'center-third', 'right-third', 'left-two-thirds', 'right-two-thirds'];
 
 class Emitter extends Actor {

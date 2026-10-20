@@ -335,7 +335,7 @@ async function createHarness(options = {}) {
     const displaySignals = new Map();
     let nextDisplaySigId = 1;
 
-    const {SpotlightPopup} = await loadModule('spotlight@nin/lib/popup/widget/spotlightPopup.js', {
+    const {SpotlightPopup} = await loadModule('spotlight@custom/lib/popup/widget/spotlightPopup.js', {
         mocks: {
             'resource:///org/gnome/shell/ui/main.js': Main,
             'gi://Clutter': {default: Clutter},
@@ -441,7 +441,7 @@ async function createHarness(options = {}) {
 // ---------------------------------------------------------------------------
 for (const completed of [true, false]) {
     test(`[Interop] borrowed entry recovers from a ${completed ? 'completed' : 'pending'} Overview hide`, async () => {
-        const {API} = await loadModule('just-perfection-desktop@just-perfection/lib/API.js');
+        const {API} = await loadModule('just-perfection-desktop@custom/lib/API.js');
         const borrowedOpacity = completed ? 0 : 127;
         const {popup, entry, entryParent, search, Clutter, dispatchKey} = await createHarness({
             beforeSteal: ({entry, entryParent, Main, Clutter}) => {
@@ -1118,7 +1118,7 @@ test('[Keystroke] Space activates a focused result and remains text in the entry
 test('[Theme] Light Style enables and disables update an open popup and clean up Shell settings tracking', async () => {
     const {popup, Main, St, animationSettings, settings} = await createHarness({colorScheme: 'prefer-dark'});
     const {default: LightStyle} = await loadModule(
-        'light-style@gnome-shell-extensions.gcampax.github.com/extension.js', {
+        'light-style@custom/extension.js', {
             mocks: {
                 'gi://St': {default: St},
                 'resource:///org/gnome/shell/ui/main.js': Main,

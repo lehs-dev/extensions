@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {Actor, loadModule} from './helpers/shell.mjs';
 
-const root = 'static-workspace-background@CleoMenezesJr.github.io';
+const root = 'static-workspace-background@custom';
 
 class ActorBox {
     constructor({x1 = 0, y1 = 0, x2 = 0, y2 = 0} = {}) {

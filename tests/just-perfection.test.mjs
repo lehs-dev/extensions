@@ -4,7 +4,7 @@ import {loadModule, Actor} from './helpers/shell.mjs';
 
 async function setup(version = 51, hasBin = true) {
     const display = new Actor();
-    const {API} = await loadModule('just-perfection-desktop@just-perfection/lib/API.js', {
+    const {API} = await loadModule('just-perfection-desktop@custom/lib/API.js', {
         globals: {global: {display}},
     });
     const entry = new Actor();

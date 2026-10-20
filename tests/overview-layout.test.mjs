@@ -3,7 +3,7 @@ import test from 'node:test';
 import {loadModule} from './helpers/shell.mjs';
 
 const {computeOverviewLayout} = await loadModule(
-    'static-workspace-background@CleoMenezesJr.github.io/overviewLayout.js');
+    'static-workspace-background@custom/overviewLayout.js');
 
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-7,
     `expected ${actual} to be close to ${expected}`);

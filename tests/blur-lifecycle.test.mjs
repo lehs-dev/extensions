@@ -11,7 +11,7 @@ async function setupPaintSignals() {
         add_effect(effect) { this.effects.add(effect); }
         remove_effect(effect) { assert.equal(this.effects.delete(effect), true); }
     }
-    const {PaintSignals} = await loadModule('blur-my-shell@aunetx/conveniences/paint_signals.js', {
+    const {PaintSignals} = await loadModule('blur-my-shell@custom/conveniences/paint_signals.js', {
         mocks: {
             'gi://GObject': {default: {registerClass: (_metadata, cls) => cls}},
             'gi://Clutter': {default: {Effect}},

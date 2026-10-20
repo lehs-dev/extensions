@@ -16,11 +16,11 @@ test('real search stealer and visibility settings coexist through steal and rest
     const overview = {searchEntry: entry, searchController: search, toggle() {},
         _overview: {controls, _controls: controls}, dash: {showAppsButton: new Actor()}};
     const Main = {overview, layoutManager: {uiGroup: new Actor()}};
-    const {OverviewSearchStealer} = await loadModule('spotlight@nin/lib/overview/searchStealer.js', {
+    const {OverviewSearchStealer} = await loadModule('spotlight@custom/lib/overview/searchStealer.js', {
         mocks: {'resource:///org/gnome/shell/ui/main.js': Main, 'gi://Clutter': {default: {}}},
         globals: {global: {stage}},
     });
-    const {API} = await loadModule('just-perfection-desktop@just-perfection/lib/API.js');
+    const {API} = await loadModule('just-perfection-desktop@custom/lib/API.js');
     const api = new API({Main, Clutter: {AnimationMode: {EASE: 1}}}, 51);
     const stealer = new OverviewSearchStealer({_visible: false});
     stealer.steal();
@@ -41,7 +41,7 @@ test('light style restores the prior color scheme over repeated enable/disable c
     const sessionMode = {colorScheme: 'prefer-dark'};
     let notifications = 0;
     const {default: Extension} = await loadModule(
-        'light-style@gnome-shell-extensions.gcampax.github.com/extension.js', {
+        'light-style@custom/extension.js', {
             mocks: {'gi://St': {default: {Settings: {get: () => ({notify: () => notifications++})}}},
                 'resource:///org/gnome/shell/ui/main.js': {sessionMode}},
         });

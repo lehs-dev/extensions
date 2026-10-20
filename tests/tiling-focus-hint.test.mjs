@@ -41,7 +41,7 @@ async function setup(mode = 2) {
         workspace_manager: {get_workspace_by_index: () => workspace},
     };
     const {default: FocusHintManager} = await loadModule(
-        'tiling-assistant@leleat-on-github/src/extension/focusHint.js', {
+        'tiling-assistant@custom/src/extension/focusHint.js', {
             globals: {global},
             mocks: {
                 '../dependencies/gi.js': {

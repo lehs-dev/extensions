@@ -22,7 +22,7 @@ for (const [filename, exportName] of [['tint', 'TintEffect'], ['monochrome', 'Mo
                 constructor(declarations) { this.declarations = declarations; }
                 set_replace(body) { this.body = body; }
             }
-            const directory = 'dash2dock-lite@icedman.github.com';
+            const directory = 'dash2dock-lite@custom';
             const namespace = await loadModule(`${directory}/effects/${filename}_effect.js`, {
                 mocks: {
                     'gi://Clutter': {default: {ShaderEffect}},

@@ -226,7 +226,7 @@ async function setupSpotlight() {
         return count;
     };
 
-    const {SpotlightPopup} = await loadModule('spotlight@nin/lib/popup/widget/spotlightPopup.js', {
+    const {SpotlightPopup} = await loadModule('spotlight@custom/lib/popup/widget/spotlightPopup.js', {
         mocks: {
             'resource:///org/gnome/shell/ui/main.js': Main,
             'gi://Clutter': {default: Clutter},
@@ -434,7 +434,7 @@ test('outside-click surface is transparent and never constructs a blur effect', 
     const chrome = new Set();
     let outsideClicks = 0;
     // No Shell mock: importing the blur API would fail this test.
-    const {PopupBackdrop} = await loadModule('spotlight@nin/lib/popup/components/backdrop.js', {
+    const {PopupBackdrop} = await loadModule('spotlight@custom/lib/popup/components/backdrop.js', {
         mocks: {
             'gi://St': {default: {Widget: TestActor}},
             'gi://Clutter': {default: {EVENT_STOP: true}},
@@ -450,7 +450,7 @@ test('outside-click surface is transparent and never constructs a blur effect', 
     backdrop.show();
     assert.ok(chrome.has(backdrop._actor));
     assert.equal(backdrop._actor.effects.size, 0);
-    const css = await readFile('spotlight@nin/stylesheet.css', 'utf8');
+    const css = await readFile('spotlight@custom/stylesheet.css', 'utf8');
     assert.match(css, /\.spotlight-backdrop\s*\{\s*background-color: transparent;\s*\}/);
     backdrop._actor.emit('button-release-event');
     assert.equal(outsideClicks, 1);

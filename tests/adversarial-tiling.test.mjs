@@ -97,11 +97,11 @@ async function setupTwm(preferences = {}, workArea = {x: 0, y: 32, width: 1920, 
         },
     };
     const utility = await loadModule(
-        'tiling-assistant@leleat-on-github/src/extension/utility.js',
+        'tiling-assistant@custom/src/extension/utility.js',
         {mocks, globals: {global}}
     );
     const {TilingWindowManager: twm} = await loadModule(
-        'tiling-assistant@leleat-on-github/src/extension/tilingWindowManager.js',
+        'tiling-assistant@custom/src/extension/tilingWindowManager.js',
         {mocks: {...mocks, './utility.js': utility}, globals: {global}}
     );
     twm.initialize();

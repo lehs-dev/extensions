@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {loadModule, Actor} from './helpers/shell.mjs';
 
-const root = 'tiling-assistant@leleat-on-github';
+const root = 'tiling-assistant@custom';
 const geometry = rect => ({x: rect.x, y: rect.y, width: rect.width, height: rect.height});
 const uniform = size => ({top: size, left: size, right: size, bottom: size});
 const defaults = {

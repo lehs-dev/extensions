@@ -80,7 +80,7 @@ async function setupOverview() {
         close() { closeRequests++; },
     };
     const {OverviewSearchStealer} = await loadModule(
-        'spotlight@nin/lib/overview/searchStealer.js', {
+        'spotlight@custom/lib/overview/searchStealer.js', {
             mocks: {
                 'resource:///org/gnome/shell/ui/main.js': {overview},
                 'gi://Clutter': {default: Clutter},

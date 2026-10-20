@@ -4,7 +4,7 @@ import {loadModule, Actor} from './helpers/shell.mjs';
 
 test('candidate highlight follows lookup cursor even when it equals the preedit caret', async () => {
     let Kimpanel;
-    await loadModule('kimpanel@kde.org/extension.js', {
+    await loadModule('kimpanel@custom/extension.js', {
         mocks: {
             'gi://GObject': {default: {Object: Actor, registerClass: cls => { Kimpanel = cls; }}},
             'gi://Gio': {default: {}}, 'gi://GLib': {default: {}}, 'gi://Meta': {default: {}},

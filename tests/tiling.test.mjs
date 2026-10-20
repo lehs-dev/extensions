@@ -65,11 +65,11 @@ async function setupTwm(preferences = {}, workArea = standardWorkArea, monitorSc
         },
     };
     const utility = await loadModule(
-        'tiling-assistant@leleat-on-github/src/extension/utility.js',
+        'tiling-assistant@custom/src/extension/utility.js',
         {mocks, globals: {global}}
     );
     const {TilingWindowManager: twm} = await loadModule(
-        'tiling-assistant@leleat-on-github/src/extension/tilingWindowManager.js',
+        'tiling-assistant@custom/src/extension/tilingWindowManager.js',
         {mocks: {...mocks, './utility.js': utility}, globals: {global}}
     );
     twm.initialize();
@@ -244,7 +244,7 @@ test('tiling respects reserved work area edges while applying inner gaps', async
 });
 
 test('schema defaults give 12px logical inner gaps without double scaling or extra outer margins', async () => {
-    const tilingSchema = await readFile('tiling-assistant@leleat-on-github/schemas/org.gnome.shell.extensions.tiling-assistant.gschema.xml', 'utf8');
+    const tilingSchema = await readFile('tiling-assistant@custom/schemas/org.gnome.shell.extensions.tiling-assistant.gschema.xml', 'utf8');
     const defaultValue = (xml, key) => {
         const match = xml.match(new RegExp(`<key name="${key}"[^>]*>[\\s\\S]*?<default>([^<]+)</default>`));
         assert.ok(match, `schema defines ${key}`);
