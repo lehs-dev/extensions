@@ -218,6 +218,21 @@ export default class Preferences extends ExtensionPreferences {
       }
     };
 
+    let updateAttachedRows = () => {
+      let isAttached = settings.get_int('background-style') === 1;
+      let flareRow = builder.get_object('flare-width-row');
+      let footRow = builder.get_object('foot-depth-row');
+      let radiusRow = builder.get_object('attached-corner-radius-row');
+      if (flareRow) flareRow.visible = isAttached;
+      if (footRow) footRow.visible = isAttached;
+      if (radiusRow) radiusRow.visible = isAttached;
+    };
+
+    settings.connect('changed::background-style', () => {
+      updateAttachedRows();
+    });
+    updateAttachedRows();
+
     settings.connect('changed::experimental-features', () => {
       toggle_experimental();
     });

@@ -1104,7 +1104,11 @@ export let Dock = GObject.registerClass(
       this._edge_distance =
         (this.extension.edge_distance || 0) * 20 * scaleFactor;
 
-      if (this.extension.panel_mode) {
+      if (
+        this.extension.panel_mode ||
+        (this.extension.background_style === 1 &&
+          this._position === DockPosition.BOTTOM)
+      ) {
         this._edge_distance = 0;
       }
 

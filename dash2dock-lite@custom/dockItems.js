@@ -21,6 +21,7 @@ import {
 } from 'resource:///org/gnome/shell/ui/dash.js';
 
 import { DockPosition } from './dock.js';
+import { AttachedDockCanvas } from './attachedBackground.js';
 
 class DockItemMenu extends PopupMenu.PopupMenu {
   constructor(sourceActor, side = St.Side.TOP, params = {}) {
@@ -348,11 +349,29 @@ export const DockItemContainer = GObject.registerClass(
 export const DockBackground = GObject.registerClass(
   {},
   class DockBackground extends St.Widget {
+    constructor(...args) {
+      super(...args);
+      if (!this._initialized && typeof this._init === 'function') {
+        this._init(...args);
+      }
+    }
+
     _init(params) {
-      super._init({
-        name: 'DockBackground',
-        ...(params || {}),
-      });
+      this._initialized = true;
+      if (typeof super._init === 'function') {
+        super._init({
+          name: 'DockBackground',
+          ...(params || {}),
+        });
+      }
+
+      try {
+        this._canvas = new AttachedDockCanvas();
+        this._canvas.visible = false;
+        this.add_child(this._canvas);
+      } catch (e) {
+        this._canvas = null;
+      }
     }
 
     update(params) {
@@ -431,6 +450,45 @@ export const DockBackground = GObject.registerClass(
           } else {
             this.x = 0;
             this.width = dock.width;
+          }
+        }
+
+        const isAttachedEdge =
+          !panel_mode &&
+          dock.extension?.background_style === 1 &&
+          position === DockPosition.BOTTOM;
+
+        if (isAttachedEdge) {
+          const flareWidth = dock.extension?.flare_width ?? 14;
+          const footDepth = dock.extension?.foot_depth ?? 4;
+          const cornerRadius = dock.extension?.attached_corner_radius ?? 10;
+          const fw = Math.round(flareWidth * scaleFactor);
+
+          this.x -= fw;
+          this.width += 2 * fw;
+
+          const screenBottom = dock.height + (dock.dash.translationY || 0);
+          this.height = Math.max(1, screenBottom - this.y);
+
+          if (this._canvas) {
+            this._canvas.visible = true;
+            this._canvas.set_position(0, 0);
+            this._canvas.set_size(this.width, this.height);
+            this._canvas.set_state({
+              width: this.width,
+              height: this.height,
+              flareWidth,
+              footDepth,
+              cornerRadius,
+              scaleFactor,
+              backgroundColor: dock.extension?._dockColors?.['background-color'],
+              borderColor: dock.extension?._dockColors?.['border-color'],
+              borderThickness: dock.extension?.border_thickness || 0,
+            });
+          }
+        } else {
+          if (this._canvas) {
+            this._canvas.visible = false;
           }
         }
 

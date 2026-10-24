@@ -635,7 +635,11 @@ export default class Dash2DockLiteExt extends Extension {
         case 'label-border-thickness':
         case 'label-background-color':
         case 'label-foreground-color':
-        case 'panel-mode': {
+        case 'panel-mode':
+        case 'background-style':
+        case 'flare-width':
+        case 'foot-depth':
+        case 'attached-corner-radius': {
           this._updateStyle();
           this._updateLayout();
           this.animate();
@@ -1049,17 +1053,23 @@ export default class Dash2DockLiteExt extends Extension {
 
     // dash
     {
-      let r = rads[Math.floor(this.border_radius)];
-      let ss = [];
-      if (this.panel_mode) {
-        r = 0;
+      if (this.background_style === 1) {
+        let r = Math.round(this.attached_corner_radius ?? 10);
+        this.computed_border_radius = r;
+        styles.push('#d2daBackground { background: none; border: none; box-shadow: none; }');
+      } else {
+        let r = rads[Math.floor(this.border_radius)];
+        let ss = [];
+        if (this.panel_mode) {
+          r = 0;
+        }
+        ss.push(`border-radius: ${r}px;`);
+        this.computed_border_radius = r;
+        let rgba = this._style.rgba(this._dockColors['background-color']);
+        ss.push(`background: rgba(${rgba});`);
+        ss.push('box-shadow: 0 3px 12px 0 rgba(0, 0, 0, 0.22);');
+        styles.push(`#d2daBackground { ${ss.join(' ')}}`);
       }
-      ss.push(`border-radius: ${r}px;`);
-      this.computed_border_radius = r;
-      let rgba = this._style.rgba(this._dockColors['background-color']);
-      ss.push(`background: rgba(${rgba});`);
-      ss.push('box-shadow: 0 3px 12px 0 rgba(0, 0, 0, 0.22);');
-      styles.push(`#d2daBackground { ${ss.join(' ')}}`);
     }
 
     // icon backgrounds
@@ -1161,6 +1171,10 @@ export default class Dash2DockLiteExt extends Extension {
 
   _updateBorderStyle() {
     this._backgroundStyle = '';
+
+    if (this.background_style === 1) {
+      return;
+    }
 
     // apply border as inline style... otherwise buggy and won't show at startup
     // also add deferred bordering... otherwise rounder borders show with artifacts

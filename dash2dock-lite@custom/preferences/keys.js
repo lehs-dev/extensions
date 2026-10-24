@@ -271,6 +271,31 @@ export const SettingsKeys = (patch) => {
       widget_type: 'scale',
       test: { values: [-1, 0, 1] },
     },
+    'background-style': {
+      default_value: 0,
+      widget_type: 'dropdown',
+      options: ['Floating', 'Attached Edge'],
+      test: { values: [0, 1] },
+      themed: true,
+    },
+    'flare-width': {
+      default_value: 14,
+      widget_type: 'scale',
+      test: { values: [4, 14, 30] },
+      themed: true,
+    },
+    'foot-depth': {
+      default_value: 4,
+      widget_type: 'scale',
+      test: { values: [2, 4, 22] },
+      themed: true,
+    },
+    'attached-corner-radius': {
+      default_value: 10,
+      widget_type: 'scale',
+      test: { values: [6, 10, 24] },
+      themed: true,
+    },
     'border-radius': {
       default_value: 3,
       widget_type: 'scale',

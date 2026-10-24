@@ -136,6 +136,26 @@
         <summary>Border thickness</summary>
         <description>Border thickness.</description>
     </key>
+    <key type="i" name="background-style">
+        <default>0</default>
+        <summary>Background style</summary>
+        <description>Dock background style (0: Floating, 1: Attached Edge).</description>
+    </key>
+    <key type="d" name="flare-width">
+        <default>14.0</default>
+        <summary>Flare width</summary>
+        <description>Attached edge flare width in pixels.</description>
+    </key>
+    <key type="d" name="foot-depth">
+        <default>4.0</default>
+        <summary>Foot depth</summary>
+        <description>Attached edge foot depth in pixels.</description>
+    </key>
+    <key type="d" name="attached-corner-radius">
+        <default>10.0</default>
+        <summary>Corner radius</summary>
+        <description>Attached edge upper corner radius in pixels.</description>
+    </key>
     <key type="d" name="border-radius">
         <default>3</default>
         <summary>Border radius</summary>

@@ -690,6 +690,13 @@ test('DockItemMenu initializes completely hidden with zero opacity and stays inv
                 AppSystem: {get_default: () => ({get_installed: () => []})},
             },
             'gi://Gio': {default: {}},
+            'gi://cairo': {
+                default: {
+                    Operator: {CLEAR: 0, SOURCE: 1, OVER: 2},
+                    LineCap: {ROUND: 0},
+                    LineJoin: {ROUND: 0},
+                },
+            },
             'gi://GObject': {
                 default: {
                     registerClass: (meta, cls) => cls,
@@ -735,3 +742,544 @@ test('DockItemMenu initializes completely hidden with zero opacity and stays inv
     assert.equal(item._menu.actor.visible, false);
     assert.equal(item._menu.actor.opacity, 0);
 });
+
+// ============================================================================
+// Serpantinum-inspired Attached Edge Dock Background Regression Tests
+// ============================================================================
+
+test('Attached Edge: geometry calculation with default values', async () => {
+    const {getAttachedEdgeGeometry, KAPPA} = await loadModule(
+        'dash2dock-lite@custom/attachedBackground.js',
+        {
+            mocks: {
+                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://cairo': {
+                    default: {
+                        Operator: {CLEAR: 0, OVER: 2, SOURCE: 1},
+                        LineCap: {ROUND: 0},
+                        LineJoin: {ROUND: 0},
+                    },
+                },
+            },
+        }
+    );
+
+    const geom = getAttachedEdgeGeometry({
+        width: 500,
+        height: 64,
+        flareWidth: 14,
+        footDepth: 4,
+        cornerRadius: 10,
+        scaleFactor: 1.0,
+    });
+
+    assert.equal(geom.width, 500);
+    assert.equal(geom.height, 64);
+    assert.equal(geom.flareWidth, 14);
+    assert.equal(geom.footDepth, 4);
+    assert.equal(geom.cornerRadius, 10);
+    assert.equal(geom.bodyWidth, 500 - 28); // 472
+
+    // Key points
+    assert.equal(geom.leftFootTip.x, 0);
+    assert.equal(geom.leftFootTip.y, 64);
+    assert.equal(geom.rightFootTip.x, 500);
+    assert.equal(geom.rightFootTip.y, 64);
+    assert.equal(geom.leftBodyBottom.x, 14);
+    assert.equal(geom.leftBodyBottom.y, 60);
+    assert.equal(geom.rightBodyBottom.x, 486);
+    assert.equal(geom.rightBodyBottom.y, 60);
+    assert.equal(geom.leftBodyTop.x, 14);
+    assert.equal(geom.leftBodyTop.y, 10);
+    assert.equal(geom.rightBodyTop.x, 486);
+    assert.equal(geom.rightBodyTop.y, 10);
+    assert.equal(geom.topLeft.x, 24);
+    assert.equal(geom.topLeft.y, 0);
+    assert.equal(geom.topRight.x, 476);
+    assert.equal(geom.topRight.y, 0);
+});
+
+test('Attached Edge: symmetric left and right flares with C1 tangent continuity', async () => {
+    const {getAttachedEdgeGeometry, KAPPA} = await loadModule(
+        'dash2dock-lite@custom/attachedBackground.js',
+        {
+            mocks: {
+                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            },
+        }
+    );
+
+    const geom = getAttachedEdgeGeometry({
+        width: 400,
+        height: 60,
+        flareWidth: 14,
+        footDepth: 4,
+        cornerRadius: 10,
+        scaleFactor: 1.0,
+    });
+
+    // 1. Flare widths must be identical
+    const leftWidth = geom.leftBodyBottom.x - geom.leftFootTip.x;
+    const rightWidth = geom.rightFootTip.x - geom.rightBodyBottom.x;
+    assert.equal(leftWidth, 14);
+    assert.equal(rightWidth, 14);
+
+    // 2. Control point offsets must be identical (symmetric)
+    const leftCp1Offset = geom.leftFootCP1.x - geom.leftFootTip.x;
+    const rightCp2Offset = geom.rightFootTip.x - geom.rightFootCP2.x;
+    assert.ok(Math.abs(leftCp1Offset - rightCp2Offset) < 1e-10);
+
+    const leftCp2Depth = geom.leftFootTip.y - geom.leftFootCP2.y;
+    const rightCp1Depth = geom.rightFootTip.y - geom.rightFootCP1.y;
+    assert.ok(Math.abs(leftCp2Depth - rightCp1Depth) < 1e-10);
+
+    // 3. Tangent continuity check
+    // Left flare at t=0 (screen edge): dy/dt must vanish (horizontal)
+    const leftT0_dy = geom.leftFootCP1.y - geom.leftFootTip.y;
+    assert.equal(leftT0_dy, 0, 'Left flare must leave the screen edge with a horizontal tangent');
+
+    // Left flare at t=1 (body edge): dx/dt must vanish (vertical)
+    const leftT1_dx = geom.leftBodyBottom.x - geom.leftFootCP2.x;
+    assert.equal(leftT1_dx, 0, 'Left flare must meet the vertical body edge with a vertical tangent');
+
+    // Right flare at t=0 (body edge): dx/dt must vanish (vertical)
+    const rightT0_dx = geom.rightFootCP1.x - geom.rightBodyBottom.x;
+    assert.equal(rightT0_dx, 0, 'Right flare must leave the vertical body edge with a vertical tangent');
+
+    // Right flare at t=1 (screen edge): dy/dt must vanish (horizontal)
+    const rightT1_dy = geom.rightFootTip.y - geom.rightFootCP2.y;
+    assert.equal(rightT1_dy, 0, 'Right flare must meet the screen edge with a horizontal tangent');
+});
+
+test('Attached Edge: attachment to bottom monitor edge without antialiasing gaps', async () => {
+    const {getAttachedEdgeGeometry, buildAttachedFillPath, buildAttachedContourPath} = await loadModule(
+        'dash2dock-lite@custom/attachedBackground.js',
+        {
+            mocks: {
+                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            },
+        }
+    );
+
+    const geom = getAttachedEdgeGeometry({
+        width: 300,
+        height: 50,
+        flareWidth: 14,
+        footDepth: 4,
+        cornerRadius: 10,
+        scaleFactor: 1.0,
+    });
+
+    // Flare tips must be exactly at the bottom edge (height = 50)
+    assert.equal(geom.leftFootTip.y, 50);
+    assert.equal(geom.rightFootTip.y, 50);
+
+    // Record Cairo operations for fill and stroke
+    const ops = [];
+    const mockCtx = {
+        newPath() { ops.push({op: 'newPath'}); },
+        moveTo(x, y) { ops.push({op: 'moveTo', x, y}); },
+        lineTo(x, y) { ops.push({op: 'lineTo', x, y}); },
+        curveTo(x1, y1, x2, y2, x3, y3) { ops.push({op: 'curveTo', x1, y1, x2, y2, x3, y3}); },
+        closePath() { ops.push({op: 'closePath'}); },
+    };
+
+    buildAttachedFillPath(mockCtx, geom);
+    // Fill path must overshoot the bottom edge (height + 2) to prevent subpixel AA gaps
+    const overshoots = ops.filter(o => o.op === 'lineTo' && o.y === 52);
+    assert.equal(overshoots.length, 2, 'Fill path must include bottom overshoot to prevent edge seam');
+    assert.equal(ops.at(-1).op, 'closePath', 'Fill path must be closed');
+
+    // Contour stroke path must trace from left flare tip to right flare tip without stroking bottom edge
+    ops.length = 0;
+    buildAttachedContourPath(mockCtx, geom);
+    assert.equal(ops[1].op, 'moveTo');
+    assert.deepEqual({x: ops[1].x, y: ops[1].y}, {x: 0, y: 50});
+    const lastOp = ops.at(-1);
+    assert.equal(lastOp.op, 'curveTo');
+    assert.deepEqual({x: lastOp.x3, y: lastOp.y3}, {x: 300, y: 50});
+    assert.ok(!ops.some(o => o.op === 'closePath'), 'Contour stroke must remain open at screen edge');
+});
+
+test('Attached Edge: floating mode preserves previous behavior', async () => {
+    const dockItems = await loadModule('dash2dock-lite@custom/dockItems.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {},
+            'resource:///org/gnome/shell/ui/boxpointer.js': {},
+            'resource:///org/gnome/shell/ui/popupMenu.js': {PopupMenu: class {}, PopupMenuManager: class {}},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            './utils.js': {trySpawnCommandLine: async () => {}},
+            './dock.js': {DockPosition: {TOP: 'top', BOTTOM: 'bottom', LEFT: 'left', RIGHT: 'right'}},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {default: {get_default_text_direction: () => 0, TextDirection: {RTL: 1}}},
+            'gi://St': {default: {Side: {}, Widget: Actor, DrawingArea: Actor}},
+        },
+    });
+
+    const mockDock = {
+        x: 0,
+        y: 1000,
+        width: 1920,
+        height: 80,
+        dash: {
+            get_transformed_position: () => [800, 1020],
+            width: 320,
+            height: 60,
+            opacity: 255,
+            translationX: 0,
+            translationY: 0,
+        },
+        extension: {
+            background_style: 0, // Floating mode
+            dock_padding: 0,
+            edge_distance: 0.5,
+        },
+        isVertical: () => false,
+    };
+
+    const first = {_icon: {translationX: 0, translationY: 0}};
+    const last = {_icon: {translationX: 0, translationY: 0}};
+
+    const bg = new dockItems.DockBackground();
+    bg.update({
+        first,
+        last,
+        iconSize: 48,
+        scaleFactor: 1,
+        vertical: false,
+        position: 'bottom',
+        panel_mode: false,
+        dock: mockDock,
+    });
+
+    // In floating mode, canvas is hidden and dimensions match traditional dock body
+    assert.equal(bg._canvas?.visible, false);
+    assert.equal(bg.x, 800);
+    assert.equal(bg.width, 320);
+});
+
+test('Attached Edge: configurable flare width, foot depth, and corner radius', async () => {
+    const {getAttachedEdgeGeometry} = await loadModule(
+        'dash2dock-lite@custom/attachedBackground.js',
+        {
+            mocks: {
+                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            },
+        }
+    );
+
+    // Custom configuration: flare 22px, depth 10px, radius 16px
+    const custom = getAttachedEdgeGeometry({
+        width: 600,
+        height: 80,
+        flareWidth: 22,
+        footDepth: 10,
+        cornerRadius: 16,
+        scaleFactor: 1.0,
+    });
+
+    assert.equal(custom.flareWidth, 22);
+    assert.equal(custom.footDepth, 10);
+    assert.equal(custom.cornerRadius, 16);
+    assert.equal(custom.leftBodyBottom.x, 22);
+    assert.equal(custom.leftBodyBottom.y, 70); // 80 - 10
+    assert.equal(custom.rightBodyBottom.x, 578); // 600 - 22
+    assert.equal(custom.rightBodyBottom.y, 70);
+
+    // Extreme clamping test: corner radius and foot depth exceeding height
+    const clamped = getAttachedEdgeGeometry({
+        width: 300,
+        height: 30,
+        flareWidth: 14,
+        footDepth: 20,
+        cornerRadius: 20,
+        scaleFactor: 1.0,
+    });
+    assert.ok(clamped.cornerRadius + clamped.footDepth <= 30.001);
+});
+
+test('Attached Edge: dynamic dock resizing preserves flare proportions', async () => {
+    const {getAttachedEdgeGeometry} = await loadModule(
+        'dash2dock-lite@custom/attachedBackground.js',
+        {
+            mocks: {
+                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            },
+        }
+    );
+
+    const small = getAttachedEdgeGeometry({
+        width: 300,
+        height: 60,
+        flareWidth: 14,
+        footDepth: 4,
+        cornerRadius: 10,
+        scaleFactor: 1.0,
+    });
+
+    const large = getAttachedEdgeGeometry({
+        width: 700,
+        height: 60,
+        flareWidth: 14,
+        footDepth: 4,
+        cornerRadius: 10,
+        scaleFactor: 1.0,
+    });
+
+    // Flare widths remain exactly 14px on both
+    assert.equal(small.flareWidth, 14);
+    assert.equal(large.flareWidth, 14);
+
+    // Straight top edge expands by exactly the width delta (400px)
+    const smallTopEdge = small.topRight.x - small.topLeft.x;
+    const largeTopEdge = large.topRight.x - large.topLeft.x;
+    assert.equal(largeTopEdge - smallTopEdge, 400);
+});
+
+test('Attached Edge: autohide slides the entire foot below screen and reveal restores it', async () => {
+    const dockItems = await loadModule('dash2dock-lite@custom/dockItems.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {},
+            'resource:///org/gnome/shell/ui/boxpointer.js': {},
+            'resource:///org/gnome/shell/ui/popupMenu.js': {PopupMenu: class {}, PopupMenuManager: class {}},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            './utils.js': {trySpawnCommandLine: async () => {}},
+            './dock.js': {DockPosition: {TOP: 'top', BOTTOM: 'bottom', LEFT: 'left', RIGHT: 'right'}},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {default: {get_default_text_direction: () => 0, TextDirection: {RTL: 1}}},
+            'gi://St': {default: {Side: {}, Widget: Actor, DrawingArea: Actor}},
+        },
+    });
+
+    const mockDock = {
+        x: 0,
+        y: 1000,
+        width: 1920,
+        height: 80,
+        dash: {
+            get_transformed_position: () => [800, 1020 + mockDock.dash.translationY],
+            width: 320,
+            height: 60,
+            opacity: 255,
+            translationX: 0,
+            translationY: 0,
+        },
+        extension: {
+            background_style: 1, // Attached Edge
+            flare_width: 14,
+            foot_depth: 4,
+            attached_corner_radius: 10,
+            dock_padding: 0,
+        },
+        isVertical: () => false,
+    };
+
+    const first = {_icon: {translationX: 0, translationY: 0}};
+    const last = {_icon: {translationX: 0, translationY: 0}};
+
+    const bg = new dockItems.DockBackground();
+
+    // 1. Fully revealed state (translationY = 0)
+    bg.update({
+        first,
+        last,
+        iconSize: 48,
+        scaleFactor: 1,
+        vertical: false,
+        position: 'bottom',
+        panel_mode: false,
+        dock: mockDock,
+    });
+
+    assert.equal(bg._canvas?.visible, true);
+    // Background actor spans body width (320) + 2 * flareWidth (28) = 348
+    assert.equal(bg.width, 348);
+    // Bottom of background is at dock.height (80)
+    assert.equal(bg.y + bg.height, mockDock.height);
+
+    // 2. Autohide sliding down by 40px
+    mockDock.dash.translationY = 40;
+    bg.update({
+        first,
+        last,
+        iconSize: 48,
+        scaleFactor: 1,
+        vertical: false,
+        position: 'bottom',
+        panel_mode: false,
+        dock: mockDock,
+    });
+    // The bottom of the shape has shifted down along with translationY
+    assert.equal(bg.y + bg.height, mockDock.height + 40);
+
+    // 3. Reveal restored
+    mockDock.dash.translationY = 0;
+    bg.update({
+        first,
+        last,
+        iconSize: 48,
+        scaleFactor: 1,
+        vertical: false,
+        position: 'bottom',
+        panel_mode: false,
+        dock: mockDock,
+    });
+    assert.equal(bg.y + bg.height, mockDock.height);
+});
+
+test('Attached Edge: monitor scaling (100%, 125%, 150%, 200%) and negative origins', async () => {
+    const {getAttachedEdgeGeometry} = await loadModule(
+        'dash2dock-lite@custom/attachedBackground.js',
+        {
+            mocks: {
+                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            },
+        }
+    );
+
+    const scales = [1.0, 1.25, 1.5, 2.0];
+    const expectedFw = [14, 17.5, 21, 28];
+    const expectedFd = [4, 5, 6, 8];
+    const expectedCr = [10, 12.5, 15, 20];
+
+    scales.forEach((scale, i) => {
+        const geom = getAttachedEdgeGeometry({
+            width: 400 * scale,
+            height: 60 * scale,
+            flareWidth: 14,
+            footDepth: 4,
+            cornerRadius: 10,
+            scaleFactor: scale,
+        });
+
+        assert.equal(geom.flareWidth, expectedFw[i], `Scale ${scale} flare width`);
+        assert.equal(geom.footDepth, expectedFd[i], `Scale ${scale} foot depth`);
+        assert.equal(geom.cornerRadius, expectedCr[i], `Scale ${scale} corner radius`);
+    });
+});
+
+test('Attached Edge: style and border updates reflect settings cleanly', async () => {
+    const dockItems = await loadModule('dash2dock-lite@custom/dockItems.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {},
+            'resource:///org/gnome/shell/ui/boxpointer.js': {},
+            'resource:///org/gnome/shell/ui/popupMenu.js': {PopupMenu: class {}, PopupMenuManager: class {}},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            './utils.js': {trySpawnCommandLine: async () => {}},
+            './dock.js': {DockPosition: {TOP: 'top', BOTTOM: 'bottom', LEFT: 'left', RIGHT: 'right'}},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {default: {get_default_text_direction: () => 0, TextDirection: {RTL: 1}}},
+            'gi://St': {default: {Side: {}, Widget: Actor, DrawingArea: Actor}},
+        },
+    });
+
+    const mockDock = {
+        x: 0,
+        y: 1000,
+        width: 1920,
+        height: 80,
+        dash: {
+            get_transformed_position: () => [800, 1020],
+            width: 320,
+            height: 60,
+            opacity: 255,
+            translationX: 0,
+            translationY: 0,
+        },
+        extension: {
+            background_style: 1,
+            flare_width: 14,
+            foot_depth: 4,
+            attached_corner_radius: 10,
+            dock_padding: 0,
+            border_thickness: 2,
+            _dockColors: {
+                'background-color': [0.1, 0.1, 0.1, 0.8],
+                'border-color': [1, 1, 1, 0.3],
+            },
+        },
+        isVertical: () => false,
+    };
+
+    const first = {_icon: {translationX: 0, translationY: 0}};
+    const last = {_icon: {translationX: 0, translationY: 0}};
+
+    const bg = new dockItems.DockBackground();
+    bg.update({
+        first,
+        last,
+        iconSize: 48,
+        scaleFactor: 1,
+        vertical: false,
+        position: 'bottom',
+        panel_mode: false,
+        dock: mockDock,
+    });
+
+    assert.equal(bg._canvas?.state?.borderThickness, 2);
+    assert.deepEqual(bg._canvas?.state?.borderColor, [1, 1, 1, 0.3]);
+    assert.deepEqual(bg._canvas?.state?.backgroundColor, [0.1, 0.1, 0.1, 0.8]);
+});
+
+test('Attached Edge: Magic Lamp and icon geometry remain unaffected by background style', async () => {
+    const monitors = [{index: 0, x: 0, y: 0, width: 1920, height: 1080, geometry_scale: 1}];
+    const app = {get_id: () => 'sample.desktop', get_pids: () => [1234]};
+    const {Integrations} = await loadModule('dash2dock-lite@custom/integrations.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {
+                layoutManager: {monitors, primaryIndex: 0},
+            },
+            'gi://Shell': {default: {WindowTracker: {get_default: () => ({get_window_app: () => app})}}},
+        },
+    });
+
+    const icon = new Actor({x: 900, y: 1030, width: 48, height: 48});
+    icon.app = app;
+
+    const dock = {
+        _icons: [icon],
+        getMonitor: () => monitors[0],
+        _position: 'bottom',
+        _preferredIconSize: () => 48,
+        dash: {_box: {get_children: () => [icon]}},
+    };
+
+    const integrations = new Integrations();
+    integrations.extension = {
+        lamp_app_animation: true,
+        background_style: 1, // Attached Edge active
+        docks: [dock],
+    };
+
+    const actor = {meta_window: {get_monitor: () => 0}};
+    const target = integrations.compiz_getIcon(actor);
+
+    assert.ok(target !== null);
+    assert.equal(target.monitorIndex, 0);
+    assert.equal(target.dockPosition, 'bottom');
+    assert.equal(target.x, 900);
+    assert.equal(target.y, 1030);
+    assert.equal(target.width, 48);
+    assert.equal(target.height, 48);
+});
+
