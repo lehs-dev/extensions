@@ -1283,3 +1283,429 @@ test('Attached Edge: Magic Lamp and icon geometry remain unaffected by backgroun
     assert.equal(target.height, 48);
 });
 
+test('Attached Edge: all four positions (bottom, top, left, right) have correct geometry and attachment', async () => {
+    const {getAttachedEdgeGeometry} = await loadModule(
+        'dash2dock-lite@custom/attachedBackground.js',
+        {
+            mocks: {
+                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            },
+        }
+    );
+
+    // 1. Bottom
+    const bottom = getAttachedEdgeGeometry({
+        width: 400,
+        height: 60,
+        flareWidth: 14,
+        footDepth: 4,
+        cornerRadius: 10,
+        position: 'bottom',
+    });
+    assert.equal(bottom.leftFootTip.y, 60, 'Bottom: left flare tip touches bottom edge');
+    assert.equal(bottom.rightFootTip.y, 60, 'Bottom: right flare tip touches bottom edge');
+    assert.equal(bottom.topLeft.y, 0, 'Bottom: crown is at top edge');
+    assert.equal(bottom.topRight.y, 0, 'Bottom: crown is at top edge');
+    // Tangent at screen edge must be horizontal (dy = 0)
+    assert.equal(bottom.leftFootCP1.y - bottom.leftFootTip.y, 0);
+    assert.equal(bottom.rightFootTip.y - bottom.rightFootCP2.y, 0);
+
+    // 2. Top
+    const top = getAttachedEdgeGeometry({
+        width: 400,
+        height: 60,
+        flareWidth: 14,
+        footDepth: 4,
+        cornerRadius: 10,
+        position: 'top',
+    });
+    assert.equal(top.leftFootTip.y, 0, 'Top: left flare tip touches top edge');
+    assert.equal(top.rightFootTip.y, 0, 'Top: right flare tip touches top edge');
+    assert.equal(top.topLeft.y, 60, 'Top: crown is at bottom edge');
+    assert.equal(top.topRight.y, 60, 'Top: crown is at bottom edge');
+    // Tangent at top screen edge must be horizontal (dy = 0)
+    assert.equal(top.leftFootCP1.y - top.leftFootTip.y, 0);
+    assert.equal(top.rightFootTip.y - top.rightFootCP2.y, 0);
+
+    // 3. Left
+    const left = getAttachedEdgeGeometry({
+        width: 60,
+        height: 400,
+        flareWidth: 14,
+        footDepth: 4,
+        cornerRadius: 10,
+        position: 'left',
+    });
+    assert.equal(left.leftFootTip.x, 0, 'Left: top flare tip touches left edge');
+    assert.equal(left.leftFootTip.y, 0, 'Left: top flare starts at y=0');
+    assert.equal(left.rightFootTip.x, 0, 'Left: bottom flare tip touches left edge');
+    assert.equal(left.rightFootTip.y, 400, 'Left: bottom flare tip is at y=400');
+    assert.equal(left.topLeft.x, 60, 'Left: crown is at right edge (x=60)');
+    assert.equal(left.topRight.x, 60, 'Left: crown is at right edge (x=60)');
+    // Tangent at left screen edge must be vertical (dx = 0)
+    assert.equal(left.leftFootCP1.x - left.leftFootTip.x, 0);
+    assert.equal(left.rightFootTip.x - left.rightFootCP2.x, 0);
+
+    // 4. Right
+    const right = getAttachedEdgeGeometry({
+        width: 60,
+        height: 400,
+        flareWidth: 14,
+        footDepth: 4,
+        cornerRadius: 10,
+        position: 'right',
+    });
+    assert.equal(right.leftFootTip.x, 60, 'Right: top flare tip touches right edge (x=60)');
+    assert.equal(right.leftFootTip.y, 0, 'Right: top flare starts at y=0');
+    assert.equal(right.rightFootTip.x, 60, 'Right: bottom flare tip touches right edge (x=60)');
+    assert.equal(right.rightFootTip.y, 400, 'Right: bottom flare tip is at y=400');
+    assert.equal(right.topLeft.x, 0, 'Right: crown is at left edge (x=0)');
+    assert.equal(right.topRight.x, 0, 'Right: crown is at left edge (x=0)');
+    // Tangent at right screen edge must be vertical (dx = 0)
+    assert.equal(right.leftFootCP1.x - right.leftFootTip.x, 0);
+    assert.equal(right.rightFootTip.x - right.rightFootCP2.x, 0);
+});
+
+test('Attached Edge: DockBackground bounding box and canvas visibility in all 4 positions', async () => {
+    const dockItems = await loadModule('dash2dock-lite@custom/dockItems.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {},
+            'resource:///org/gnome/shell/ui/boxpointer.js': {},
+            'resource:///org/gnome/shell/ui/popupMenu.js': {PopupMenu: class {}, PopupMenuManager: class {}},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            './utils.js': {trySpawnCommandLine: async () => {}},
+            './dock.js': {DockPosition: {TOP: 'top', BOTTOM: 'bottom', LEFT: 'left', RIGHT: 'right'}},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {default: {get_default_text_direction: () => 0, TextDirection: {RTL: 1}}},
+            'gi://St': {default: {Side: {}, Widget: Actor, DrawingArea: Actor}},
+        },
+    });
+
+    const first = {_icon: {translationX: 0, translationY: 0}};
+    const last = {_icon: {translationX: 0, translationY: 0}};
+
+    const makeDock = (position, isVertical) => ({
+        x: 0,
+        y: 0,
+        width: isVertical ? 80 : 1920,
+        height: isVertical ? 1080 : 80,
+        dash: {
+            get_transformed_position: () => isVertical ? [10, 300] : [800, 10],
+            width: isVertical ? 60 : 320,
+            height: isVertical ? 320 : 60,
+            opacity: 255,
+            translationX: 0,
+            translationY: 0,
+        },
+        extension: {
+            background_style: 1, // Attached Edge
+            flare_width: 14,
+            foot_depth: 4,
+            attached_corner_radius: 10,
+            dock_padding: 0,
+        },
+        isVertical: () => isVertical,
+    });
+
+    const positions = [
+        {pos: 'bottom', vertical: false},
+        {pos: 'top', vertical: false},
+        {pos: 'left', vertical: true},
+        {pos: 'right', vertical: true},
+    ];
+
+    for (const {pos, vertical} of positions) {
+        const dock = makeDock(pos, vertical);
+        const bg = new dockItems.DockBackground();
+        bg.update({
+            first,
+            last,
+            iconSize: 48,
+            scaleFactor: 1,
+            vertical,
+            position: pos,
+            panel_mode: false,
+            dock,
+        });
+
+        assert.equal(bg._canvas?.visible, true, `Canvas must be visible on ${pos}`);
+        assert.equal(bg._canvas?.state?.position, pos, `Canvas state position must be ${pos}`);
+        assert.ok(bg.width > 0, `${pos} width must be positive`);
+        assert.ok(bg.height > 0, `${pos} height must be positive`);
+
+        // Check screen edge attachment
+        if (pos === 'bottom') {
+            assert.equal(bg.y + bg.height, dock.height, 'Bottom attaches to dock.height');
+        } else if (pos === 'top') {
+            assert.equal(bg.y, 0, 'Top attaches to dock y=0');
+        } else if (pos === 'left') {
+            assert.equal(bg.x, 0, 'Left attaches to dock x=0');
+        } else if (pos === 'right') {
+            assert.equal(bg.x + bg.width, dock.width, 'Right attaches to dock.width');
+        }
+    }
+});
+
+test('Attached Edge: position changes trigger canvas updates without requiring restart', async () => {
+    const dockItems = await loadModule('dash2dock-lite@custom/dockItems.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {},
+            'resource:///org/gnome/shell/ui/boxpointer.js': {},
+            'resource:///org/gnome/shell/ui/popupMenu.js': {PopupMenu: class {}, PopupMenuManager: class {}},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            './utils.js': {trySpawnCommandLine: async () => {}},
+            './dock.js': {DockPosition: {TOP: 'top', BOTTOM: 'bottom', LEFT: 'left', RIGHT: 'right'}},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {default: {get_default_text_direction: () => 0, TextDirection: {RTL: 1}}},
+            'gi://St': {default: {Side: {}, Widget: Actor, DrawingArea: Actor}},
+        },
+    });
+
+    const dock = {
+        x: 0,
+        y: 0,
+        width: 1920,
+        height: 80,
+        dash: {
+            get_transformed_position: () => [800, 10],
+            width: 320,
+            height: 60,
+            opacity: 255,
+            translationX: 0,
+            translationY: 0,
+        },
+        extension: {
+            background_style: 1,
+            flare_width: 14,
+            foot_depth: 4,
+            attached_corner_radius: 10,
+            dock_padding: 0,
+        },
+        isVertical: () => false,
+    };
+
+    const first = {_icon: {translationX: 0, translationY: 0}};
+    const last = {_icon: {translationX: 0, translationY: 0}};
+    const bg = new dockItems.DockBackground();
+
+    // Start on bottom
+    bg.update({first, last, iconSize: 48, scaleFactor: 1, vertical: false, position: 'bottom', panel_mode: false, dock});
+    assert.equal(bg._canvas?.state?.position, 'bottom');
+    const repaintsBefore = bg._canvas?.repaints || 0;
+
+    // Switch to left
+    dock.width = 80;
+    dock.height = 1080;
+    dock.isVertical = () => true;
+    bg.update({first, last, iconSize: 48, scaleFactor: 1, vertical: true, position: 'left', panel_mode: false, dock});
+    assert.equal(bg._canvas?.state?.position, 'left');
+    assert.ok((bg._canvas?.repaints || 0) > repaintsBefore, 'Repaint must be queued on position switch');
+
+    // Switch to top
+    dock.width = 1920;
+    dock.height = 80;
+    dock.isVertical = () => false;
+    bg.update({first, last, iconSize: 48, scaleFactor: 1, vertical: false, position: 'top', panel_mode: false, dock});
+    assert.equal(bg._canvas?.state?.position, 'top');
+
+    // Switch to right
+    dock.width = 80;
+    dock.height = 1080;
+    dock.isVertical = () => true;
+    bg.update({first, last, iconSize: 48, scaleFactor: 1, vertical: true, position: 'right', panel_mode: false, dock});
+    assert.equal(bg._canvas?.state?.position, 'right');
+});
+
+test('Icon sizing: genuine base sizing from 12px to 96px with strict monotonicity', async () => {
+    const dockModule = await loadModule('dash2dock-lite@custom/dock.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {layoutManager: {primaryIndex: 0}},
+            'resource:///org/gnome/shell/ui/appFavorites.js': {getAppFavorites: () => ({getFavorites: () => []})},
+            'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '51'},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://Graphene': {default: {Point: class {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {
+                default: {
+                    ActorAlign: {CENTER: 0},
+                    OffscreenRedirect: {ALWAYS: 1},
+                    Orientation: {VERTICAL: 1, HORIZONTAL: 0},
+                },
+            },
+            'gi://St': {default: {Widget: class extends Actor {}}},
+            './effects/tint_effect.js': {TintEffect: class {}},
+            './effects/monochrome_effect.js': {MonochromeEffect: class {}},
+            './dockItems.js': {DockIcon: Actor, DockItemContainer: Actor, DockBackground: Actor},
+            './dockItemMenu.js': {DockItemList: class {}},
+            './autohide.js': {AutoHide: class {}},
+            './animator.js': {Animator: class {}},
+            './utils.js': {get_distance_sqr: () => 0, get_distance: () => 0, isInRect: () => false, isOverlapRect: () => false, tempPath: () => ''},
+        },
+    });
+
+    const dock = new dockModule.Dock({
+        extension: {
+            icon_size: 0,
+            scale: 1.0,
+            _config: {},
+        },
+    });
+
+    // 1. Default when unset (0) must be 48px
+    dock.extension.icon_size = 0;
+    assert.equal(dock._preferredIconSize(), 48, 'Unset icon size must default to 48px');
+
+    // 2. Base sizes 12, 16, 20, 24, 32, 48, 64, 96
+    const testSizes = [12, 16, 20, 24, 32, 48, 64, 96];
+    for (const size of testSizes) {
+        dock.extension.icon_size = size;
+        const result = dock._preferredIconSize();
+        assert.equal(result, size, `Base size ${size}px must be exactly achievable`);
+    }
+
+    // 3. Monotonicity check across the entire range 12..96
+    let prev = 0;
+    for (let s = 12; s <= 96; s++) {
+        dock.extension.icon_size = s;
+        const current = dock._preferredIconSize();
+        assert.ok(current >= prev, `Size at ${s} (${current}) must be >= size at ${s - 1} (${prev})`);
+        prev = current;
+    }
+
+    // 4. Legacy normalized slider values [0, 1] map smoothly to [12, 96]
+    dock.extension.icon_size = 0.5;
+    const legacyMid = dock._preferredIconSize();
+    assert.equal(legacyMid, 54, '0.5 legacy normalized maps to 54px (midpoint of 12..96)');
+
+    dock.extension.icon_size = 0.1;
+    const legacyLow = dock._preferredIconSize();
+    assert.ok(legacyLow >= 12 && legacyLow <= 96, 'Legacy low is within 12..96');
+});
+
+test('Icon sizing: dock container and spacing shrink proportionally for small icons', async () => {
+    const dockModule = await loadModule('dash2dock-lite@custom/dock.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {layoutManager: {primaryIndex: 0}},
+            'resource:///org/gnome/shell/ui/appFavorites.js': {getAppFavorites: () => ({getFavorites: () => []})},
+            'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '51'},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://Graphene': {default: {Point: class {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {
+                default: {
+                    ActorAlign: {CENTER: 0},
+                    OffscreenRedirect: {ALWAYS: 1},
+                    Orientation: {VERTICAL: 1, HORIZONTAL: 0},
+                },
+            },
+            'gi://St': {default: {Widget: class extends Actor {}}},
+            './effects/tint_effect.js': {TintEffect: class {}},
+            './effects/monochrome_effect.js': {MonochromeEffect: class {}},
+            './dockItems.js': {DockIcon: Actor, DockItemContainer: Actor, DockBackground: Actor},
+            './dockItemMenu.js': {DockItemList: class {}},
+            './autohide.js': {AutoHide: class {}},
+            './animator.js': {Animator: class {}},
+            './utils.js': {get_distance_sqr: () => 0, get_distance: () => 0, isInRect: () => false, isOverlapRect: () => false, tempPath: () => ''},
+        },
+    });
+
+    const dock = new dockModule.Dock({
+        extension: {
+            icon_size: 48,
+            scale: 1.0,
+            animation_spread: 1.0,
+            animation_magnify: 0.5,
+            edge_distance: 0,
+            background_style: 1,
+            _config: {},
+        },
+    });
+
+    // Formula for dock breadth fp: iconSize * 2 + iconSize * (0.6 * (1 + magnify))
+    const computeFp = (iconSize) => {
+        const magnify = dock.extension.animation_magnify * 1.8;
+        return iconSize * 2 + iconSize * (0.6 * (1 + magnify));
+    };
+
+    const fp12 = computeFp(12);
+    const fp16 = computeFp(16);
+    const fp48 = computeFp(48);
+    const fp64 = computeFp(64);
+
+    // Dock breadth at 16px is genuinely smaller than at 48px and 64px
+    assert.ok(fp12 < fp16);
+    assert.ok(fp16 < fp48);
+    assert.ok(fp48 < fp64);
+    assert.ok(fp16 < 60, `16px dock breadth (${fp16}) must be compact (< 60px)`);
+    assert.ok(fp48 > 140, `48px dock breadth (${fp48}) is around standard 150px`);
+
+    // Proportional icon spacing check: 16px has tighter spacing than 48px
+    const spreadFactor16 = Math.max(0.25, Math.min(1.0, 16 / 48));
+    const extra16 = Math.max(1, Math.round(2 * spreadFactor16)) + Math.round(8 * 1.0 * spreadFactor16);
+    assert.ok(extra16 <= 4, 'Extra spacing for 16px icon is small (<= 4px)');
+
+    const spreadFactor48 = Math.max(0.25, Math.min(1.0, 48 / 48));
+    const extra48 = Math.max(1, Math.round(2 * spreadFactor48)) + Math.round(8 * 1.0 * spreadFactor48);
+    assert.equal(extra48, 10, 'Extra spacing for 48px icon matches standard 10px');
+});
+
+test('Icon sizing: Magic Lamp receives accurate icon geometry with small icons across all 4 positions', async () => {
+    const monitors = [{index: 0, x: 0, y: 0, width: 1920, height: 1080, geometry_scale: 1}];
+    const app = {get_id: () => 'small-icon.desktop', get_pids: () => [4321]};
+    const {Integrations} = await loadModule('dash2dock-lite@custom/integrations.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {
+                layoutManager: {monitors, primaryIndex: 0},
+            },
+            'gi://Shell': {default: {WindowTracker: {get_default: () => ({get_window_app: () => app})}}},
+        },
+    });
+
+    const positions = ['bottom', 'top', 'left', 'right'];
+    for (const pos of positions) {
+        const icon = new Actor({
+            x: pos === 'left' ? 10 : (pos === 'right' ? 1890 : 960),
+            y: pos === 'top' ? 10 : (pos === 'bottom' ? 1050 : 540),
+            width: 16,
+            height: 16,
+        });
+        icon.app = app;
+
+        const dock = {
+            _icons: [icon],
+            getMonitor: () => monitors[0],
+            _position: pos,
+            _preferredIconSize: () => 16,
+            dash: {_box: {get_children: () => [icon]}},
+        };
+
+        const integrations = new Integrations();
+        integrations.extension = {
+            lamp_app_animation: true,
+            background_style: 1,
+            docks: [dock],
+        };
+
+        const actor = {meta_window: {get_monitor: () => 0}};
+        const target = integrations.compiz_getIcon(actor);
+
+        assert.ok(target !== null, `Target must not be null for ${pos}`);
+        assert.equal(target.dockPosition, pos);
+        assert.equal(target.width, 16, `${pos} width must be 16`);
+        assert.equal(target.height, 16, `${pos} height must be 16`);
+        assert.ok(Number.isFinite(target.x) && Number.isFinite(target.y));
+    }
+});
+

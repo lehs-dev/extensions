@@ -13,6 +13,7 @@ export function getAttachedEdgeGeometry({
   footDepth = 4,
   cornerRadius = 10,
   scaleFactor = 1.0,
+  position = 'bottom',
 }) {
   const fw = Math.max(0, flareWidth * scaleFactor);
   let fd = Math.max(0, footDepth * scaleFactor);
@@ -21,66 +22,88 @@ export function getAttachedEdgeGeometry({
   const w = Math.max(1, width);
   const h = Math.max(1, height);
 
-  // Body width is the width between vertical edges
-  const bodyWidth = Math.max(0, w - 2 * fw);
+  const isVertical = position === 'left' || position === 'right';
+  const L = isVertical ? h : w;
+  const D = isVertical ? w : h;
 
-  // Clamp corner radius so it does not exceed half body width
-  if (cr * 2 > bodyWidth) {
-    cr = bodyWidth / 2;
+  // Body length is the length between the flared ends along the screen edge
+  const bodyLength = Math.max(0, L - 2 * fw);
+
+  // Clamp corner radius so it does not exceed half body length
+  if (cr * 2 > bodyLength) {
+    cr = bodyLength / 2;
   }
 
-  // Clamp foot depth and corner radius so their sum does not exceed total height
-  if (cr + fd > h) {
+  // Clamp foot depth and corner radius so their sum does not exceed total depth
+  if (cr + fd > D) {
     const total = cr + fd;
     if (total > 0) {
-      cr = (cr / total) * h;
-      fd = (fd / total) * h;
+      cr = (cr / total) * D;
+      fd = (fd / total) * D;
     }
   }
 
-  // Key boundary points
-  const leftFootTip = { x: 0, y: h };
-  const leftBodyBottom = { x: fw, y: h - fd };
-  const leftBodyTop = { x: fw, y: cr };
-  const topLeft = { x: fw + cr, y: 0 };
-  const topRight = { x: w - fw - cr, y: 0 };
-  const rightBodyTop = { x: w - fw, y: cr };
-  const rightBodyBottom = { x: w - fw, y: h - fd };
-  const rightFootTip = { x: w, y: h };
+  // Canonical coordinate mapping:
+  // u in [0, L] along the screen edge
+  // v in [0, D] perpendicular to screen edge (v = D at screen edge, v = 0 at inner crown)
+  let transform;
+  switch (position) {
+    case 'top':
+      // Base at y = 0, crown at y = h
+      transform = (u, v) => ({ x: u, y: D - v });
+      break;
+    case 'left':
+      // Base at x = 0, crown at x = w
+      transform = (u, v) => ({ x: D - v, y: u });
+      break;
+    case 'right':
+      // Base at x = w, crown at x = 0
+      transform = (u, v) => ({ x: v, y: u });
+      break;
+    case 'bottom':
+    default:
+      // Base at y = h, crown at y = 0
+      transform = (u, v) => ({ x: u, y: v });
+      break;
+  }
+
+  // Key boundary points in canonical coordinates
+  const leftFootTip = transform(0, D);
+  const leftBodyBottom = transform(fw, D - fd);
+  const leftBodyTop = transform(fw, cr);
+  const topLeft = transform(fw + cr, 0);
+  const topRight = transform(L - fw - cr, 0);
+  const rightBodyTop = transform(L - fw, cr);
+  const rightBodyBottom = transform(L - fw, D - fd);
+  const rightFootTip = transform(L, D);
 
   // Control points for cubic Béziers
-  // Left foot flare (curves from leftFootTip to leftBodyBottom)
-  // At leftFootTip (0, h), tangent is horizontal (1, 0)
-  // At leftBodyBottom (fw, h - fd), tangent is vertical (0, -1)
-  const leftFootCP1 = { x: KAPPA * fw, y: h };
-  const leftFootCP2 = { x: fw, y: h - KAPPA * fd };
+  const leftFootCP1 = transform(KAPPA * fw, D);
+  const leftFootCP2 = transform(fw, D - KAPPA * fd);
 
-  // Top-left corner (curves from leftBodyTop to topLeft)
-  // At leftBodyTop (fw, cr), tangent is vertical (0, -1)
-  // At topLeft (fw + cr, 0), tangent is horizontal (1, 0)
-  const topLeftCP1 = { x: fw, y: (1 - KAPPA) * cr };
-  const topLeftCP2 = { x: fw + (1 - KAPPA) * cr, y: 0 };
+  const topLeftCP1 = transform(fw, (1 - KAPPA) * cr);
+  const topLeftCP2 = transform(fw + (1 - KAPPA) * cr, 0);
 
-  // Top-right corner (curves from topRight to rightBodyTop)
-  // At topRight (w - fw - cr, 0), tangent is horizontal (1, 0)
-  // At rightBodyTop (w - fw, cr), tangent is vertical (0, 1)
-  const topRightCP1 = { x: w - fw - (1 - KAPPA) * cr, y: 0 };
-  const topRightCP2 = { x: w - fw, y: (1 - KAPPA) * cr };
+  const topRightCP1 = transform(L - fw - (1 - KAPPA) * cr, 0);
+  const topRightCP2 = transform(L - fw, (1 - KAPPA) * cr);
 
-  // Right foot flare (curves from rightBodyBottom to rightFootTip)
-  // At rightBodyBottom (w - fw, h - fd), tangent is vertical (0, 1)
-  // At rightFootTip (w, h), tangent is horizontal (1, 0)
-  const rightFootCP1 = { x: w - fw, y: h - KAPPA * fd };
-  const rightFootCP2 = { x: w - KAPPA * fw, y: h };
+  const rightFootCP1 = transform(L - fw, D - KAPPA * fd);
+  const rightFootCP2 = transform(L - KAPPA * fw, D);
+
+  // Overshoot points into the screen edge to prevent subpixel antialiasing gaps
+  const rightFootTipOvershoot = transform(L, D + 2);
+  const leftFootTipOvershoot = transform(0, D + 2);
 
   return {
     width: w,
     height: h,
-    bodyWidth,
+    bodyWidth: bodyLength,
+    bodyLength,
     flareWidth: fw,
     footDepth: fd,
     cornerRadius: cr,
     scaleFactor,
+    position,
     leftFootTip,
     leftBodyBottom,
     leftBodyTop,
@@ -97,6 +120,8 @@ export function getAttachedEdgeGeometry({
     topRightCP2,
     rightFootCP1,
     rightFootCP2,
+    rightFootTipOvershoot,
+    leftFootTipOvershoot,
   };
 }
 
@@ -120,10 +145,15 @@ export function buildAttachedFillPath(ctx, geom) {
     geom.rightFootCP2.x, geom.rightFootCP2.y,
     geom.rightFootTip.x, geom.rightFootTip.y
   );
-  // Bottom extension to prevent subpixel antialiasing gaps
-  const bottomOvershoot = geom.height + 2;
-  ctx.lineTo(geom.rightFootTip.x, bottomOvershoot);
-  ctx.lineTo(geom.leftFootTip.x, bottomOvershoot);
+  // Base extension to prevent subpixel antialiasing gaps
+  if (geom.rightFootTipOvershoot && geom.leftFootTipOvershoot) {
+    ctx.lineTo(geom.rightFootTipOvershoot.x, geom.rightFootTipOvershoot.y);
+    ctx.lineTo(geom.leftFootTipOvershoot.x, geom.leftFootTipOvershoot.y);
+  } else {
+    const bottomOvershoot = geom.height + 2;
+    ctx.lineTo(geom.rightFootTip.x, bottomOvershoot);
+    ctx.lineTo(geom.leftFootTip.x, bottomOvershoot);
+  }
   ctx.lineTo(geom.leftFootTip.x, geom.leftFootTip.y);
   // Left foot flare
   ctx.curveTo(
@@ -236,6 +266,7 @@ export const AttachedDockCanvas = GObject.registerClass(
         !prev ||
         prev.width !== s.width ||
         prev.height !== s.height ||
+        prev.position !== s.position ||
         prev.flareWidth !== s.flareWidth ||
         prev.footDepth !== s.footDepth ||
         prev.cornerRadius !== s.cornerRadius ||
@@ -281,6 +312,7 @@ export const AttachedDockCanvas = GObject.registerClass(
         footDepth: this.state.footDepth,
         cornerRadius: this.state.cornerRadius,
         scaleFactor: this.state.scaleFactor,
+        position: this.state.position || 'bottom',
       });
 
       // Subtle ambient shadow along the contour

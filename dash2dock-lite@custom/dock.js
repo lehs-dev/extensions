@@ -471,30 +471,23 @@ export let Dock = GObject.registerClass(
     }
 
     _preferredIconSize() {
-      let preferredIconSizes = this._preferredIconSizes;
-      let iconSize = 64;
-      if (!preferredIconSizes) {
-        preferredIconSizes = [32];
-        for (let i = 16; i <= 128; i += 4) {
-          preferredIconSizes.push(i);
-        }
-        this._preferredIconSizes = preferredIconSizes;
+      let iconSize = 48;
+
+      let raw = this.extension.icon_size;
+      if (raw === undefined || raw === null || raw === 0) {
+        iconSize = 48;
+      } else if (raw > 0 && raw < 12) {
+        // Legacy normalized setting [0, 1] mapped to [12, 96]
+        iconSize = Math.round(12 + raw * (96 - 12));
+      } else if (raw >= 12) {
+        iconSize = Math.round(raw);
       }
 
-      //! why the need for upscaling
-      let upscale = 1 + (2 - this._scaleFactor) || 1;
-      if (upscale < 1) {
-        upscale = 1; // does scaleFactor go beyond 2x?
+      if (this.extension.scale && this.extension.scale !== 1.0) {
+        iconSize *= this.extension.scale;
       }
-      // console.log(`scaleFactor:${this._scaleFactor} upscale:${upscale}`);
-      iconSize =
-        upscale *
-        (preferredIconSizes[
-          Math.floor(this.extension.icon_size * preferredIconSizes.length)
-        ] || 64);
-      iconSize *= this.extension.scale;
 
-      if (this.extension._config.icon_size) {
+      if (this.extension._config && this.extension._config.icon_size) {
         iconSize = this.extension._config.icon_size;
       }
 
@@ -562,7 +555,16 @@ export let Dock = GObject.registerClass(
         this._separators.push(c);
         this._dashItems.push(c);
         c.visible = true;
-        c.style = 'margin-left: 8px; margin-right: 8px;';
+        let sepMargin = 8;
+        if (this._iconSizeScaledDown) {
+          let spreadFactor = Math.max(0.25, Math.min(1.0, this._iconSizeScaledDown / 48));
+          sepMargin = Math.max(2, Math.round(8 * spreadFactor));
+        }
+        if (this.isVertical()) {
+          c.style = `margin-top: ${sepMargin}px; margin-bottom: ${sepMargin}px;`;
+        } else {
+          c.style = `margin-left: ${sepMargin}px; margin-right: ${sepMargin}px;`;
+        }
         return false;
       }
 
@@ -1073,8 +1075,10 @@ export let Dock = GObject.registerClass(
       }
 
       let iconSize = this._preferredIconSize();
-      //! why not use icon_spacing? animation spread should only be when animated
-      let iconSizeSpaced = iconSize + 2 + 8 * animation_spread;
+      let spreadFactor = Math.max(0.25, Math.min(1.0, iconSize / 48));
+      let baseExtra = Math.max(1, Math.round(2 * spreadFactor));
+      let spreadExtra = Math.round(8 * animation_spread * spreadFactor);
+      let iconSizeSpaced = iconSize + baseExtra + spreadExtra;
 
       let projectedWidth =
         iconSize +
@@ -1106,8 +1110,7 @@ export let Dock = GObject.registerClass(
 
       if (
         this.extension.panel_mode ||
-        (this.extension.background_style === 1 &&
-          this._position === DockPosition.BOTTOM)
+        this.extension.background_style === 1
       ) {
         this._edge_distance = 0;
       }

@@ -121,105 +121,124 @@ export let PrefKeys = class {
     let self = this;
     let keys = this._keys;
 
-    Object.keys(keys).forEach((name) => {
-      let key = keys[name];
-      key.object = builder ? builder.get_object(key.name) : null;
-      switch (key.widget_type) {
-        case 'json_array': {
-          key.value = [];
-          try {
-            key.value = JSON.parse(settings.get_string(name));
-          } catch (err) {
-            // fail silently
-          }
-          break;
-        }
-        case 'switch': {
-          key.value = settings.get_boolean(name);
-          if (key.object) key.object.set_active(key.value);
-          break;
-        }
-        case 'dropdown': {
-          key.value = settings.get_int(name);
-          try {
-            if (key.object) key.object.set_selected(key.value);
-          } catch (err) {
-            //
-          }
-          break;
-        }
-        case 'scale': {
-          key.value = settings.get_double(name);
-          if (key.object) key.object.set_value(key.value);
-          break;
-        }
-        case 'string': {
-          key.value = settings.get_string(name);
-          if (key.object) key.object.set_value(key.value);
-          break;
-        }
-        case 'color': {
-          key.value = settings.get_value(name).deepUnpack();
-          try {
-            if (key.object) {
-              key.object.set_rgba(
-                // new Gdk.RGBA({
-                this._toRGBA({
-                  red: key.value[0],
-                  green: key.value[1],
-                  blue: key.value[2],
-                  alpha: key.value[3],
-                })
-              );
+    this._updatingWidgets = true;
+    try {
+      Object.keys(keys).forEach((name) => {
+        let key = keys[name];
+        key.object = builder ? builder.get_object(key.name) : null;
+        switch (key.widget_type) {
+          case 'json_array': {
+            key.value = [];
+            try {
+              key.value = JSON.parse(settings.get_string(name));
+            } catch (err) {
+              // fail silently
             }
-          } catch (err) {
-            //
+            break;
           }
-          break;
+          case 'switch': {
+            key.value = settings.get_boolean(name);
+            if (key.object) key.object.set_active(key.value);
+            break;
+          }
+          case 'dropdown': {
+            key.value = settings.get_int(name);
+            try {
+              if (key.object) key.object.set_selected(key.value);
+            } catch (err) {
+              //
+            }
+            break;
+          }
+          case 'scale': {
+            key.value = settings.get_double(name);
+            if (name === 'icon-size') {
+              if (key.value === 0) {
+                key.value = 48;
+              } else if (key.value > 0 && key.value < 12) {
+                key.value = Math.round(12 + key.value * 84);
+              }
+            }
+            if (key.object) key.object.set_value(key.value);
+            break;
+          }
+          case 'string': {
+            key.value = settings.get_string(name);
+            if (key.object) key.object.set_value(key.value);
+            break;
+          }
+          case 'color': {
+            key.value = settings.get_value(name).deepUnpack();
+            try {
+              if (key.object) {
+                key.object.set_rgba(
+                  // new Gdk.RGBA({
+                  this._toRGBA({
+                    red: key.value[0],
+                    green: key.value[1],
+                    blue: key.value[2],
+                    alpha: key.value[3],
+                  })
+                );
+              }
+            } catch (err) {
+              //
+            }
+            break;
+          }
         }
-      }
 
-      this._settingsListeners.push(
-        settings.connect(`changed::${name}`, () => {
-          let key = keys[name];
-          switch (key.widget_type) {
-            case 'json_array': {
-              key.value = [];
-              try {
-                key.value = JSON.parse(settings.get_string(name));
-              } catch (err) {
-                // fail silently
+        this._settingsListeners.push(
+          settings.connect(`changed::${name}`, () => {
+            let key = keys[name];
+            switch (key.widget_type) {
+              case 'json_array': {
+                key.value = [];
+                try {
+                  key.value = JSON.parse(settings.get_string(name));
+                } catch (err) {
+                  // fail silently
+                }
+                break;
               }
-              break;
-            }
-            case 'switch': {
-              key.value = settings.get_boolean(name);
-              break;
-            }
-            case 'dropdown': {
-              key.value = settings.get_int(name);
-              break;
-            }
-            case 'scale': {
-              key.value = settings.get_double(name);
-              break;
-            }
-            case 'color': {
-              key.value = settings.get_value(name).deepUnpack();
-              if (key.value.length != 4) {
-                key.value = [1, 1, 1, 0];
+              case 'switch': {
+                key.value = settings.get_boolean(name);
+                break;
               }
-              break;
+              case 'dropdown': {
+                key.value = settings.get_int(name);
+                break;
+              }
+              case 'scale': {
+                key.value = settings.get_double(name);
+                if (name === 'icon-size') {
+                  if (key.value === 0) {
+                    key.value = 48;
+                  } else if (key.value > 0 && key.value < 12) {
+                    key.value = Math.round(12 + key.value * 84);
+                  }
+                }
+                break;
+              }
+              case 'color': {
+                key.value = settings.get_value(name).deepUnpack();
+                if (key.value.length != 4) {
+                  key.value = [1, 1, 1, 0];
+                }
+                break;
+              }
+              case 'string': {
+                key.value = settings.get_string(name);
+                break;
+              }
             }
-            case 'string': {
-              key.value = settings.get_string(name);
-              break;
-            }
-          }
-          if (callback) callback(name, key.value);
-        })
-      );
-    });
+            if (callback) callback(name, key.value);
+          })
+        );
+      });
+    } finally {
+      this._updatingWidgets = false;
+    }
   }
 
   disconnectSettings() {
@@ -272,6 +291,7 @@ export let PrefKeys = class {
         }
         case 'scale': {
           signal_id = key.object.connect('value-changed', (w) => {
+            if (self._updatingWidgets) return;
             let value = w.get_value();
             self.setValue(name, value);
           });

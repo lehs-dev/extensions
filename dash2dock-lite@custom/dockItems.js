@@ -455,8 +455,7 @@ export const DockBackground = GObject.registerClass(
 
         const isAttachedEdge =
           !panel_mode &&
-          dock.extension?.background_style === 1 &&
-          position === DockPosition.BOTTOM;
+          dock.extension?.background_style === 1;
 
         if (isAttachedEdge) {
           const flareWidth = dock.extension?.flare_width ?? 14;
@@ -464,11 +463,31 @@ export const DockBackground = GObject.registerClass(
           const cornerRadius = dock.extension?.attached_corner_radius ?? 10;
           const fw = Math.round(flareWidth * scaleFactor);
 
-          this.x -= fw;
-          this.width += 2 * fw;
-
-          const screenBottom = dock.height + (dock.dash.translationY || 0);
-          this.height = Math.max(1, screenBottom - this.y);
+          if (position === DockPosition.BOTTOM) {
+            this.x -= fw;
+            this.width += 2 * fw;
+            const screenBottom = dock.height + (dock.dash.translationY || 0);
+            this.height = Math.max(1, screenBottom - this.y);
+          } else if (position === DockPosition.TOP) {
+            this.x -= fw;
+            this.width += 2 * fw;
+            const bodyBottom = this.y + this.height;
+            const screenTop = 0 + (dock.dash.translationY || 0);
+            this.y = screenTop;
+            this.height = Math.max(1, bodyBottom - this.y);
+          } else if (position === DockPosition.LEFT) {
+            this.y -= fw;
+            this.height += 2 * fw;
+            const bodyRight = this.x + this.width;
+            const screenLeft = 0 + (dock.dash.translationX || 0);
+            this.x = screenLeft;
+            this.width = Math.max(1, bodyRight - this.x);
+          } else if (position === DockPosition.RIGHT) {
+            this.y -= fw;
+            this.height += 2 * fw;
+            const screenRight = dock.width + (dock.dash.translationX || 0);
+            this.width = Math.max(1, screenRight - this.x);
+          }
 
           if (this._canvas) {
             this._canvas.visible = true;
@@ -481,6 +500,7 @@ export const DockBackground = GObject.registerClass(
               footDepth,
               cornerRadius,
               scaleFactor,
+              position,
               backgroundColor: dock.extension?._dockColors?.['background-color'],
               borderColor: dock.extension?._dockColors?.['border-color'],
               borderThickness: dock.extension?.border_thickness || 0,
