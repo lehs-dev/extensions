@@ -38,6 +38,10 @@ import { Dock } from './dock.js';
 import { Services } from './services.js';
 import { Integrations } from './integrations.js';
 import { runTests } from './diagnostics.js';
+import { ScreenFrame } from './screenFrame.js';
+import { DebugVisuals } from './debugVisuals.js';
+import { DesktopLayoutManager } from './desktopLayoutManager.js';
+import { WindowGapCoordinator } from './windowGaps.js';
 
 import {
   Extension,
@@ -265,6 +269,11 @@ export default class Dash2DockLiteExt extends Extension {
 
     this._showMainOverviewDash(true);
 
+    this.disableWindowGapCoordinator();
+    this.disableDesktopLayoutManager();
+    this.disableDebugVisuals();
+    this.disableScreenFrame();
+    this.disableSystemDock();
     this.destroyDocks();
     this.docks = [];
 
@@ -313,8 +322,162 @@ export default class Dash2DockLiteExt extends Extension {
     });
   }
 
+  enableDesktopLayoutManager() {
+    if (this.desktopLayoutManager) return;
+    const currentConfigKey = `${this.desktop_layout}:${this.enable_system_dock}:${this.modular_show_quicksettings}:${this.modular_show_clock}`;
+    if (this._lastFailedLayoutConfig === currentConfigKey) {
+      return;
+    }
+    try {
+      this.desktopLayoutManager = new DesktopLayoutManager({ extension: this });
+      this.desktopLayoutManager.enable();
+      this.systemDock = this.desktopLayoutManager.systemDock;
+      this._applyDesktopLayoutDefaults();
+      this._lastFailedLayoutConfig = null;
+      console.log('dash2dock-lite: Desktop Layout Manager enabled successfully');
+    } catch (err) {
+      this._lastFailedLayoutConfig = currentConfigKey;
+      console.error('dash2dock-lite: Failed to initialize Desktop Layout Manager:', err);
+      if (this.desktopLayoutManager) {
+        try {
+          this.desktopLayoutManager.destroy();
+        } catch (e) {}
+        this.desktopLayoutManager = null;
+      }
+      this.systemDock = null;
+      for (const dock of this.docks ?? []) dock.layout();
+    }
+  }
+
+  _applyDesktopLayoutDefaults() {
+    if (this.desktopLayoutManager?.mode === 1 &&
+        this._settings?.get_user_value?.('enable-screen-frame') === null) {
+      this._settings.set_boolean('enable-screen-frame', true);
+    }
+  }
+
+  disableDesktopLayoutManager() {
+    if (this.desktopLayoutManager) {
+      try {
+        this.desktopLayoutManager.destroy();
+      } catch (err) {
+        console.error('Error disabling Desktop Layout Manager:', err);
+      }
+      this.desktopLayoutManager = null;
+      this.systemDock = null;
+    }
+  }
+
+  enableWindowGapCoordinator() {
+    if (this.windowGapCoordinator) return;
+    try {
+      this.windowGapCoordinator = new WindowGapCoordinator({ extension: this });
+      this.windowGapCoordinator.enable();
+      console.log('dash2dock-lite: Window Gap Coordinator enabled successfully');
+    } catch (err) {
+      console.error('dash2dock-lite: Failed to initialize Window Gap Coordinator:', err);
+      if (this.windowGapCoordinator) {
+        try {
+          this.windowGapCoordinator.destroy();
+        } catch (e) {}
+        this.windowGapCoordinator = null;
+      }
+    }
+  }
+
+  disableWindowGapCoordinator() {
+    if (this.windowGapCoordinator) {
+      try {
+        this.windowGapCoordinator.destroy();
+      } catch (err) {
+        console.error('Error disabling Window Gap Coordinator:', err);
+      }
+      this.windowGapCoordinator = null;
+    }
+  }
+
+  enableSystemDock() {
+    if (this.desktopLayoutManager) {
+      this.desktopLayoutManager.onSettingsChanged('enable-system-dock', true);
+      return;
+    }
+    this.enableDesktopLayoutManager();
+  }
+
+  disableSystemDock() {
+    this.disableDesktopLayoutManager();
+  }
+
+  enableScreenFrame() {
+    if (this.screenFrame) return;
+    try {
+      this.screenFrame = new ScreenFrame({ extension: this });
+      this.screenFrame.enable();
+      console.log('dash2dock-lite: Screen Frame enabled successfully');
+    } catch (err) {
+      console.error('dash2dock-lite: Failed to initialize Screen Frame:', err);
+      if (this.screenFrame) {
+        try {
+          this.screenFrame.destroy();
+        } catch (e) {}
+        this.screenFrame = null;
+      }
+    }
+  }
+
+  disableScreenFrame() {
+    if (this.screenFrame) {
+      try {
+        this.screenFrame.destroy();
+      } catch (err) {
+        console.error('dash2dock-lite: Error disabling Screen Frame:', err);
+      }
+      this.screenFrame = null;
+    }
+  }
+
+  enableDebugVisuals() {
+    if (this.debugVisuals) return;
+    try {
+      this.debugVisuals = new DebugVisuals({ extension: this });
+      this.debugVisuals.enable();
+      console.log('dash2dock-lite: Debug Visuals enabled successfully');
+    } catch (err) {
+      console.error('dash2dock-lite: Failed to initialize Debug Visuals:', err);
+      if (this.debugVisuals) {
+        try {
+          this.debugVisuals.destroy();
+        } catch (e) {}
+        this.debugVisuals = null;
+      }
+    }
+  }
+
+  disableDebugVisuals() {
+    if (this.debugVisuals) {
+      try {
+        this.debugVisuals.destroy();
+      } catch (err) {
+        console.error('dash2dock-lite: Error disabling Debug Visuals:', err);
+      }
+      this.debugVisuals = null;
+    }
+  }
+
   startUp() {
     this.createTheDocks();
+    if (this.debug_visual) {
+      this.enableDebugVisuals();
+    }
+    if (this.enable_screen_frame) {
+      this.enableScreenFrame();
+    }
+    if (this.enable_window_outer_gap) {
+      this.enableWindowGapCoordinator();
+    }
+    if (this.enable_system_dock || this.desktop_layout === 1) {
+      this.enableDesktopLayoutManager();
+    }
     this._loTimer.runOnce(() => {
       this._updateWidgetStyle();
       this.animate({ refresh: true });
@@ -501,6 +664,11 @@ export default class Dash2DockLiteExt extends Extension {
           break;
         }
         case 'debug-visual':
+          if (value) {
+            this.enableDebugVisuals();
+          } else {
+            this.disableDebugVisuals();
+          }
           this.animate();
           break;
         case 'mounted-icon': {
@@ -664,6 +832,107 @@ export default class Dash2DockLiteExt extends Extension {
         case 'trash-icon': {
           this._updateLayout();
           this.animate({ refresh: true });
+          break;
+        }
+        case 'desktop-layout':
+        case 'modular-show-quicksettings':
+        case 'modular-show-appdock':
+        case 'modular-show-clock':
+        case 'modular-upper-pod-offset':
+        case 'modular-lower-pod-offset':
+        case 'modular-min-spacing':
+        case 'enable-system-dock': {
+          this._lastFailedLayoutConfig = null;
+          if (this.enable_system_dock || this.desktop_layout === 1) {
+            if (!this.desktopLayoutManager) {
+              this.enableDesktopLayoutManager();
+            } else {
+              this.desktopLayoutManager.onSettingsChanged(name, value);
+            }
+          } else {
+            this.disableDesktopLayoutManager();
+          }
+          this._applyDesktopLayoutDefaults();
+          this.docks.forEach((dock) => {
+            dock._icons = null;
+            dock.layout();
+          });
+          this.animate({ refresh: true });
+          break;
+        }
+        case 'modular-quicksettings-width':
+        case 'modular-group-elevation':
+        case 'modular-elevation-distance':
+        case 'modular-animation-duration':
+        case 'modular-indicator-icon-size':
+        case 'modular-indicator-spacing':
+        case 'modular-show-network':
+        case 'modular-show-bluetooth':
+        case 'modular-show-battery':
+        case 'modular-show-volume':
+        case 'modular-show-input-source':
+        case 'modular-clock-width':
+        case 'modular-clock-show-weekday':
+        case 'modular-clock-show-date':
+        case 'modular-clock-format':
+        case 'system-dock-hide-topbar':
+        case 'system-dock-behavior':
+        case 'system-dock-show-clock':
+        case 'system-dock-show-network':
+        case 'system-dock-show-bluetooth':
+        case 'system-dock-show-volume':
+        case 'system-dock-show-battery':
+        case 'system-dock-show-notifications':
+        case 'system-dock-show-power':
+        case 'system-dock-icon-size':
+        case 'system-dock-icon-spacing':
+        case 'system-dock-width':
+        case 'system-dock-flare-width':
+        case 'system-dock-foot-depth':
+        case 'system-dock-corner-radius': {
+          if (this.desktopLayoutManager) {
+            this.desktopLayoutManager.onSettingsChanged(name, value);
+          }
+          break;
+        }
+        case 'enable-screen-frame': {
+          if (value) {
+            this.enableScreenFrame();
+          } else {
+            this.disableScreenFrame();
+          }
+          this.desktopLayoutManager?.updateLayout();
+          if (this.windowGapCoordinator) {
+            this.windowGapCoordinator.updateGaps();
+          }
+          break;
+        }
+        case 'screen-frame-thickness':
+        case 'screen-frame-corner-radius':
+        case 'screen-frame-color':
+        case 'screen-frame-opacity':
+        case 'screen-frame-all-monitors': {
+          if (this.screenFrame) {
+            this.screenFrame.onSettingsChanged(name, value);
+          }
+          this.desktopLayoutManager?.updateLayout();
+          if (this.windowGapCoordinator) {
+            this.windowGapCoordinator.updateGaps();
+          }
+          break;
+        }
+        case 'enable-window-outer-gap': {
+          if (value) {
+            this.enableWindowGapCoordinator();
+          } else {
+            this.disableWindowGapCoordinator();
+          }
+          break;
+        }
+        case 'window-outer-gap-size': {
+          if (this.windowGapCoordinator) {
+            this.windowGapCoordinator.updateGaps();
+          }
           break;
         }
       }
@@ -1053,7 +1322,7 @@ export default class Dash2DockLiteExt extends Extension {
 
     // dash
     {
-      if (this.background_style === 1) {
+      if (this.background_style === 1 || this.desktopLayoutManager?.mode === 1) {
         let r = Math.round(this.attached_corner_radius ?? 10);
         this.computed_border_radius = r;
         styles.push('#d2daBackground { background: none; border: none; box-shadow: none; }');
@@ -1167,12 +1436,22 @@ export default class Dash2DockLiteExt extends Extension {
     this._style.build('custom-d2dl', styles);
 
     this._updateBorderStyle();
+
+    if (this.desktopLayoutManager) {
+      this.desktopLayoutManager.updateTheme();
+    } else if (this.systemDock) {
+      this.systemDock.updateTheme();
+    }
+
+    if (this.screenFrame) {
+      this.screenFrame.updateStyle();
+    }
   }
 
   _updateBorderStyle() {
     this._backgroundStyle = '';
 
-    if (this.background_style === 1) {
+    if (this.background_style === 1 || this.desktopLayoutManager?.mode === 1) {
       return;
     }
 
@@ -1208,6 +1487,11 @@ export default class Dash2DockLiteExt extends Extension {
     this.docks.forEach((dock) => {
       dock.layout();
     });
+    if (this.desktopLayoutManager) {
+      this.desktopLayoutManager.updateLayout();
+    } else if (this.systemDock) {
+      this.systemDock.updateLayout();
+    }
   }
 
   _updateIconSpacing(disable) {

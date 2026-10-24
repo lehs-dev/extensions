@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {loadModule, Actor} from './helpers/shell.mjs';
+import {loadModule, Actor, GObjectActor, registerGObjectClass} from './helpers/shell.mjs';
+
+function registerBackgroundClass(...args) {
+    const Original = args.at(-1);
+    return ['DockBackground', 'AttachedDockCanvas'].includes(Original.name)
+        ? registerGObjectClass(...args) : Original;
+}
 
 async function setup(position = 'bottom') {
     const vertical = ['left', 'right'].includes(position);
@@ -103,6 +109,23 @@ test('reduced motion disables magnification while retaining usable renderers', a
     for (const icon of icons) {
         assert.equal(icon._targetScale, 1);
         assert.equal(icon._renderer.visible, true);
+    }
+});
+
+test('Left Modular group elevation preferences preserve the existing application icon animation', async () => {
+    const baseline = await setup('left');
+    baseline.settle();
+    const expected = baseline.icons.map(icon => [icon._renderer.x, icon._renderer.y, icon._renderer.scaleX]);
+    for (const enabled of [true, false]) {
+        const env = await setup('left');
+        Object.assign(env.dock.extension, {desktopLayoutManager: {mode: 1},
+            modular_group_elevation: enabled, modular_elevation_distance: 16,
+            modular_animation_duration: 600});
+        env.settle();
+        assert.deepEqual(env.icons.map(icon => [icon._renderer.x, icon._renderer.y, icon._renderer.scaleX]), expected);
+        assert.ok(env.icons.some(icon => icon._renderer.scaleX > 1));
+        env.leave(); env.settle();
+        assert.ok(env.icons.every(icon => icon._targetScale === 1));
     }
 });
 
@@ -592,6 +615,11 @@ test('Dock follows real light-style St notifications over interface preferences 
             './timer.js': {Timer: class {}}, './frameTimer.js': {FrameTimer: class {}},
             './style.js': {Style: class {}}, './dock.js': {Dock: class {}},
             './services.js': {Services: class {}}, './integrations.js': {Integrations: class {}},
+            './systemDock/systemDock.js': {SystemDock: class { enable() {} destroy() {} updateTheme() {} updateLayout() {} onSettingsChanged() {} }},
+            './screenFrame.js': {ScreenFrame: class { enable() {} destroy() {} updateStyle() {} updateLayout() {} onSettingsChanged() {} }},
+            './debugVisuals.js': {DebugVisuals: class { enable() {} destroy() {} }},
+            './desktopLayoutManager.js': {DesktopLayoutManager: class { enable() {} destroy() {} updateTheme() {} updateLayout() {} onSettingsChanged() {} }},
+            './windowGaps.js': {WindowGapCoordinator: class { enable() {} destroy() {} updateGaps() {} }},
             './diagnostics.js': {runTests() {}},
             './preferences/keys.js': {schemaId: 'test', SettingsKeys() {}},
         },
@@ -699,9 +727,9 @@ test('DockItemMenu initializes completely hidden with zero opacity and stays inv
             },
             'gi://GObject': {
                 default: {
-                    registerClass: (meta, cls) => cls,
+                    registerClass: registerBackgroundClass,
                 },
-                registerClass: (meta, cls) => cls,
+                registerClass: registerBackgroundClass,
             },
             'gi://Clutter': {
                 default: {
@@ -752,8 +780,8 @@ test('Attached Edge: geometry calculation with default values', async () => {
         'dash2dock-lite@custom/attachedBackground.js',
         {
             mocks: {
-                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
-                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://GObject': {default: {registerClass: registerBackgroundClass}},
+                'gi://St': {default: {DrawingArea: GObjectActor, Widget: GObjectActor}},
                 'gi://cairo': {
                     default: {
                         Operator: {CLEAR: 0, OVER: 2, SOURCE: 1},
@@ -805,8 +833,8 @@ test('Attached Edge: symmetric left and right flares with C1 tangent continuity'
         'dash2dock-lite@custom/attachedBackground.js',
         {
             mocks: {
-                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
-                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://GObject': {default: {registerClass: registerBackgroundClass}},
+                'gi://St': {default: {DrawingArea: GObjectActor, Widget: GObjectActor}},
                 'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
             },
         }
@@ -859,8 +887,8 @@ test('Attached Edge: attachment to bottom monitor edge without antialiasing gaps
         'dash2dock-lite@custom/attachedBackground.js',
         {
             mocks: {
-                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
-                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://GObject': {default: {registerClass: registerBackgroundClass}},
+                'gi://St': {default: {DrawingArea: GObjectActor, Widget: GObjectActor}},
                 'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
             },
         }
@@ -918,9 +946,9 @@ test('Attached Edge: floating mode preserves previous behavior', async () => {
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {default: {get_default_text_direction: () => 0, TextDirection: {RTL: 1}}},
-            'gi://St': {default: {Side: {}, Widget: Actor, DrawingArea: Actor}},
+            'gi://St': {default: {Side: {}, Widget: GObjectActor, DrawingArea: GObjectActor}},
         },
     });
 
@@ -971,8 +999,8 @@ test('Attached Edge: configurable flare width, foot depth, and corner radius', a
         'dash2dock-lite@custom/attachedBackground.js',
         {
             mocks: {
-                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
-                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://GObject': {default: {registerClass: registerBackgroundClass}},
+                'gi://St': {default: {DrawingArea: GObjectActor, Widget: GObjectActor}},
                 'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
             },
         }
@@ -1013,8 +1041,8 @@ test('Attached Edge: dynamic dock resizing preserves flare proportions', async (
         'dash2dock-lite@custom/attachedBackground.js',
         {
             mocks: {
-                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
-                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://GObject': {default: {registerClass: registerBackgroundClass}},
+                'gi://St': {default: {DrawingArea: GObjectActor, Widget: GObjectActor}},
                 'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
             },
         }
@@ -1060,9 +1088,9 @@ test('Attached Edge: autohide slides the entire foot below screen and reveal res
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {default: {get_default_text_direction: () => 0, TextDirection: {RTL: 1}}},
-            'gi://St': {default: {Side: {}, Widget: Actor, DrawingArea: Actor}},
+            'gi://St': {default: {Side: {}, Widget: GObjectActor, DrawingArea: GObjectActor}},
         },
     });
 
@@ -1147,8 +1175,8 @@ test('Attached Edge: monitor scaling (100%, 125%, 150%, 200%) and negative origi
         'dash2dock-lite@custom/attachedBackground.js',
         {
             mocks: {
-                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
-                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://GObject': {default: {registerClass: registerBackgroundClass}},
+                'gi://St': {default: {DrawingArea: GObjectActor, Widget: GObjectActor}},
                 'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
             },
         }
@@ -1187,9 +1215,9 @@ test('Attached Edge: style and border updates reflect settings cleanly', async (
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {default: {get_default_text_direction: () => 0, TextDirection: {RTL: 1}}},
-            'gi://St': {default: {Side: {}, Widget: Actor, DrawingArea: Actor}},
+            'gi://St': {default: {Side: {}, Widget: GObjectActor, DrawingArea: GObjectActor}},
         },
     });
 
@@ -1288,8 +1316,8 @@ test('Attached Edge: all four positions (bottom, top, left, right) have correct 
         'dash2dock-lite@custom/attachedBackground.js',
         {
             mocks: {
-                'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
-                'gi://St': {default: {DrawingArea: Actor, Widget: Actor}},
+                'gi://GObject': {default: {registerClass: registerBackgroundClass}},
+                'gi://St': {default: {DrawingArea: GObjectActor, Widget: GObjectActor}},
                 'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
             },
         }
@@ -1380,9 +1408,9 @@ test('Attached Edge: DockBackground bounding box and canvas visibility in all 4 
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {default: {get_default_text_direction: () => 0, TextDirection: {RTL: 1}}},
-            'gi://St': {default: {Side: {}, Widget: Actor, DrawingArea: Actor}},
+            'gi://St': {default: {Side: {}, Widget: GObjectActor, DrawingArea: GObjectActor}},
         },
     });
 
@@ -1463,9 +1491,9 @@ test('Attached Edge: position changes trigger canvas updates without requiring r
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://cairo': {default: {Operator: {}, LineCap: {}, LineJoin: {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {default: {get_default_text_direction: () => 0, TextDirection: {RTL: 1}}},
-            'gi://St': {default: {Side: {}, Widget: Actor, DrawingArea: Actor}},
+            'gi://St': {default: {Side: {}, Widget: GObjectActor, DrawingArea: GObjectActor}},
         },
     });
 
@@ -1534,7 +1562,7 @@ test('Icon sizing: genuine base sizing from 12px to 96px with strict monotonicit
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://Graphene': {default: {Point: class {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {
                 default: {
                     ActorAlign: {CENTER: 0},
@@ -1602,7 +1630,7 @@ test('Icon sizing: dock container and spacing shrink proportionally for small ic
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://Graphene': {default: {Point: class {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {
                 default: {
                     ActorAlign: {CENTER: 0},
@@ -1723,7 +1751,7 @@ test('Dock.isWithinHoverArea: Left dock strict boundary prevents activation insi
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://Graphene': {default: {Point: class {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {
                 default: {
                     ActorAlign: {CENTER: 0},
@@ -1793,7 +1821,7 @@ test('Dock.isWithinHoverArea: All four orientations enforce strict bounds', asyn
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://Graphene': {default: {Point: class {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {
                 default: {
                     ActorAlign: {CENTER: 0},
@@ -1863,7 +1891,7 @@ test('Dock.isWithinHoverArea: Attached Edge transparent flare corners do not act
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://Graphene': {default: {Point: class {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {
                 default: {
                     ActorAlign: {CENTER: 0},
@@ -1920,7 +1948,7 @@ test('Dock.isWithinHoverArea: Floating mode strictly bounds the dock capsule', a
             'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
             'gi://Gio': {default: {}},
             'gi://Graphene': {default: {Point: class {}}},
-            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://GObject': {default: {registerClass: registerBackgroundClass}},
             'gi://Clutter': {
                 default: {
                     ActorAlign: {CENTER: 0},
@@ -2115,5 +2143,144 @@ test('Animator & Hover Integration: Entering dock magnifies icons, leaving immed
     for (let i = 0; i < 240; i++) animator.animate(16);
     assert.ok(dock._nearestIcon !== null, 'Nearest icon must reactivate upon return');
     assert.ok(icons[1]._targetScale > 1.2, 'Icon 1 must magnify again');
+});
+
+test('Dock recursion protection: animate() fast-forward runs iteratively without nested recursion', async () => {
+    let callDepth = 0;
+    let maxCallDepth = 0;
+    let animatorCalls = 0;
+
+    const fakeDock = {
+        _preview: 0,
+        _pauseBounce: 0,
+        _fast_forward: 20,
+        dash: { opacity: 255 },
+        simulated_pointer: null,
+        animator: {
+            animate(dt) {
+                animatorCalls++;
+                callDepth++;
+                maxCallDepth = Math.max(maxCallDepth, callDepth);
+                callDepth--;
+            },
+        },
+    };
+
+    // Load actual Dock prototype animate method
+    const dockModule = await loadModule('dash2dock-lite@custom/dock.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': { layoutManager: { primaryIndex: 0 } },
+            'resource:///org/gnome/shell/ui/appFavorites.js': { getAppFavorites: () => ({ _getIds: () => [], getFavorites: () => [] }) },
+            'resource:///org/gnome/shell/misc/config.js': { PACKAGE_VERSION: '51' },
+            'resource:///org/gnome/shell/ui/dash.js': { Dash: Actor, DashIcon: Actor, DashItemContainer: Actor },
+            './dockItems.js': { DockIcon: Actor, DockItemContainer: Actor, DockBackground: Actor },
+            './dockItemMenu.js': { DockItemList: class {} },
+            './effects/tint_effect.js': { TintEffect: class {} },
+            './effects/monochrome_effect.js': { MonochromeEffect: class {} },
+            './appearance.js': {},
+            './style.js': {},
+            './animator.js': { Animator: class {} },
+            './autohide.js': { AutoHide: class {} },
+            './dockOverflow.js': { computeDockViewport: () => ({ height: 200, contentTop: 14, bodyHeight: 180, overflow: false }) },
+            './utils.js': { get_distance_sqr: () => 0, get_distance: () => 0, isInRect: () => false, isOverlapRect: () => false, tempPath: () => '' },
+            'gi://Clutter': { default: { ActorAlign: { CENTER: 0 }, Orientation: { VERTICAL: 1, HORIZONTAL: 0 } } },
+            'gi://St': { default: { Widget: Actor, ScrollView: Actor, BoxLayout: Actor, PolicyType: {} } },
+            'gi://GObject': { default: { registerClass: (_meta, cls) => cls } },
+            'gi://Graphene': { default: { Point: class {} } },
+            'gi://Shell': { default: { AppSystem: { get_default: () => ({ get_installed: () => [] }) } } },
+            'gi://Gio': { default: {} },
+            'gi://GLib': { default: {} },
+        },
+    });
+
+    fakeDock.animate = dockModule.Dock.prototype.animate.bind(fakeDock);
+
+    // Call animate() with _fast_forward = 20
+    fakeDock.animate(16);
+
+    // 1 base animate call + 20 fast-forward calls = 21 total animator.animate calls
+    assert.equal(animatorCalls, 21, 'Must execute 1 base + 20 fast-forward simulation steps');
+    assert.equal(fakeDock._fast_forward, 0, '_fast_forward must be exhausted to 0');
+    assert.equal(maxCallDepth, 1, 'Max stack depth must be 1 (strictly iterative, zero recursion)');
+    assert.equal(fakeDock._inAnimate, false, '_inAnimate re-entrancy lock must be released');
+});
+
+test('Dock recursion protection: re-entrant layout() calls return safely without recursive looping', async () => {
+    let layoutDepth = 0;
+    let maxLayoutDepth = 0;
+    let layoutExecutionCount = 0;
+
+    const fakeDock = {
+        dash: {
+            last_child: { text_direction: 1, layout_manager: {} },
+            _box: { text_direction: 1, layout_manager: {} },
+            set_size() {},
+            set_position() {},
+        },
+        extension: {
+            dock_location: 1,
+            icon_size: 48,
+            animation_spread: 0.5,
+            flare_width: 14,
+            animation_magnify: 0.5,
+        },
+        _findIcons: () => [],
+        _updateExtraIcons() {},
+        getMonitor: () => ({ x: 0, y: 0, width: 1920, height: 1080 }),
+        _syncOwnedStruts() {},
+        isVertical: () => true,
+        _preferredIconSize: () => 48,
+        _configureScrollView() {},
+        _snapToContainerEdge() {},
+        renderArea: {},
+        dwell: {},
+        struts: {},
+        _icons: [],
+    };
+
+    const dockModule = await loadModule('dash2dock-lite@custom/dock.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': { layoutManager: { primaryIndex: 0 } },
+            'resource:///org/gnome/shell/ui/appFavorites.js': { getAppFavorites: () => ({ _getIds: () => [], getFavorites: () => [] }) },
+            'resource:///org/gnome/shell/misc/config.js': { PACKAGE_VERSION: '51' },
+            'resource:///org/gnome/shell/ui/dash.js': { Dash: Actor, DashIcon: Actor, DashItemContainer: Actor },
+            './dockItems.js': { DockIcon: Actor, DockItemContainer: Actor, DockBackground: Actor },
+            './dockItemMenu.js': { DockItemList: class {} },
+            './effects/tint_effect.js': { TintEffect: class {} },
+            './effects/monochrome_effect.js': { MonochromeEffect: class {} },
+            './appearance.js': {},
+            './style.js': {},
+            './animator.js': { Animator: class {} },
+            './autohide.js': { AutoHide: class {} },
+            './dockOverflow.js': { computeDockViewport: () => ({ height: 200, contentTop: 14, bodyHeight: 180, overflow: false }) },
+            './utils.js': { get_distance_sqr: () => 0, get_distance: () => 0, isInRect: () => false, isOverlapRect: () => false, tempPath: () => '' },
+            'gi://Clutter': { default: { ActorAlign: { CENTER: 0 }, Orientation: { VERTICAL: 1, HORIZONTAL: 0 } } },
+            'gi://St': { default: { Widget: Actor, ScrollView: Actor, BoxLayout: Actor, PolicyType: {} } },
+            'gi://GObject': { default: { registerClass: (_meta, cls) => cls } },
+            'gi://Graphene': { default: { Point: class {} } },
+            'gi://Shell': { default: { AppSystem: { get_default: () => ({ get_installed: () => [] }) } } },
+            'gi://Gio': { default: {} },
+            'gi://GLib': { default: {} },
+        },
+    });
+
+    fakeDock.layout = dockModule.Dock.prototype.layout.bind(fakeDock);
+
+    // Simulate an allocation or notification listener that attempts re-entrant layout()
+    fakeDock._updateExtraIcons = () => {
+        layoutDepth++;
+        maxLayoutDepth = Math.max(maxLayoutDepth, layoutDepth);
+        layoutExecutionCount++;
+        // Attempt recursive layout call inside layout()
+        const result = fakeDock.layout();
+        assert.equal(result, true, 'Re-entrant layout() must return true early without repeating execution');
+        layoutDepth--;
+    };
+
+    fakeDock.layout();
+
+    assert.equal(layoutExecutionCount, 1, 'Only one actual layout pass executed');
+    assert.equal(maxLayoutDepth, 1, 'Maximum layout depth strictly limited to 1');
+    assert.equal(fakeDock._inLayout, false, '_inLayout re-entrancy lock released');
 });
 

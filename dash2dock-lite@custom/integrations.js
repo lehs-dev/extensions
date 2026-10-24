@@ -64,7 +64,7 @@ export const Integrations = class {
       : null;
     const docks = (this.extension?.docks || [])
       .map((dock) => ({ dock, monitor: dock.getMonitor?.() }))
-      .filter(({ monitor }) => monitor &&
+      .filter(({ dock, monitor }) => !dock._layoutSuppressed && monitor &&
         [monitor.x, monitor.y, monitor.width, monitor.height].every(Number.isFinite) &&
         monitor.width > 0 && monitor.height > 0);
     const priority = ({ monitor }) =>
@@ -126,6 +126,13 @@ export const Integrations = class {
     let [x, y] = rawPosition;
     const right = monitor.x + monitor.width;
     const bottom = monitor.y + monitor.height;
+    // Scrolled applications retain an app-specific target at the nearest visible
+    // viewport edge instead of minimizing toward hidden off-capsule geometry.
+    if (dock._modularViewport) {
+      const top = dock.y + dock._modularViewport.contentTop;
+      const bottom = top + dock._modularViewport.bodyHeight;
+      y = Math.max(top, Math.min(bottom - Math.min(height, bottom - top), y));
+    }
     // Autohide moves the real icon beyond its dock edge. Keep its app-specific
     // coordinate along that edge; unrelated off-screen geometry is not a target.
     switch (dock._position) {
@@ -211,7 +218,12 @@ export const Integrations = class {
       return;
     }
 
-    bms.visible = dock.extension.blur_background;
+    // BMS's dock overlay has a rectangular clip. Left Modular renders all
+    // three organic surfaces with the shared Cairo contour; showing this
+    // rectangle would fill the transparent flares and break that silhouette.
+    // Keep the saved blur choice for Dual Edge and leave native popup blur alone.
+    bms.visible = dock.extension.blur_background &&
+      dock.extension.desktopLayoutManager?.mode !== 1;
     if (!bms.visible) {
       return;
     }

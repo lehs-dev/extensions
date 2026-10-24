@@ -112,7 +112,7 @@ export let Animator = class {
     let simulation = false;
 
     if (!dock.layout()) {
-      console.log('unable to layout()');
+      if (!dock._layoutSuppressed) console.log('unable to layout()');
       return;
     }
 
@@ -951,7 +951,7 @@ export let Animator = class {
       dock._updateTransparenies();
     }
 
-    dock.struts.visible = !dock._hidden;
+    dock.struts.visible = !dock._hidden && !m.inFullscreen && !dock._layoutSuppressed;
     dock.dash.opacity = 255;
 
     //---------------------

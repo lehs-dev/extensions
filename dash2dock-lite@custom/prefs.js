@@ -168,11 +168,15 @@ export default class Preferences extends ExtensionPreferences {
     let UIFolderPath = `${this.path}/ui`;
     builder.add_from_file(`${UIFolderPath}/general.ui`);
     builder.add_from_file(`${UIFolderPath}/appearance.ui`);
+    builder.add_from_file(`${UIFolderPath}/systemDock.ui`);
     builder.add_from_file(`${UIFolderPath}/tweaks.ui`);
     builder.add_from_file(`${UIFolderPath}/others.ui`);
     builder.add_from_file(`${UIFolderPath}/menu.ui`);
     window.add(builder.get_object('general'));
     window.add(builder.get_object('appearance'));
+    window.add(builder.get_object('systemDock'));
+    window.add(builder.get_object('systemControls'));
+    window.add(builder.get_object('desktopFrame'));
     window.add(builder.get_object('others'));
     window.add(builder.get_object('tweaks'));
     window.set_search_enabled(true);
@@ -219,7 +223,7 @@ export default class Preferences extends ExtensionPreferences {
     };
 
     let updateAttachedRows = () => {
-      let isAttached = settings.get_int('background-style') === 1;
+      let isAttached = settings.get_int('desktop-layout') === 1 || settings.get_int('background-style') === 1;
       let flareRow = builder.get_object('flare-width-row');
       let footRow = builder.get_object('foot-depth-row');
       let radiusRow = builder.get_object('attached-corner-radius-row');
@@ -228,20 +232,47 @@ export default class Preferences extends ExtensionPreferences {
       if (radiusRow) radiusRow.visible = isAttached;
     };
 
-    settings.connect('changed::background-style', () => {
+    const preferenceSignals = [];
+    const watchSetting = (name, callback) =>
+      preferenceSignals.push(settings.connect(`changed::${name}`, callback));
+
+    watchSetting('background-style', () => {
       updateAttachedRows();
     });
     updateAttachedRows();
 
-    settings.connect('changed::experimental-features', () => {
-      toggle_experimental();
-    });
+    const updateLayoutRows = () => {
+      const modular = settings.get_int('desktop-layout') === 1;
+      updateAttachedRows();
+      for (const id of ['group-left-modular', 'group-quick-settings', 'group-clock-pod', 'group-window-layout'])
+        builder.get_object(id).visible = modular;
+      for (const id of ['group-dual-edge', 'group-dual-edge-indicators', 'group-dual-edge-dimensions'])
+        builder.get_object(id).visible = !modular;
+      builder.get_object('group-quick-settings').sensitive = settings.get_boolean('modular-show-quicksettings');
+      builder.get_object('group-clock-pod').sensitive = settings.get_boolean('modular-show-clock');
+      for (const id of ['group-dual-edge-indicators', 'group-dual-edge-dimensions'])
+        builder.get_object(id).sensitive = settings.get_boolean('enable-system-dock');
+      builder.get_object('system-dock-behavior-row').sensitive = settings.get_boolean('enable-system-dock');
+      // These Application Dock controls are overridden by Left Modular geometry.
+      for (const key of ['dock-location', 'panel-mode', 'edge-distance', 'background-style']) {
+        const control = builder.get_object(key);
+        const row = control?.get_ancestor(Adw.ActionRow);
+        if (row) row.visible = !modular;
+      }
+    };
+    for (const name of ['desktop-layout', 'modular-show-quicksettings', 'modular-show-clock', 'enable-system-dock'])
+      watchSetting(name, updateLayoutRows);
+    updateLayoutRows();
+
+    watchSetting('experimental-features', toggle_experimental);
 
     toggle_experimental();
 
     this._monitorsConfig = new MonitorsConfig();
     this._monitorsConfig.connect('updated', () => this.updateMonitors());
     window.connect('close-request', () => {
+      for (const id of preferenceSignals) settings.disconnect(id);
+      settingsKeys.disconnectBuilder();
       settingsKeys.disconnectSettings();
       this._monitorsConfig.destroy();
       return false;

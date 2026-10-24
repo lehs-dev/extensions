@@ -327,3 +327,47 @@ test('migration preserves explicit mode and scope, and seeds only untouched cust
     assert.equal(clean.get_boolean('use-individual-screen-gaps'), false);
     assert.equal(clean.get_boolean('screen-gaps-panel-monitor-only'), true);
 });
+
+test('Desktop 3 live gap contract shares tile, preview, resize and gapped-maximize without settings writes', async () => {
+    const env = await setup({'maximize-with-gap': false});
+    const {WindowGapCoordinator} = await loadModule('dash2dock-lite@custom/windowGaps.js', {
+        mocks: {'resource:///org/gnome/shell/ui/main.js': env.Main},
+    });
+    const extension = {enable_window_outer_gap: true, desktopLayoutManager: {mode: 1}, window_outer_gap_size: 8,
+        enable_screen_frame: true, screen_frame_thickness: 6, screen_frame_all_monitors: false};
+    const coordinator = new WindowGapCoordinator({extension});
+    coordinator.enable();
+    env.Main.extensionManager = {lookup: uuid => uuid === 'dash2dock-lite@custom'
+        ? {stateObj: {windowGapCoordinator: coordinator}} : null};
+    const writes = [...env.settings.writes];
+    const {Util, Rect} = env.utility;
+    assert.deepEqual({...Util.getScreenGaps(0)}, {...uniform(14), top: 0},
+        '32px panel strut already satisfies the desired 14px inset');
+    assert.deepEqual({...Util.getScreenGaps(1)}, uniform(10), 'unframed monitor keeps TA saved preferences');
+    assert.equal(Util.useGappedMaximize(0), true);
+    assert.equal(Util.useGappedMaximize(1), false);
+    const area = new Rect(env.workAreas[0]);
+    const tile = new Rect(area.x, area.y, area.width / 2, area.height / 2);
+    const window = env.createWindow();
+    const preview = await env.createPreview();
+    preview.open(window, tile, 0);
+    preview.complete();
+    await env.twm.tile(window, tile, {openTilingPopup: false});
+    assert.deepEqual(geometry(preview), geometry(window.get_frame_rect()));
+    assert.equal(window.get_frame_rect().x, 14);
+    const handler = await env.createResizeHandler(window);
+    const frame = geometry(window.get_frame_rect());
+    frame.x += 100;
+    frame.width -= 100;
+    window.move_resize_frame(true, frame.x, frame.y, frame.width, frame.height);
+    handler._onResizeFinished(window, env.Meta.GrabOp.RESIZING_W);
+    assert.deepEqual(geometry(window.tiledRect.addGaps(area, 0)), frame);
+    await env.twm.tile(window, area, {openTilingPopup: false});
+    assert.equal(window.get_frame_rect().x, 14, 'TA maximize uses the same live provider');
+    assert.equal(window.maximizedHorizontally, undefined, 'TA gap-maximize avoids native full maximization');
+    assert.deepEqual(env.settings.writes, writes, 'other extensions saved settings stay unchanged');
+    coordinator.destroy();
+    assert.deepEqual({...Util.getScreenGaps(0)}, {...uniform(10), top: 0});
+    assert.equal(Util.useGappedMaximize(0), false);
+    env.destroy();
+});

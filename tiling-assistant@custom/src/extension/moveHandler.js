@@ -964,7 +964,7 @@ class TilePreview extends WindowManager.TilePreview {
 
         const workArea = new Rect(window.get_work_area_for_monitor(monitorIndex));
         const tile = new Rect(tileRect);
-        const frame = tile.equal(workArea) && !Settings.getBoolean('maximize-with-gap')
+        const frame = tile.equal(workArea) && !Util.useGappedMaximize(monitorIndex)
             ? tile
             : tile.addGaps(workArea, monitorIndex);
 

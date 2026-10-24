@@ -113,8 +113,28 @@ export class Util {
         return gap % 2 === 0 ? gap : gap + 1;
     }
 
+    /** Desktop 3 supplies an optional in-memory gap contract. Never import the
+     * other extension's modules or mutate either extension's saved preferences.
+     */
+    static _getDesktopGaps(monitor, workArea = null) {
+        const provider = Main.extensionManager?.lookup('dash2dock-lite@custom')
+            ?.stateObj?.windowGapCoordinator;
+        if (!provider)
+            return null;
+        const area = workArea ?? global.workspace_manager.get_active_workspace()
+            .get_work_area_for_monitor(monitor);
+        return provider.getScreenGaps(monitor, area);
+    }
+
+    static useGappedMaximize(monitor) {
+        return this._getDesktopGaps(monitor) !== null || Settings.getBoolean('maximize-with-gap');
+    }
+
     /** Return the effective outer gaps for this monitor in stage coordinates. */
-    static getScreenGaps(monitor) {
+    static getScreenGaps(monitor, workArea = null) {
+        const desktopGaps = this._getDesktopGaps(monitor, workArea);
+        if (desktopGaps !== null)
+            return desktopGaps;
         const panelEdge = this._getPanelEdge(monitor);
         if (Settings.getBoolean('use-individual-screen-gaps') &&
                 (!Settings.getBoolean('screen-gaps-panel-monitor-only') || panelEdge)) {
@@ -488,7 +508,7 @@ export class Rect {
      * @returns {Rect} the rectangle after the gaps were taken into account
      */
     addGaps(workArea, monitor) {
-        const {top, left, right, bottom} = Util.getScreenGaps(monitor);
+        const {top, left, right, bottom} = Util.getScreenGaps(monitor, workArea);
         const windowGap = Util.getScaledGap('window-gap', monitor);
         const r = this.copy();
 

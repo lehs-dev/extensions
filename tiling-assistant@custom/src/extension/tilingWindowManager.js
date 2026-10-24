@@ -196,7 +196,7 @@ export class TilingWindowManager {
         if (!window.untiledRect)
             window.untiledRect = oldRect;
 
-        if (maximize && !Settings.getBoolean('maximize-with-gap')) {
+        if (maximize && !Util.useGappedMaximize(monitor)) {
             window.tiledRect = null;
             // It's possible for a window to maximize() to the wrong monitor.
             // This is very easy to reproduce when dragging a window on the

@@ -506,5 +506,242 @@
         <summary>Transparent background</summary>
         <description>Transparent background on overview.</description>
     </key>
+    <key type="b" name="enable-system-dock">
+        <default>false</default>
+        <summary>Enable System Dock</summary>
+        <description>Enable vertical system utility dock on the right edge.</description>
+    </key>
+    <key type="b" name="system-dock-hide-topbar">
+        <default>false</default>
+        <summary>Hide GNOME Top Bar</summary>
+        <description>Hide the visual GNOME panel only while replacement system and calendar controls are usable. Native panel objects remain available.</description>
+    </key>
+    <key type="b" name="system-dock-show-clock">
+        <default>true</default>
+        <summary>Show Clock</summary>
+        <description>Show stacked upright clock on System Dock.</description>
+    </key>
+    <key type="b" name="system-dock-show-network">
+        <default>true</default>
+        <summary>Show Network</summary>
+        <description>Show network indicator on System Dock.</description>
+    </key>
+    <key type="b" name="system-dock-show-bluetooth">
+        <default>true</default>
+        <summary>Show Bluetooth</summary>
+        <description>Show bluetooth indicator on System Dock.</description>
+    </key>
+    <key type="b" name="system-dock-show-volume">
+        <default>true</default>
+        <summary>Show Volume</summary>
+        <description>Show volume and audio indicator on System Dock.</description>
+    </key>
+    <key type="b" name="system-dock-show-battery">
+        <default>true</default>
+        <summary>Show Battery</summary>
+        <description>Show battery indicator on System Dock when available.</description>
+    </key>
+    <key type="b" name="system-dock-show-notifications">
+        <default>true</default>
+        <summary>Show Notifications</summary>
+        <description>Show notification indicator on System Dock.</description>
+    </key>
+    <key type="b" name="system-dock-show-power">
+        <default>true</default>
+        <summary>Show Power</summary>
+        <description>Show power and session indicator on System Dock.</description>
+    </key>
+    <key type="i" name="system-dock-behavior">
+        <default>0</default>
+        <summary>System Dock Behavior</summary>
+        <description>System Dock window avoidance behavior: 0 for Overlay, 1 for Intellihide.</description>
+    </key>
+    <key type="i" name="system-dock-icon-size">
+        <default>18</default>
+        <summary>System Dock Icon Size</summary>
+        <description>System Dock indicator icon size in logical pixels.</description>
+    </key>
+    <key type="i" name="system-dock-icon-spacing">
+        <default>6</default>
+        <summary>System Dock Icon Spacing</summary>
+        <description>System Dock indicator spacing in logical pixels.</description>
+    </key>
+    <key type="i" name="system-dock-width">
+        <default>48</default>
+        <summary>System Dock Width</summary>
+        <description>System Dock body width in logical pixels.</description>
+    </key>
+    <key type="d" name="system-dock-flare-width">
+        <default>14.0</default>
+        <summary>System Dock Flare Width</summary>
+        <description>System Dock attached edge flare width in logical pixels.</description>
+    </key>
+    <key type="d" name="system-dock-foot-depth">
+        <default>4.0</default>
+        <summary>System Dock Foot Depth</summary>
+        <description>System Dock attached edge foot depth in logical pixels.</description>
+    </key>
+    <key type="d" name="system-dock-corner-radius">
+        <default>10.0</default>
+        <summary>System Dock Corner Radius</summary>
+        <description>System Dock attached edge corner radius in logical pixels.</description>
+    </key>
+    <key type="b" name="enable-screen-frame">
+        <default>false</default>
+        <summary>Enable Desktop Screen Frame</summary>
+        <description>Draw an organic dark frame around monitor screen edges.</description>
+    </key>
+    <key type="i" name="screen-frame-thickness">
+        <default>6</default>
+        <summary>Screen Frame Thickness</summary>
+        <description>Thickness of desktop screen frame in logical pixels.</description>
+    </key>
+    <key type="(dddd)" name="screen-frame-color">
+        <default>(0.025, 0.025, 0.03, 1.0)</default>
+        <summary>Screen Frame Color</summary>
+        <description>Color of desktop screen frame in RGBA format.</description>
+    </key>
+    <key type="d" name="screen-frame-opacity">
+        <default>0.95</default>
+        <summary>Screen Frame Opacity</summary>
+        <description>Opacity of desktop screen frame.</description>
+    </key>
+    <key type="b" name="screen-frame-all-monitors">
+        <default>true</default>
+        <summary>Screen Frame on All Monitors</summary>
+        <description>Display screen frame around all connected monitors or primary monitor only.</description>
+    </key>
+    <key type="d" name="screen-frame-corner-radius">
+        <default>12.0</default>
+        <summary>Screen Frame Corner Radius</summary>
+        <description>Corner curvature radius of the desktop screen frame in logical pixels.</description>
+    </key>
+    <key type="i" name="desktop-layout">
+        <default>0</default>
+        <summary>Desktop Layout Mode</summary>
+        <description>Desktop layout arrangement: 0 for Dual Edge (dock left, system right), 1 for Left Modular (three capsules along left edge).</description>
+    </key>
+    <key type="b" name="modular-show-quicksettings">
+        <default>true</default>
+        <summary>Show Quick Settings Pod</summary>
+        <description>Show top-left quick settings capsule in Left Modular mode.</description>
+    </key>
+    <key type="b" name="modular-show-appdock">
+        <default>true</default>
+        <summary>Show Application Dock</summary>
+        <description>Show center-left application dock capsule in Left Modular mode.</description>
+    </key>
+    <key type="b" name="modular-show-clock">
+        <default>true</default>
+        <summary>Show Clock Pod</summary>
+        <description>Show bottom-left clock capsule in Left Modular mode.</description>
+    </key>
+    <key type="i" name="modular-upper-pod-offset">
+        <default>12</default>
+        <summary>Upper Pod Offset</summary>
+        <description>Offset from the frame inner top boundary to Quick Settings Pod in logical pixels.</description>
+    </key>
+    <key type="b" name="modular-group-elevation">
+        <default>true</default>
+        <summary>Lift system pods together on hover</summary>
+        <description>Raise the whole Quick Settings or Clock capsule outward, keeping its attachment anchored. Application Dock magnification is independent.</description>
+    </key>
+    <key type="i" name="modular-elevation-distance">
+        <range min="0" max="16"/>
+        <default>8</default>
+        <summary>System pod elevation distance</summary>
+        <description>Outward movement in logical pixels.</description>
+    </key>
+    <key type="i" name="modular-animation-duration">
+        <range min="0" max="600"/>
+        <default>210</default>
+        <summary>System pod animation duration</summary>
+        <description>Hover-in time in milliseconds. Hover-out adds 30 milliseconds. Reduced motion applies immediately.</description>
+    </key>
+    <key type="i" name="modular-lower-pod-offset">
+        <default>12</default>
+        <summary>Lower Pod Offset</summary>
+        <description>Offset from the frame inner bottom boundary to Clock Pod in logical pixels.</description>
+    </key>
+    <key type="i" name="modular-min-spacing">
+        <default>16</default>
+        <summary>Minimum Module Spacing</summary>
+        <description>Minimum gap between modular capsules along the left edge in logical pixels.</description>
+    </key>
+    <key type="i" name="modular-quicksettings-width">
+        <range min="32" max="72"/>
+        <default>44</default>
+        <summary>Quick Settings Pod Width</summary>
+        <description>Body width of the independent Quick Settings Pod in logical pixels.</description>
+    </key>
+    <key type="i" name="modular-indicator-icon-size">
+        <range min="14" max="32"/>
+        <default>18</default>
+        <summary>Quick Settings Indicator Size</summary>
+        <description>Symbolic indicator icon size in logical pixels.</description>
+    </key>
+    <key type="i" name="modular-indicator-spacing">
+        <range min="0" max="16"/>
+        <default>6</default>
+        <summary>Quick Settings Indicator Spacing</summary>
+        <description>Vertical space between available indicators in logical pixels.</description>
+    </key>
+    <key type="b" name="modular-show-network">
+        <default>true</default>
+        <summary>Quick Settings Network</summary>
+        <description>Include the current network indicator in the Quick Settings Pod.</description>
+    </key>
+    <key type="b" name="modular-show-bluetooth">
+        <default>true</default>
+        <summary>Quick Settings Bluetooth</summary>
+        <description>Include Bluetooth when an adapter is available.</description>
+    </key>
+    <key type="b" name="modular-show-battery">
+        <default>true</default>
+        <summary>Quick Settings Battery</summary>
+        <description>Include battery status when battery hardware is present.</description>
+    </key>
+    <key type="b" name="modular-show-volume">
+        <default>true</default>
+        <summary>Quick Settings Volume</summary>
+        <description>Include current audio state and scroll adjustment.</description>
+    </key>
+    <key type="b" name="modular-show-input-source">
+        <default>true</default>
+        <summary>Quick Settings Input Source</summary>
+        <description>Include the active GNOME or supported input-method source.</description>
+    </key>
+    <key type="i" name="modular-clock-width">
+        <range min="32" max="72"/>
+        <default>44</default>
+        <summary>Clock Pod Width</summary>
+        <description>Body width of the independent Clock Pod in logical pixels.</description>
+    </key>
+    <key type="b" name="modular-clock-show-weekday">
+        <default>true</default>
+        <summary>Clock Pod Weekday</summary>
+        <description>Include the locale weekday abbreviation in the Clock Pod.</description>
+    </key>
+    <key type="b" name="modular-clock-show-date">
+        <default>true</default>
+        <summary>Clock Pod Date</summary>
+        <description>Include the day of month and locale month abbreviation in the Clock Pod.</description>
+    </key>
+    <key type="i" name="modular-clock-format">
+        <range min="0" max="2"/>
+        <default>0</default>
+        <summary>Clock Pod Format</summary>
+        <description>Clock format: 0 follows the system, 1 uses 24 hours, 2 uses 12 hours.</description>
+    </key>
+    <key type="b" name="enable-window-outer-gap">
+        <default>true</default>
+        <summary>Enable Window Outer Gap</summary>
+        <description>Coordinate screen-edge gaps for Tiling Assistant tiles in Left Modular mode. Floating and native maximized windows keep their normal Mutter geometry.</description>
+    </key>
+    <key type="i" name="window-outer-gap-size">
+        <default>8</default>
+        <summary>Window Outer Gap Size</summary>
+        <description>Space between application windows and the inner edge of the screen frame in logical pixels.</description>
+    </key>
   </schema>
 </schemalist>

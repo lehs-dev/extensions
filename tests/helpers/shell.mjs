@@ -136,10 +136,49 @@ export class Actor {
     remove_style_class_name(name) { this.classes.delete(name); }
     has_style_class_name(name) { return this.classes.has(name); }
     set_style_class_name(name) { this.style_class = name; }
-    set_size(width, height) { Object.assign(this, {width, height}); }
+    get position() {
+        return {x: this.x, y: this.y};
+    }
+    set position(val) {
+        if (typeof val === 'string' || typeof val === 'number')
+            throw new TypeError(`Wrong type ${typeof val}; boxed type GraphenePoint expected`);
+        if (val && typeof val.x === 'number' && typeof val.y === 'number') {
+            this.x = val.x;
+            this.y = val.y;
+        }
+    }
+    get pivot_point() {
+        return {x: this._pivotX ?? 0.5, y: this._pivotY ?? 0.5};
+    }
+    set pivot_point(val) {
+        if (typeof val === 'string' || typeof val === 'number')
+            throw new TypeError(`Wrong type ${typeof val}; boxed type GraphenePoint expected`);
+        if (val && typeof val.x === 'number' && typeof val.y === 'number') {
+            this._pivotX = val.x;
+            this._pivotY = val.y;
+        }
+    }
+    set_pivot_point(x, y) {
+        if (Number.isNaN(x) || Number.isNaN(y))
+            throw new Error(`clutter_actor_set_pivot_point: assertion '!isnan (x) && !isnan (y)' failed`);
+        this._pivotX = x;
+        this._pivotY = y;
+    }
+    get_pivot_point() {
+        return [this._pivotX ?? 0.5, this._pivotY ?? 0.5];
+    }
+    set_size(width, height) {
+        if (Number.isNaN(width) || Number.isNaN(height))
+            throw new Error(`clutter_actor_set_size: assertion '!isnan (width) && !isnan (height)' failed`);
+        Object.assign(this, {width, height});
+    }
     set_icon_size(size) { this.icon_size = size; }
     set_scale(x, y) { this.scaleX = x; this.scaleY = y; }
-    set_position(x, y) { Object.assign(this, {x, y}); }
+    set_position(x, y) {
+        if (Number.isNaN(x) || Number.isNaN(y))
+            throw new Error(`clutter_actor_set_position: assertion '!isnan (x) && !isnan (y)' failed`);
+        Object.assign(this, {x, y});
+    }
     get_transformed_position() {
         const parent = this.parent?.get_transformed_position() ?? [0, 0];
         return [parent[0] + this.x + this.translationX,
@@ -186,4 +225,22 @@ export class Actor {
         this.parent?.remove_child(this);
         this.destroyed = true;
     }
+}
+
+// Model GJS's most-derived _init dispatch without requiring production classes
+// to carry JavaScript-constructor shims solely for Node mocks.
+export class GObjectActor extends Actor {
+    _init(params = {}) { Object.assign(this, params); }
+}
+export function registerGObjectClass(...args) {
+    const Original = args.at(-1);
+    return class extends Original {
+        constructor(...params) {
+            super(...params);
+            if (!this._gobjectInitialized) {
+                this._gobjectInitialized = true;
+                this._init?.(...params);
+            }
+        }
+    };
 }

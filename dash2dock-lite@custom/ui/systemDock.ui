@@ -1,0 +1,824 @@
+<?xml version="1.0" ?>
+<interface>
+  <object class="AdwPreferencesPage" id="systemDock">
+    <property name="name">systemDock</property>
+    <property name="title" translatable="yes">Desktop Layout</property>
+    <property name="icon-name">preferences-desktop-display-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup" id="group-desktop-layout">
+        <property name="title" translatable="yes">Desktop Layout</property>
+        <property name="description" translatable="yes">Choose a desktop arrangement. Existing Application Dock settings are preserved.</property>
+        <child>
+          <object class="AdwActionRow" id="desktop-layout-row">
+            <property name="title" translatable="yes">Layout Mode</property>
+            <property name="subtitle" translatable="yes">Dual Edge uses a right system rail. Left Modular attaches three independent modules to the left frame.</property>
+            <property name="activatable-widget">desktop-layout</property>
+            <child>
+              <object class="GtkDropDown" id="desktop-layout">
+                <property name="valign">center</property>
+                <property name="model">desktop-layout-model</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-hide-topbar-row">
+            <property name="title" translatable="yes">Hide GNOME Top Bar</property>
+            <property name="subtitle" translatable="yes">Applied only after replacement system and calendar controls are ready.</property>
+            <property name="activatable-widget">system-dock-hide-topbar</property>
+            <child>
+              <object class="GtkSwitch" id="system-dock-hide-topbar">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="group-dual-edge">
+        <property name="title" translatable="yes">Dual Edge</property>
+        <property name="description" translatable="yes">The existing Application Dock stays on the left; system controls use the right edge.</property>
+        <child>
+          <object class="AdwActionRow" id="enable-system-dock-row">
+            <property name="title" translatable="yes">Show System Dock</property>
+            <property name="subtitle" translatable="yes">Enable the right system rail.</property>
+            <property name="activatable-widget">enable-system-dock</property>
+            <child>
+              <object class="GtkSwitch" id="enable-system-dock">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-behavior-row">
+            <property name="title" translatable="yes">System Dock Behavior</property>
+            <property name="subtitle" translatable="yes">Keep the rail visible or dodge overlapping windows.</property>
+            <property name="activatable-widget">system-dock-behavior</property>
+            <child>
+              <object class="GtkDropDown" id="system-dock-behavior">
+                <property name="valign">center</property>
+                <property name="model">system-dock-behavior-model</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="group-left-modular">
+        <property name="title" translatable="yes">Left Modular</property>
+        <property name="description" translatable="yes">Three separate capsules share the primary monitor’s left frame.</property>
+        <child>
+          <object class="AdwActionRow" id="modular-show-quicksettings-row">
+            <property name="title" translatable="yes">Show Quick Settings Pod</property>
+            <property name="subtitle" translatable="yes">Network, Bluetooth, audio, battery and input source near the top.</property>
+            <property name="activatable-widget">modular-show-quicksettings</property>
+            <child>
+              <object class="GtkSwitch" id="modular-show-quicksettings">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-show-appdock-row">
+            <property name="title" translatable="yes">Show Application Dock</property>
+            <property name="subtitle" translatable="yes">Use the available region between the system pods.</property>
+            <property name="activatable-widget">modular-show-appdock</property>
+            <child>
+              <object class="GtkSwitch" id="modular-show-appdock">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-show-clock-row">
+            <property name="title" translatable="yes">Show Clock Pod</property>
+            <property name="subtitle" translatable="yes">Stacked upright time and date near the bottom.</property>
+            <property name="activatable-widget">modular-show-clock</property>
+            <child>
+              <object class="GtkSwitch" id="modular-show-clock">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-group-elevation-row">
+            <property name="title" translatable="yes">Lift System Pods Together</property>
+            <property name="subtitle" translatable="yes">Hover or focus lifts the entire system capsule. Application Dock magnification is independent.</property>
+            <property name="activatable-widget">modular-group-elevation</property>
+            <child>
+              <object class="GtkSwitch" id="modular-group-elevation">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-elevation-distance-row">
+            <property name="title" translatable="yes">Pod Elevation Distance</property>
+            <property name="subtitle" translatable="yes">Outward movement in logical pixels.</property>
+            <property name="activatable-widget">modular-elevation-distance</property>
+            <child>
+              <object class="GtkScale" id="modular-elevation-distance">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">modular-elevation-distance-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-animation-duration-row">
+            <property name="title" translatable="yes">Pod Animation Duration</property>
+            <property name="subtitle" translatable="yes">Hover-in time in milliseconds; return takes 30 ms longer. Respects reduced motion.</property>
+            <property name="activatable-widget">modular-animation-duration</property>
+            <child>
+              <object class="GtkScale" id="modular-animation-duration">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">modular-animation-duration-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-upper-pod-offset-row">
+            <property name="title" translatable="yes">Upper Pod Offset</property>
+            <property name="subtitle" translatable="yes">Logical pixels from the frame’s inner top boundary.</property>
+            <property name="activatable-widget">modular-upper-pod-offset</property>
+            <child>
+              <object class="GtkScale" id="modular-upper-pod-offset">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">modular-upper-pod-offset-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-lower-pod-offset-row">
+            <property name="title" translatable="yes">Lower Pod Offset</property>
+            <property name="subtitle" translatable="yes">Logical pixels from the frame’s inner bottom boundary.</property>
+            <property name="activatable-widget">modular-lower-pod-offset</property>
+            <child>
+              <object class="GtkScale" id="modular-lower-pod-offset">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">modular-lower-pod-offset-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-min-spacing-row">
+            <property name="title" translatable="yes">Minimum Module Spacing</property>
+            <property name="subtitle" translatable="yes">Clear space between module silhouettes in logical pixels.</property>
+            <property name="activatable-widget">modular-min-spacing</property>
+            <child>
+              <object class="GtkScale" id="modular-min-spacing">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">modular-min-spacing-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+  <object class="AdwPreferencesPage" id="systemControls">
+    <property name="name">systemControls</property>
+    <property name="title" translatable="yes">System Controls</property>
+    <property name="icon-name">preferences-system-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup" id="group-quick-settings">
+        <property name="title" translatable="yes">Quick Settings Pod</property>
+        <property name="description" translatable="yes">Only available hardware and input sources appear. Each indicator opens real system controls.</property>
+        <child>
+          <object class="AdwActionRow" id="modular-show-network-row">
+            <property name="title" translatable="yes">Network</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">modular-show-network</property>
+            <child>
+              <object class="GtkSwitch" id="modular-show-network">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-show-bluetooth-row">
+            <property name="title" translatable="yes">Bluetooth</property>
+            <property name="subtitle" translatable="yes">Hidden when no adapter is available.</property>
+            <property name="activatable-widget">modular-show-bluetooth</property>
+            <child>
+              <object class="GtkSwitch" id="modular-show-bluetooth">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-show-battery-row">
+            <property name="title" translatable="yes">Battery</property>
+            <property name="subtitle" translatable="yes">Hidden on systems without a battery.</property>
+            <property name="activatable-widget">modular-show-battery</property>
+            <child>
+              <object class="GtkSwitch" id="modular-show-battery">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-show-volume-row">
+            <property name="title" translatable="yes">Audio</property>
+            <property name="subtitle" translatable="yes">Scroll over the indicator to adjust volume.</property>
+            <property name="activatable-widget">modular-show-volume</property>
+            <child>
+              <object class="GtkSwitch" id="modular-show-volume">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-show-input-source-row">
+            <property name="title" translatable="yes">Input Source</property>
+            <property name="subtitle" translatable="yes">Use the current GNOME or supported input-method source.</property>
+            <property name="activatable-widget">modular-show-input-source</property>
+            <child>
+              <object class="GtkSwitch" id="modular-show-input-source">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-indicator-icon-size-row">
+            <property name="title" translatable="yes">Indicator Icon Size</property>
+            <property name="subtitle" translatable="yes">Logical pixels.</property>
+            <property name="activatable-widget">modular-indicator-icon-size</property>
+            <child>
+              <object class="GtkScale" id="modular-indicator-icon-size">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">modular-indicator-icon-size-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-indicator-spacing-row">
+            <property name="title" translatable="yes">Icon Spacing</property>
+            <property name="subtitle" translatable="yes">Logical pixels between indicators.</property>
+            <property name="activatable-widget">modular-indicator-spacing</property>
+            <child>
+              <object class="GtkScale" id="modular-indicator-spacing">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">modular-indicator-spacing-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-quicksettings-width-row">
+            <property name="title" translatable="yes">Pod Width</property>
+            <property name="subtitle" translatable="yes">Logical pixels across the capsule body.</property>
+            <property name="activatable-widget">modular-quicksettings-width</property>
+            <child>
+              <object class="GtkScale" id="modular-quicksettings-width">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">modular-quicksettings-width-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="group-clock-pod">
+        <property name="title" translatable="yes">Clock Pod</property>
+        <property name="description" translatable="yes">Uses locale weekday and month names. Click to open Calendar and Notifications.</property>
+        <child>
+          <object class="AdwActionRow" id="modular-clock-show-weekday-row">
+            <property name="title" translatable="yes">Show Weekday</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">modular-clock-show-weekday</property>
+            <child>
+              <object class="GtkSwitch" id="modular-clock-show-weekday">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-clock-show-date-row">
+            <property name="title" translatable="yes">Show Date</property>
+            <property name="subtitle" translatable="yes">Include day of month and month.</property>
+            <property name="activatable-widget">modular-clock-show-date</property>
+            <child>
+              <object class="GtkSwitch" id="modular-clock-show-date">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-clock-format-row">
+            <property name="title" translatable="yes">Clock Format</property>
+            <property name="subtitle" translatable="yes">Follow the system setting or override this pod.</property>
+            <property name="activatable-widget">modular-clock-format</property>
+            <child>
+              <object class="GtkDropDown" id="modular-clock-format">
+                <property name="valign">center</property>
+                <property name="model">modular-clock-format-model</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="modular-clock-width-row">
+            <property name="title" translatable="yes">Pod Width</property>
+            <property name="subtitle" translatable="yes">Logical pixels; text follows the desktop theme.</property>
+            <property name="activatable-widget">modular-clock-width</property>
+            <child>
+              <object class="GtkScale" id="modular-clock-width">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">modular-clock-width-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="group-dual-edge-indicators">
+        <property name="title" translatable="yes">System Dock Indicators</property>
+        <property name="description" translatable="yes">Choose content for the right system rail.</property>
+        <child>
+          <object class="AdwActionRow" id="system-dock-show-clock-row">
+            <property name="title" translatable="yes">Clock</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">system-dock-show-clock</property>
+            <child>
+              <object class="GtkSwitch" id="system-dock-show-clock">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-show-network-row">
+            <property name="title" translatable="yes">Network</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">system-dock-show-network</property>
+            <child>
+              <object class="GtkSwitch" id="system-dock-show-network">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-show-bluetooth-row">
+            <property name="title" translatable="yes">Bluetooth</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">system-dock-show-bluetooth</property>
+            <child>
+              <object class="GtkSwitch" id="system-dock-show-bluetooth">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-show-battery-row">
+            <property name="title" translatable="yes">Battery</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">system-dock-show-battery</property>
+            <child>
+              <object class="GtkSwitch" id="system-dock-show-battery">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-show-volume-row">
+            <property name="title" translatable="yes">Audio</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">system-dock-show-volume</property>
+            <child>
+              <object class="GtkSwitch" id="system-dock-show-volume">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-show-notifications-row">
+            <property name="title" translatable="yes">Notifications</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">system-dock-show-notifications</property>
+            <child>
+              <object class="GtkSwitch" id="system-dock-show-notifications">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-show-power-row">
+            <property name="title" translatable="yes">Power and Session</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">system-dock-show-power</property>
+            <child>
+              <object class="GtkSwitch" id="system-dock-show-power">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="group-dual-edge-dimensions">
+        <property name="title" translatable="yes">System Dock Appearance</property>
+        <property name="description" translatable="yes">Dimensions and attached edge geometry for Dual Edge mode.</property>
+        <child>
+          <object class="AdwActionRow" id="system-dock-icon-size-row">
+            <property name="title" translatable="yes">Icon Size</property>
+            <property name="subtitle" translatable="yes">Logical pixels.</property>
+            <property name="activatable-widget">system-dock-icon-size</property>
+            <child>
+              <object class="GtkScale" id="system-dock-icon-size">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">system-dock-icon-size-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-icon-spacing-row">
+            <property name="title" translatable="yes">Icon Spacing</property>
+            <property name="subtitle" translatable="yes">Logical pixels.</property>
+            <property name="activatable-widget">system-dock-icon-spacing</property>
+            <child>
+              <object class="GtkScale" id="system-dock-icon-spacing">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">system-dock-icon-spacing-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-width-row">
+            <property name="title" translatable="yes">Dock Width</property>
+            <property name="subtitle" translatable="yes">Logical pixels.</property>
+            <property name="activatable-widget">system-dock-width</property>
+            <child>
+              <object class="GtkScale" id="system-dock-width">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">system-dock-width-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-flare-width-row">
+            <property name="title" translatable="yes">Flare Width</property>
+            <property name="subtitle" translatable="yes">Logical pixels.</property>
+            <property name="activatable-widget">system-dock-flare-width</property>
+            <child>
+              <object class="GtkScale" id="system-dock-flare-width">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">system-dock-flare-width-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-foot-depth-row">
+            <property name="title" translatable="yes">Foot Depth</property>
+            <property name="subtitle" translatable="yes">Logical pixels.</property>
+            <property name="activatable-widget">system-dock-foot-depth</property>
+            <child>
+              <object class="GtkScale" id="system-dock-foot-depth">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">system-dock-foot-depth-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="system-dock-corner-radius-row">
+            <property name="title" translatable="yes">Corner Radius</property>
+            <property name="subtitle" translatable="yes">Logical pixels.</property>
+            <property name="activatable-widget">system-dock-corner-radius</property>
+            <child>
+              <object class="GtkScale" id="system-dock-corner-radius">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">system-dock-corner-radius-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+  <object class="AdwPreferencesPage" id="desktopFrame">
+    <property name="name">desktopFrame</property>
+    <property name="title" translatable="yes">Frame &amp; Windows</property>
+    <property name="icon-name">preferences-system-windows-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup" id="group-screen-frame">
+        <property name="title" translatable="yes">Screen Frame</property>
+        <property name="description" translatable="yes">A continuous non-interactive border. Fullscreen applications remain unobstructed.</property>
+        <child>
+          <object class="AdwActionRow" id="enable-screen-frame-row">
+            <property name="title" translatable="yes">Enable Screen Frame</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">enable-screen-frame</property>
+            <child>
+              <object class="GtkSwitch" id="enable-screen-frame">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="screen-frame-thickness-row">
+            <property name="title" translatable="yes">Thickness</property>
+            <property name="subtitle" translatable="yes">Logical pixels.</property>
+            <property name="activatable-widget">screen-frame-thickness</property>
+            <child>
+              <object class="GtkScale" id="screen-frame-thickness">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">screen-frame-thickness-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="screen-frame-corner-radius-row">
+            <property name="title" translatable="yes">Corner Radius</property>
+            <property name="subtitle" translatable="yes">Frame curvature in logical pixels; independent of application corners.</property>
+            <property name="activatable-widget">screen-frame-corner-radius</property>
+            <child>
+              <object class="GtkScale" id="screen-frame-corner-radius">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">screen-frame-corner-radius-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="screen-frame-color-row">
+            <property name="title" translatable="yes">Color</property>
+            <property name="subtitle" translatable="yes">Opacity is controlled separately.</property>
+            <property name="activatable-widget">screen-frame-color</property>
+            <child>
+              <object class="GtkColorButton" id="screen-frame-color">
+                <property name="valign">center</property>
+                <property name="use-alpha">false</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="screen-frame-opacity-row">
+            <property name="title" translatable="yes">Opacity</property>
+            <property name="subtitle" translatable="yes"/>
+            <property name="activatable-widget">screen-frame-opacity</property>
+            <child>
+              <object class="GtkScale" id="screen-frame-opacity">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">2</property>
+                <property name="adjustment">screen-frame-opacity-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="screen-frame-all-monitors-row">
+            <property name="title" translatable="yes">All Monitors</property>
+            <property name="subtitle" translatable="yes">Turn off to frame only the primary monitor.</property>
+            <property name="activatable-widget">screen-frame-all-monitors</property>
+            <child>
+              <object class="GtkSwitch" id="screen-frame-all-monitors">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="group-window-layout">
+        <property name="title" translatable="yes">Window Layout</property>
+        <property name="description" translatable="yes">Coordinates with Tiling Assistant without moving ordinary floating windows.</property>
+        <child>
+          <object class="AdwActionRow" id="enable-window-outer-gap-row">
+            <property name="title" translatable="yes">Enable Outer Gap</property>
+            <property name="subtitle" translatable="yes">Apply to Tiling Assistant tiles, including its maximize-with-gaps action.</property>
+            <property name="activatable-widget">enable-window-outer-gap</property>
+            <child>
+              <object class="GtkSwitch" id="enable-window-outer-gap">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="window-outer-gap-size-row">
+            <property name="title" translatable="yes">Outer Gap Size</property>
+            <property name="subtitle" translatable="yes">Logical pixels between a tile and the frame’s inner edge.</property>
+            <property name="activatable-widget">window-outer-gap-size</property>
+            <child>
+              <object class="GtkScale" id="window-outer-gap-size">
+                <property name="valign">center</property>
+                <property name="width-request">160</property>
+                <property name="draw-value">true</property>
+                <property name="digits">0</property>
+                <property name="adjustment">window-outer-gap-size-adjust</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="native-window-corners">
+            <property name="title" translatable="yes">Native Window Corners</property>
+            <property name="subtitle" translatable="yes">Applications and Mutter determine window corners. Native maximized windows retain Mutter geometry; fullscreen windows are unaffected.</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+  <object class="GtkAdjustment" id="modular-upper-pod-offset-adjust">
+    <property name="lower">0</property>
+    <property name="upper">64</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="modular-lower-pod-offset-adjust">
+    <property name="lower">0</property>
+    <property name="upper">64</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="modular-min-spacing-adjust">
+    <property name="lower">8</property>
+    <property name="upper">48</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="modular-indicator-icon-size-adjust">
+    <property name="lower">14</property>
+    <property name="upper">32</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="modular-indicator-spacing-adjust">
+    <property name="lower">0</property>
+    <property name="upper">16</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="modular-quicksettings-width-adjust">
+    <property name="lower">32</property>
+    <property name="upper">72</property>
+    <property name="step-increment">2</property>
+  </object>
+  <object class="GtkAdjustment" id="modular-clock-width-adjust">
+    <property name="lower">32</property>
+    <property name="upper">72</property>
+    <property name="step-increment">2</property>
+  </object>
+  <object class="GtkAdjustment" id="system-dock-icon-size-adjust">
+    <property name="lower">14</property>
+    <property name="upper">36</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="system-dock-icon-spacing-adjust">
+    <property name="lower">2</property>
+    <property name="upper">16</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="system-dock-width-adjust">
+    <property name="lower">32</property>
+    <property name="upper">64</property>
+    <property name="step-increment">2</property>
+  </object>
+  <object class="GtkAdjustment" id="system-dock-flare-width-adjust">
+    <property name="lower">4</property>
+    <property name="upper">30</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="system-dock-foot-depth-adjust">
+    <property name="lower">2</property>
+    <property name="upper">22</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="system-dock-corner-radius-adjust">
+    <property name="lower">4</property>
+    <property name="upper">24</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="screen-frame-thickness-adjust">
+    <property name="lower">1</property>
+    <property name="upper">24</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="screen-frame-corner-radius-adjust">
+    <property name="lower">0</property>
+    <property name="upper">32</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="screen-frame-opacity-adjust">
+    <property name="lower">0.1</property>
+    <property name="upper">1</property>
+    <property name="step-increment">0.05</property>
+  </object>
+  <object class="GtkAdjustment" id="window-outer-gap-size-adjust">
+    <property name="lower">0</property>
+    <property name="upper">32</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkStringList" id="desktop-layout-model">
+    <items>
+      <item translatable="yes">Dual Edge</item>
+      <item translatable="yes">Left Modular</item>
+    </items>
+  </object>
+  <object class="GtkStringList" id="system-dock-behavior-model">
+    <items>
+      <item translatable="yes">Overlay</item>
+      <item translatable="yes">Intellihide</item>
+    </items>
+  </object>
+  <object class="GtkStringList" id="modular-clock-format-model">
+    <items>
+      <item translatable="yes">System</item>
+      <item translatable="yes">24-hour</item>
+      <item translatable="yes">12-hour</item>
+    </items>
+  </object>
+  <object class="GtkAdjustment" id="modular-elevation-distance-adjust">
+    <property name="lower">0</property>
+    <property name="upper">16</property>
+    <property name="step-increment">1</property>
+  </object>
+  <object class="GtkAdjustment" id="modular-animation-duration-adjust">
+    <property name="lower">0</property>
+    <property name="upper">600</property>
+    <property name="step-increment">10</property>
+  </object>
+</interface>

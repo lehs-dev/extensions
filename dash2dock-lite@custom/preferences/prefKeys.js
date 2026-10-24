@@ -3,7 +3,7 @@ import GLib from 'gi://GLib';
 export let PrefKeys = class {
   constructor(patch) {
     this._keys = {};
-    
+
     if (patch) {
       Object.keys(patch).forEach((k) => {
         this[k] = patch[k];
@@ -22,7 +22,8 @@ export let PrefKeys = class {
         key.test,
         key.callback,
         key.options,
-        key.themed
+        key.themed,
+        key.value_type
       );
     });
   }
@@ -35,7 +36,8 @@ export let PrefKeys = class {
     test,
     callback,
     options,
-    themed
+    themed,
+    value_type
   ) {
     this._keys[name] = {
       name,
@@ -48,38 +50,89 @@ export let PrefKeys = class {
       options,
       object: null,
       themed: themed || false,
+      value_type,
     };
   }
 
-  setValue(name, value) {
-    this._keys[name].value = value;
+  _numericType(name, key) {
+    // The installed schema is authoritative. Metadata also supports callers
+    // preparing values before a settings object has been connected.
+    const settings = this._settings;
+    if (settings?.settings_schema?.has_key(name)) {
+      return settings.settings_schema.get_key(name).get_value_type().dup_string();
+    }
+    if (settings?.get_value) {
+      return settings.get_value(name).get_type_string();
+    }
+    if (key.value_type === 'int') return 'i';
+    if (key.value_type === 'double') return 'd';
+    return key.value_type || 'd';
+  }
 
-    let settings = this._settings;
-    let keys = this._keys;
+  _isIntegerKey(name, key) {
+    return ['i', 'u', 'n', 'q'].includes(this._numericType(name, key));
+  }
+
+  _readScale(name, key) {
+    const type = this._numericType(name, key);
+    if (type === 'i') return this._settings.get_int(name);
+    if (type === 'u') return this._settings.get_uint(name);
+    if (type === 'n' || type === 'q') return this._settings.get_value(name).deepUnpack();
+    return this._settings.get_double(name);
+  }
+
+  setValue(name, value) {
+    const key = this._keys[name];
+    const settings = this._settings;
+    if (key.widget_type === 'scale') {
+      if (!Number.isFinite(value))
+        throw new TypeError(`${name}: expected a finite number`);
+      if (this._isIntegerKey(name, key)) value = Math.round(value);
+    }
+    key.value = value;
     if (settings) {
-      let key = keys[name];
       switch (key.widget_type) {
-        case 'switch': {
+        case 'switch':
           settings.set_boolean(name, value);
           break;
-        }
-        case 'dropdown': {
+        case 'dropdown':
           settings.set_int(name, value);
           break;
-        }
         case 'scale': {
-          settings.set_double(name, value);
+          const type = this._numericType(name, key);
+          if (type === 'i') settings.set_int(name, value);
+          else if (type === 'u') settings.set_uint(name, value);
+          else if (type === 'n' || type === 'q')
+            settings.set_value(name, new GLib.Variant(type, value));
+          else settings.set_double(name, value);
           break;
         }
-        case 'color': {
+        case 'color':
           settings.set_value(name, new GLib.Variant('(dddd)', value));
           break;
-        }
       }
     }
+    key.callback?.(key.value);
+  }
 
-    if (this._keys[name].callback) {
-      this._keys[name].callback(this._keys[name].value);
+  _syncWidget(key) {
+    if (!key.object) return;
+    const wasUpdating = this._updatingWidgets;
+    this._updatingWidgets = true;
+    try {
+      switch (key.widget_type) {
+        case 'switch': key.object.set_active(key.value); break;
+        case 'dropdown': key.object.set_selected(key.value); break;
+        case 'scale': key.object.set_value(key.value); break;
+        case 'color':
+          key.object.set_rgba(this._toRGBA({
+            red: key.value[0], green: key.value[1],
+            blue: key.value[2], alpha: key.value[3],
+          }));
+          break;
+      }
+    } finally {
+      this._updatingWidgets = wasUpdating;
     }
   }
 
@@ -151,7 +204,7 @@ export let PrefKeys = class {
             break;
           }
           case 'scale': {
-            key.value = settings.get_double(name);
+            key.value = this._readScale(name, key);
             if (name === 'icon-size') {
               if (key.value === 0) {
                 key.value = 48;
@@ -210,7 +263,7 @@ export let PrefKeys = class {
                 break;
               }
               case 'scale': {
-                key.value = settings.get_double(name);
+                key.value = this._readScale(name, key);
                 if (name === 'icon-size') {
                   if (key.value === 0) {
                     key.value = 48;
@@ -232,6 +285,7 @@ export let PrefKeys = class {
                 break;
               }
             }
+            this._syncWidget(key);
             if (callback) callback(name, key.value);
           })
         );
@@ -249,7 +303,16 @@ export let PrefKeys = class {
     this._settings = null;
   }
 
+  disconnectBuilder() {
+    for (const { source, signal_id } of this._builderListeners || []) {
+      if (signal_id !== null) source.disconnect(signal_id);
+    }
+    this._builderListeners = [];
+    this._builder = null;
+  }
+
   connectBuilder(builder) {
+    this.disconnectBuilder();
     this._builderListeners = [];
 
     this._builder = builder;
@@ -270,12 +333,9 @@ export let PrefKeys = class {
         }
         case 'switch': {
           key.object.set_active(key.default_value);
-          signal_id = key.object.connect('state-set', (w) => {
-            let value = w.get_active();
-            self.setValue(name, value);
-            if (key.callback) {
-              key.callback(value);
-            }
+          signal_id = key.object.connect('notify::active', (w) => {
+            if (self._updatingWidgets) return;
+            self.setValue(name, w.get_active());
           });
           break;
         }
@@ -299,6 +359,7 @@ export let PrefKeys = class {
         }
         case 'color': {
           signal_id = key.object.connect('color-set', (w) => {
+            if (self._updatingWidgets) return;
             let rgba = w.get_rgba();
             let value = [rgba.red, rgba.green, rgba.blue, rgba.alpha];
             self.setValue(name, value);
@@ -315,7 +376,6 @@ export let PrefKeys = class {
         }
       }
 
-      // when do we clean this up?
       this._builderListeners.push({
         source: key.object,
         signal_id: signal_id,

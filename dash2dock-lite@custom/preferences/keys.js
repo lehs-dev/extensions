@@ -501,6 +501,222 @@ export const SettingsKeys = (patch) => {
       widget_type: 'switch',
       themed: true,
     },
+    'enable-system-dock': {
+      default_value: false,
+      widget_type: 'switch',
+    },
+    'system-dock-hide-topbar': {
+      default_value: false,
+      widget_type: 'switch',
+    },
+    'system-dock-show-clock': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'system-dock-show-network': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'system-dock-show-bluetooth': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'system-dock-show-volume': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'system-dock-show-battery': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'system-dock-show-notifications': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'system-dock-show-power': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'system-dock-behavior': {
+      default_value: 0,
+      widget_type: 'dropdown',
+      options: ['Overlay', 'Intellihide'],
+      test: { values: [0, 1] },
+      value_type: 'i',
+    },
+    'system-dock-icon-size': {
+      default_value: 18,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'system-dock-icon-spacing': {
+      default_value: 6,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'system-dock-width': {
+      default_value: 48,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'system-dock-flare-width': {
+      default_value: 14,
+      widget_type: 'scale',
+      value_type: 'd',
+      themed: true,
+    },
+    'system-dock-foot-depth': {
+      default_value: 4,
+      widget_type: 'scale',
+      value_type: 'd',
+      themed: true,
+    },
+    'system-dock-corner-radius': {
+      default_value: 10,
+      widget_type: 'scale',
+      value_type: 'd',
+      themed: true,
+    },
+    'enable-screen-frame': {
+      default_value: false,
+      widget_type: 'switch',
+    },
+    'screen-frame-thickness': {
+      default_value: 6,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'screen-frame-color': {
+      default_value: [0.025, 0.025, 0.03, 1.0],
+      widget_type: 'color',
+      themed: true,
+    },
+    'screen-frame-opacity': {
+      default_value: 0.95,
+      widget_type: 'scale',
+      value_type: 'd',
+    },
+    'screen-frame-all-monitors': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'screen-frame-corner-radius': {
+      default_value: 12.0,
+      widget_type: 'scale',
+      value_type: 'd',
+      themed: true,
+    },
+    'desktop-layout': {
+      default_value: 0,
+      widget_type: 'dropdown',
+      options: ['Dual Edge', 'Left Modular'],
+      test: { values: [0, 1] },
+      value_type: 'i',
+    },
+    'modular-show-quicksettings': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-show-appdock': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-show-clock': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-group-elevation': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-elevation-distance': {
+      default_value: 8,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'modular-animation-duration': {
+      default_value: 210,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'modular-upper-pod-offset': {
+      default_value: 12,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'modular-lower-pod-offset': {
+      default_value: 12,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'modular-min-spacing': {
+      default_value: 16,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'modular-quicksettings-width': {
+      default_value: 44,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'modular-indicator-icon-size': {
+      default_value: 18,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'modular-indicator-spacing': {
+      default_value: 6,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'modular-show-network': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-show-bluetooth': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-show-battery': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-show-volume': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-show-input-source': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-clock-width': {
+      default_value: 44,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
+    'modular-clock-show-weekday': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-clock-show-date': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'modular-clock-format': {
+      default_value: 0,
+      widget_type: 'dropdown',
+      value_type: 'i',
+      options: ['System', '24-hour', '12-hour'],
+    },
+    'enable-window-outer-gap': {
+      default_value: true,
+      widget_type: 'switch',
+    },
+    'window-outer-gap-size': {
+      default_value: 8,
+      widget_type: 'scale',
+      value_type: 'i',
+    },
   });
 
   return settingsKeys;

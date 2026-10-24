@@ -301,9 +301,9 @@ export default class TilingResizeHandler {
             return;
 
         const monitor = window.get_monitor();
-        const {top: screenTopGap, left: screenLeftGap} = Util.getScreenGaps(monitor);
-        const windowGap = Util.getScaledGap('window-gap', monitor);
         const workArea = window.get_work_area_for_monitor(monitor);
+        const {top: screenTopGap, left: screenLeftGap} = Util.getScreenGaps(monitor, workArea);
+        const windowGap = Util.getScaledGap('window-gap', monitor);
 
         // First calculate the new tiledRect for window:
         // The new x / y coord for the window's tiledRect can be calculated by

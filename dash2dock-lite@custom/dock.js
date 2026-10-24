@@ -11,6 +11,8 @@ import Clutter from 'gi://Clutter';
 import Graphene from 'gi://Graphene';
 import St from 'gi://St';
 
+import { computeDockViewport } from './dockOverflow.js';
+
 import { Dash } from 'resource:///org/gnome/shell/ui/dash.js';
 
 import { TintEffect } from './effects/tint_effect.js';
@@ -103,9 +105,10 @@ export let Dock = GObject.registerClass(
         track_hover: false,
       });
       this.renderArea.opacity = 0;
+      this.renderArea.connect('scroll-event', (actor, event) => this._onScrollEvent(actor, event));
       this.add_child(this.renderArea);
 
-      this.add_child(this.createDash());
+      this._attachDash(this.createDash());
       this._scrollCounter = 0;
 
       this.animator = new Animator();
@@ -139,6 +142,17 @@ export let Dock = GObject.registerClass(
         this.autohider._onLeaveEvent.bind(this.autohider),
         this
       );
+      this.connect('notify::visible', () => {
+        if (this.visible && this._layoutSuppressed) this.hide();
+      });
+      this.dwell.connect('notify::visible', () => {
+        if (this.dwell.visible && (this._layoutSuppressed ||
+            (this._monitor?.inFullscreen && !Main.overview?.visible))) this.dwell.hide();
+      });
+      this.struts.connect('notify::visible', () => {
+        if (this.struts.visible && (this._layoutSuppressed ||
+            (this._monitor?.inFullscreen && !Main.overview?.visible))) this.struts.hide();
+      });
     }
 
     destroyDash() {
@@ -152,9 +166,11 @@ export let Dock = GObject.registerClass(
           this._icons = null;
         }
 
-        this.remove_child(this.dash);
+        const dashParent = this.dash.get_parent();
+        dashParent?.remove_child(this.dash);
         this.dash.destroy();
         this.dash = null;
+        this._destroyScrollView();
         this._clock = null;
         this._calendar = null;
         this._trashIcon = null;
@@ -168,7 +184,7 @@ export let Dock = GObject.registerClass(
       this._hidden = false;
       this.opacity = 0;
       this.renderArea.opacity = 0;
-      this.add_child(this.createDash());
+      this._attachDash(this.createDash());
       this._icons = null;
       this._trashIcon = null;
       this._recentFilesIcon = null;
@@ -190,7 +206,7 @@ export let Dock = GObject.registerClass(
 
     dock() {
       if (!this.dash) {
-        this.add_child(this.createDash());
+        this._attachDash(this.createDash());
       }
       this.animator.enable();
       this.addToChrome();
@@ -354,6 +370,11 @@ export let Dock = GObject.registerClass(
     }
 
     getMonitor() {
+      const layout = this.extension.desktopLayoutManager;
+      if (layout?.mode === 1 && (!layout.applicationDock || layout.applicationDock === this)) {
+        this._monitor = Main.layoutManager.primaryMonitor;
+        return this._monitor;
+      }
       this._monitorIndex = this.extension._queryDisplay(this._monitorIndex);
       let m =
         Main.layoutManager.monitors[this._monitorIndex] ||
@@ -422,6 +443,62 @@ export let Dock = GObject.registerClass(
       return dash;
     }
 
+    _attachDash(dash) {
+      this.add_child(dash);
+    }
+
+    _destroyScrollView() {
+      if (!this._scrollView) return;
+      if (this._scrollAdjustmentSignal) {
+        this._scrollView.vadjustment.disconnect(this._scrollAdjustmentSignal);
+        this._scrollAdjustmentSignal = null;
+      }
+      if (this.dash?.get_parent() === this._scrollBox)
+        this._scrollBox.remove_child(this.dash);
+      this._scrollView.set_child(null);
+      this._scrollBox.destroy();
+      this._scrollBox = null;
+      this._scrollView.destroy();
+      this._scrollView = null;
+    }
+
+    _configureScrollView(modular) {
+      if (modular && !this._scrollView) {
+        // Native Dash is St.Widget, not St.Scrollable. St.BoxLayout inherits
+        // St.Viewport and supplies the adjustment contract ScrollView requires.
+        this._scrollView = new St.ScrollView({overlay_scrollbars: true,
+          hscrollbar_policy: St.PolicyType.NEVER,
+          vscrollbar_policy: St.PolicyType.EXTERNAL, reactive: false,
+          enable_mouse_scrolling: false, enable_touch_scrolling: false});
+        this._scrollBox = new St.BoxLayout({orientation: Clutter.Orientation.VERTICAL,
+          reactive: false});
+        this.remove_child(this.dash);
+        this._scrollBox.add_child(this.dash);
+        this._scrollView.set_child(this._scrollBox);
+        this._scrollAdjustmentSignal = this._scrollView.vadjustment.connect('notify::value', () => {
+          this._beginAnimation();
+          this._debounceEndAnimation();
+        });
+        this.add_child(this._scrollView);
+      } else if (!modular && this._scrollView) {
+        this._destroyScrollView();
+        this.add_child(this.dash);
+        this.dash.set_size(-1, -1);
+      }
+    }
+
+    _syncOwnedStruts(suppressed) {
+      if (!this._onChrome || this._strutSuppressed === suppressed) return;
+      // Visibility does not remove GNOME chrome struts. Update only our own
+      // tracked actor so disabled/secondary copies reserve no invisible rail.
+      Main.layoutManager.untrackChrome(this.struts);
+      Main.layoutManager.trackChrome(this.struts, {
+        affectsStruts: !this.extension.autohide_dash && !suppressed,
+        trackFullscreen: false,
+      });
+      this._strutSuppressed = suppressed;
+    }
+
     addToChrome() {
       if (this._onChrome) {
         return;
@@ -450,6 +527,8 @@ export let Dock = GObject.registerClass(
       });
 
       this._onChrome = true;
+      this._strutSuppressed = false;
+      this._syncOwnedStruts(!!this._layoutSuppressed);
     }
 
     removeFromChrome() {
@@ -802,7 +881,11 @@ export let Dock = GObject.registerClass(
         }
         c._icon.track_hover = true;
         c._icon.reactive = true;
-        c._icon.pivot_point = pv;
+        if (typeof c._icon.set_pivot_point === 'function') {
+          c._icon.set_pivot_point(0.5, 0.5);
+        } else {
+          c._icon.pivot_point = pv;
+        }
         if (c._button) {
           c._button.reactive = noAnimation;
           c._button.track_hover = noAnimation;
@@ -989,8 +1072,11 @@ export let Dock = GObject.registerClass(
     }
 
     layout() {
-      if (!this.dash || !this.dash.last_child) return;
-      if (this.extension.apps_icon_front) {
+      if (this._inLayout) return true;
+      this._inLayout = true;
+      try {
+        if (!this.dash || !this.dash.last_child) return false;
+        if (this.extension.apps_icon_front) {
         this.dash.last_child.text_direction = 2; // RTL
         this.dash._box.text_direction = 1; // LTR
       } else {
@@ -1013,6 +1099,9 @@ export let Dock = GObject.registerClass(
         }
       }
 
+      const leftModular = this.extension?.desktopLayoutManager?.mode === 1;
+      if (leftModular) this._position = DockPosition.LEFT;
+
       this._updateExtraIcons();
 
       let m = this.getMonitor();
@@ -1020,7 +1109,19 @@ export let Dock = GObject.registerClass(
         return false;
       }
 
-      let scaleFactor = m.geometry_scale;
+      const modularOwner = this.extension.desktopLayoutManager?.applicationDock;
+      this._layoutSuppressed = leftModular &&
+        (this.extension.modular_show_appdock === false || (modularOwner && modularOwner !== this));
+      this._syncOwnedStruts(!!this._layoutSuppressed);
+      if (this._layoutSuppressed) {
+        this.visible = this.dwell.visible = this.struts.visible = false;
+        return false;
+      }
+      const fullscreen = m.inFullscreen && !Main.overview?.visible;
+      this.dwell.visible = !fullscreen;
+      this.struts.visible = !fullscreen;
+
+      let scaleFactor = leftModular ? 1 : m.geometry_scale;
       let vertical = this.isVertical();
       this._scaleFactor = scaleFactor;
 
@@ -1089,9 +1190,15 @@ export let Dock = GObject.registerClass(
       let scaleDown = 1.0;
       let limit = vertical ? 0.96 : 0.98; // use dock_size_limit
       let maxWidth = (vertical ? m.height : m.width) * limit;
-      if (projectedWidth * scaleFactor > maxWidth * 0.98) {
+
+      const modularConstraints =
+        this.extension?.desktopLayoutManager?.getModularConstraints?.(m);
+      const modular = !!modularConstraints && vertical && this._position === DockPosition.LEFT;
+      if (!modular && projectedWidth * scaleFactor > maxWidth * 0.98) {
         scaleDown = (maxWidth - iconSize / 2) / (projectedWidth * scaleFactor);
       }
+
+      this._configureScrollView(modular);
 
       iconSize *= scaleDown;
       iconSizeSpaced *= scaleDown;
@@ -1110,12 +1217,27 @@ export let Dock = GObject.registerClass(
 
       if (
         this.extension.panel_mode ||
-        this.extension.background_style === 1
+        this.extension.background_style === 1 || leftModular
       ) {
         this._edge_distance = 0;
       }
 
       this._icons.forEach((icon) => {
+        const focusActor = icon._appwell || icon;
+        if (!icon._modularFocusConnected && focusActor.connectObject) {
+          icon._modularFocusConnected = true;
+          focusActor.connectObject('key-focus-in', () => {
+            if (!this._modularViewport?.overflow) return;
+            const adjustment = this._scrollView?.vadjustment;
+            if (!adjustment) return;
+            const [, y] = icon.get_transformed_position();
+            const [, top] = this._scrollView.get_transformed_position();
+            const shift = y < top ? y - top : Math.max(0, y + icon.height - top - this._modularViewport.bodyHeight);
+            adjustment.value = Math.max(adjustment.lower, Math.min(adjustment.upper - adjustment.page_size, adjustment.value + shift));
+            this._beginAnimation();
+            this._debounceEndAnimation();
+          }, this);
+        }
         icon.width = Math.floor(iconSizeSpaced * scaleFactor);
         icon.height = Math.floor(iconSizeSpaced * scaleFactor);
         if (icon.style != iconStyle) {
@@ -1156,7 +1278,50 @@ export let Dock = GObject.registerClass(
       this._snapToContainerEdge(m, this, true);
       this.x += m.x;
       this.y += m.y;
-      this._snapToContainerEdge(this, this.dash, true);
+      this._modularViewport = null;
+      if (modular) {
+        const contentHeight = Math.max(iconSizeSpaced, (this._icons?.length ?? 1) * iconSizeSpaced + iconMargins);
+        const viewport = computeDockViewport({
+          availableHeight: modularConstraints.availableHeight,
+          contentHeight,
+          iconSize,
+          flareWidth: this.extension.flare_width ?? 14,
+          magnify: this.extension.animation_magnify ?? 0,
+        });
+        this._modularViewport = viewport;
+        this.height = Math.round(viewport.height);
+        const centerY = Number.isFinite(modularConstraints.centerY)
+          ? modularConstraints.centerY
+          : (m.y + m.height / 2);
+        this.y = Math.round(centerY - this.height / 2);
+        const show = this.extension.modular_show_appdock !== false && modularConstraints.visible;
+        this.visible = show && !fullscreen;
+        this.dwell.visible = show && !fullscreen;
+        this.struts.visible = show && !fullscreen;
+        if (this._scrollView) {
+          this._scrollView.set_position(0, viewport.contentTop);
+          this._scrollView.set_size(iconSizeSpaced + 8, viewport.bodyHeight);
+          this._scrollView.vscrollbar_policy = St.PolicyType.EXTERNAL;
+          this._scrollView.reactive = false;
+        }
+        // Clip both native icon hit actors and their existing animated renderers
+        // to the same body; rounded flares never acquire transparent hitboxes.
+        const flare = Math.min(this.extension.flare_width ?? 14, this.height / 2);
+        this.renderArea.set_clip?.(0, flare, this.width, Math.max(0, this.height - 2 * flare));
+        this.dash.set_size(iconSizeSpaced + 8, contentHeight);
+        this.dash.set_position(0, 0);
+        this._scrollBox.set_width?.(iconSizeSpaced + 8);
+      } else {
+        this.visible = !fullscreen;
+        this.dwell.visible = !fullscreen;
+        this.renderArea.remove_clip?.();
+        if (this._scrollView) {
+          this._scrollView.set_position(0, 0);
+          this._scrollView.set_size(this.width, this.height);
+          this._scrollView.vscrollbar_policy = St.PolicyType.NEVER;
+        }
+        this._snapToContainerEdge(this, this.dash, true);
+      }
 
       this._iconSizeScaledDown = iconSize;
       this._scaledDown = scaleDown;
@@ -1183,7 +1348,10 @@ export let Dock = GObject.registerClass(
       }
 
       return true;
+    } finally {
+      this._inLayout = false;
     }
+  }
 
     _updateTransparenies() {
       let transparent =
@@ -1219,54 +1387,65 @@ export let Dock = GObject.registerClass(
     }
 
     animate(dt = 15) {
-      if (this._preview) {
-        let p = null;
+      if (this._inAnimate) return;
+      this._inAnimate = true;
+      try {
+        if (this._preview) {
+          let p = null;
 
-        if (this._icons && this._icons.length) {
-          let icon = this._icons[this._icons.length >> 1];
-          p = icon._icon.get_transformed_position();
-          let s = icon._icon.get_transformed_size();
-          p[0] += s[0] / 2;
-          p[1] += s[1] / 2;
+          if (this._icons && this._icons.length) {
+            let icon = this._icons[this._icons.length >> 1];
+            p = icon._icon.get_transformed_position();
+            let s = icon._icon.get_transformed_size();
+            p[0] += s[0] / 2;
+            p[1] += s[1] / 2;
+          }
+
+          if (!p) {
+            p = this.dash.get_transformed_position();
+            p[0] += this.dash.width / 2;
+            p[1] += this.dash.height / 2;
+          }
+
+          this.simulated_pointer = p;
+          this._preview--;
         }
 
-        if (!p) {
-          p = this.dash.get_transformed_position();
-          p[0] += this.dash.width / 2;
-          p[1] += this.dash.height / 2;
+        //! add layout here instead of at the
+        this.animator.animate(dt);
+
+        // Advance simulation frames iteratively when inserting icons without recursion
+        if (!this._pauseBounce || this._pauseBounce <= 0) {
+          const fastForwardFrames = Math.max(0, Math.min(20, this._fast_forward || 0));
+          this._fast_forward = 0;
+          for (let i = 0; i < fastForwardFrames; i++) {
+            this.animator.animate(dt);
+            this.dash.opacity = 0;
+          }
         }
+        this.simulated_pointer = null;
 
-        this.simulated_pointer = p;
-        this._preview--;
-      }
-
-      //! add layout here instead of at the
-      this.animator.animate(dt);
-
-      // hack to mitigate jerkiness when a new icon is inserted
-      if (!this._pauseBounce || this._pauseBounce <= 0) {
-        while (this._fast_forward && this._fast_forward-- > 0) {
-          this.animate(dt);
-          this.dash.opacity = 0;
+        if (this._pauseBounce && this._pauseBounce > 0) {
+          this._pauseBounce -= dt;
         }
-      }
-      this.simulated_pointer = null;
-
-      if (this._pauseBounce && this._pauseBounce > 0) {
-        this._pauseBounce -= dt;
+      } finally {
+        this._inAnimate = false;
       }
     }
 
     isWithinHoverArea(p) {
-      if (this._hidden || !p) {
+      if (this._hidden || this.visible === false || !p) {
         return false;
       }
 
       let [px, py] = p;
+      if (this._modularViewport && (py < this.y || py >= this.y + this.height)) return false;
 
       // 1. If an icon is actively magnified, allow interaction within its
       // magnified visible actor bounds so interaction remains continuous.
-      if (this._icons && this._icons.length > 0) {
+      const flare = this._modularViewport ? Math.min(this.extension.flare_width ?? 14, this.height / 2) : 0;
+      const rendererVisibleHere = !this._modularViewport || (py >= this.y + flare && py < this.y + this.height - flare);
+      if (rendererVisibleHere && this._icons && this._icons.length > 0) {
         for (const icon of this._icons) {
           if (!icon || !icon._icon) continue;
           if (icon._scale && icon._scale > 1.05) {
@@ -1302,7 +1481,7 @@ export let Dock = GObject.registerClass(
       }
 
       // Floating Mode (background_style !== 1): strict bounding box of the capsule
-      if (this.extension?.background_style !== 1) {
+      if (this.extension?.background_style !== 1 && this.extension?.desktopLayoutManager?.mode !== 1) {
         return px >= bgX && px < bgX + bgW && py >= bgY && py < bgY + bgH;
       }
 
@@ -1629,6 +1808,20 @@ export let Dock = GObject.registerClass(
     }
 
     _onScrollEvent(obj, evt) {
+      if (this._modularViewport?.overflow && this._scrollView) {
+        const adjustment = this._scrollView.vadjustment;
+        if (adjustment) {
+          const direction = evt.get_scroll_direction();
+          const delta = direction === Clutter.ScrollDirection.SMOOTH
+            ? evt.get_scroll_delta()[1] : direction === Clutter.ScrollDirection.UP ? -1
+            : direction === Clutter.ScrollDirection.DOWN ? 1 : 0;
+          adjustment.value = Math.max(adjustment.lower, Math.min(adjustment.upper - adjustment.page_size,
+            adjustment.value + delta * this._iconSizeScaledDown));
+          this._beginAnimation();
+          this._debounceEndAnimation();
+          return Clutter.EVENT_STOP;
+        }
+      }
       this._lastScrollEvent = evt;
       let pointer = global.get_pointer();
       let target = this._nearestIcon; // this._hoveredIcon;

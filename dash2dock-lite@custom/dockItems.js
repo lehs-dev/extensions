@@ -103,7 +103,11 @@ export const DockItemDotsOverlay = GObject.registerClass(
 
       renderer.width = dock._iconSizeScaledDown || icon._icon.width;
       renderer.height = dock._iconSizeScaledDown || icon._icon.height;
-      renderer.pivot_point = icon._icon.pivot_point;
+      if (typeof renderer.set_pivot_point === 'function') {
+        renderer.set_pivot_point(icon._icon.pivot_point?.x ?? 0.5, icon._icon.pivot_point?.y ?? 0.5);
+      } else {
+        renderer.pivot_point = icon._icon.pivot_point;
+      }
 
       let canvasScale = renderer.width / renderer._canvas.width;
 
@@ -349,13 +353,6 @@ export const DockItemContainer = GObject.registerClass(
 export const DockBackground = GObject.registerClass(
   {},
   class DockBackground extends St.Widget {
-    constructor(...args) {
-      super(...args);
-      if (!this._initialized && typeof this._init === 'function') {
-        this._init(...args);
-      }
-    }
-
     _init(params) {
       this._initialized = true;
       if (typeof super._init === 'function') {
@@ -365,13 +362,9 @@ export const DockBackground = GObject.registerClass(
         });
       }
 
-      try {
-        this._canvas = new AttachedDockCanvas();
-        this._canvas.visible = false;
-        this.add_child(this._canvas);
-      } catch (e) {
-        this._canvas = null;
-      }
+      this._canvas = new AttachedDockCanvas();
+      this._canvas.visible = false;
+      this.add_child(this._canvas);
     }
 
     update(params) {
@@ -386,9 +379,10 @@ export const DockBackground = GObject.registerClass(
         dock,
       } = params;
 
+      if (dock.extension?.desktopLayoutManager?.mode === 1) panel_mode = false;
       this._padding = 0;
 
-      if (!first || !last || first == last) {
+      if (!first || !last || (first == last && !dock._modularViewport)) {
         this.opacity = 0;
         return;
       }
@@ -455,7 +449,7 @@ export const DockBackground = GObject.registerClass(
 
         const isAttachedEdge =
           !panel_mode &&
-          dock.extension?.background_style === 1;
+          (dock.extension?.background_style === 1 || dock.extension?.desktopLayoutManager?.mode === 1);
 
         if (isAttachedEdge) {
           const flareWidth = dock.extension?.flare_width ?? 14;
@@ -487,6 +481,14 @@ export const DockBackground = GObject.registerClass(
             this.height += 2 * fw;
             const screenRight = dock.width + (dock.dash.translationX || 0);
             this.width = Math.max(1, screenRight - this.x);
+          }
+
+          if (dock._modularViewport) {
+            // A stable capsule encloses the scroll viewport and its flares.
+            this.y = dock.dash.translationY || 0;
+            this.height = dock.height;
+            const magnification = Math.min(2, 1 + Math.max(0, dock.extension.animation_magnify ?? 0) * 1.8);
+            this.width = Math.max(this.width, iconSize * magnification * scaleFactor + 2 * padding);
           }
 
           if (this._canvas) {
