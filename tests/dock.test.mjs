@@ -1709,3 +1709,411 @@ test('Icon sizing: Magic Lamp receives accurate icon geometry with small icons a
     }
 });
 
+// ============================================================================
+// Strict Hover Bounds & Interaction Area Regression Tests
+// ============================================================================
+
+test('Dock.isWithinHoverArea: Left dock strict boundary prevents activation inside Firefox window', async () => {
+    const dockModule = await loadModule('dash2dock-lite@custom/dock.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {layoutManager: {primaryIndex: 0}},
+            'resource:///org/gnome/shell/ui/appFavorites.js': {getAppFavorites: () => ({getFavorites: () => []})},
+            'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '51'},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://Graphene': {default: {Point: class {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {
+                default: {
+                    ActorAlign: {CENTER: 0},
+                    OffscreenRedirect: {ALWAYS: 1},
+                    Orientation: {VERTICAL: 1, HORIZONTAL: 0},
+                },
+            },
+            'gi://St': {default: {Widget: class extends Actor {}}},
+            './effects/tint_effect.js': {TintEffect: class {}},
+            './effects/monochrome_effect.js': {MonochromeEffect: class {}},
+            './dockItems.js': {DockIcon: Actor, DockItemContainer: Actor, DockBackground: Actor},
+            './dockItemMenu.js': {DockItemList: class {}},
+            './autohide.js': {AutoHide: class {}},
+            './animator.js': {Animator: class {}},
+            './utils.js': {get_distance_sqr: () => 0, get_distance: () => 0, isInRect: () => false, isOverlapRect: () => false, tempPath: () => ''},
+        },
+    });
+
+    const dock = new dockModule.Dock({
+        extension: {
+            icon_size: 48,
+            background_style: 1, // Attached Edge
+            flare_width: 14,
+            foot_depth: 4,
+            _config: {},
+        },
+    });
+
+    dock._position = 'left';
+    dock._hidden = false;
+    dock._scaleFactor = 1.0;
+    dock.x = 0;
+    dock.y = 0;
+
+    // Background covers depth x = 0..70, length y = 300..700
+    dock._background = {
+        x: 0,
+        y: 300,
+        width: 70,
+        height: 400,
+        get_transformed_position: () => [0, 300],
+    };
+
+    // 1. Pointer inside the dock body
+    assert.equal(dock.isWithinHoverArea([35, 500]), true, 'Center of left dock must activate hover');
+    assert.equal(dock.isWithinHoverArea([69, 500]), true, 'Just inside the right edge of left dock must activate hover');
+    assert.equal(dock.isWithinHoverArea([1, 500]), true, 'Just inside screen edge must activate hover');
+
+    // 2. Pointer in the adjacent Firefox window (outside x = 70)
+    assert.equal(dock.isWithinHoverArea([70, 500]), false, 'Cursor 1px outside (on boundary x=70) must not activate hover');
+    assert.equal(dock.isWithinHoverArea([71, 500]), false, 'Cursor 1px into Firefox must not activate hover');
+    assert.equal(dock.isWithinHoverArea([75, 500]), false, 'Cursor 5px into Firefox must not activate hover');
+    assert.equal(dock.isWithinHoverArea([90, 500]), false, 'Cursor 20px into Firefox must not activate hover');
+
+    // 3. Pointer above or below the dock span
+    assert.equal(dock.isWithinHoverArea([35, 299]), false, 'Cursor above dock body must not activate hover');
+    assert.equal(dock.isWithinHoverArea([35, 701]), false, 'Cursor below dock body must not activate hover');
+});
+
+test('Dock.isWithinHoverArea: All four orientations enforce strict bounds', async () => {
+    const dockModule = await loadModule('dash2dock-lite@custom/dock.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {layoutManager: {primaryIndex: 0}},
+            'resource:///org/gnome/shell/ui/appFavorites.js': {getAppFavorites: () => ({getFavorites: () => []})},
+            'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '51'},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://Graphene': {default: {Point: class {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {
+                default: {
+                    ActorAlign: {CENTER: 0},
+                    OffscreenRedirect: {ALWAYS: 1},
+                    Orientation: {VERTICAL: 1, HORIZONTAL: 0},
+                },
+            },
+            'gi://St': {default: {Widget: class extends Actor {}}},
+            './effects/tint_effect.js': {TintEffect: class {}},
+            './effects/monochrome_effect.js': {MonochromeEffect: class {}},
+            './dockItems.js': {DockIcon: Actor, DockItemContainer: Actor, DockBackground: Actor},
+            './dockItemMenu.js': {DockItemList: class {}},
+            './autohide.js': {AutoHide: class {}},
+            './animator.js': {Animator: class {}},
+            './utils.js': {get_distance_sqr: () => 0, get_distance: () => 0, isInRect: () => false, isOverlapRect: () => false, tempPath: () => ''},
+        },
+    });
+
+    const dock = new dockModule.Dock({
+        extension: {
+            icon_size: 48,
+            background_style: 1,
+            flare_width: 14,
+            foot_depth: 4,
+            _config: {},
+        },
+    });
+    dock._hidden = false;
+    dock._scaleFactor = 1.0;
+
+    // A. Bottom Dock (x: 400..800, y: 1010..1080)
+    dock._position = 'bottom';
+    dock._background = {x: 400, y: 1010, width: 400, height: 70, get_transformed_position: () => [400, 1010]};
+    assert.equal(dock.isWithinHoverArea([600, 1040]), true, 'Bottom: inside dock');
+    assert.equal(dock.isWithinHoverArea([600, 1009]), false, 'Bottom: 1px above crown in window must be false');
+    assert.equal(dock.isWithinHoverArea([600, 990]), false, 'Bottom: 20px above crown must be false');
+
+    // B. Top Dock (x: 400..800, y: 0..70)
+    dock._position = 'top';
+    dock._background = {x: 400, y: 0, width: 400, height: 70, get_transformed_position: () => [400, 0]};
+    assert.equal(dock.isWithinHoverArea([600, 35]), true, 'Top: inside dock');
+    assert.equal(dock.isWithinHoverArea([600, 71]), false, 'Top: 1px below crown in window must be false');
+    assert.equal(dock.isWithinHoverArea([600, 90]), false, 'Top: 20px below crown must be false');
+
+    // C. Right Dock (x: 1850..1920, y: 300..700)
+    dock._position = 'right';
+    dock._background = {x: 1850, y: 300, width: 70, height: 400, get_transformed_position: () => [1850, 300]};
+    assert.equal(dock.isWithinHoverArea([1880, 500]), true, 'Right: inside dock');
+    assert.equal(dock.isWithinHoverArea([1849, 500]), false, 'Right: 1px to the left in window must be false');
+    assert.equal(dock.isWithinHoverArea([1830, 500]), false, 'Right: 20px to the left must be false');
+
+    // D. Left Dock (x: 0..70, y: 300..700)
+    dock._position = 'left';
+    dock._background = {x: 0, y: 300, width: 70, height: 400, get_transformed_position: () => [0, 300]};
+    assert.equal(dock.isWithinHoverArea([35, 500]), true, 'Left: inside dock');
+    assert.equal(dock.isWithinHoverArea([71, 500]), false, 'Left: 1px to the right in window must be false');
+    assert.equal(dock.isWithinHoverArea([90, 500]), false, 'Left: 20px to the right must be false');
+});
+
+test('Dock.isWithinHoverArea: Attached Edge transparent flare corners do not activate hover', async () => {
+    const dockModule = await loadModule('dash2dock-lite@custom/dock.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {layoutManager: {primaryIndex: 0}},
+            'resource:///org/gnome/shell/ui/appFavorites.js': {getAppFavorites: () => ({getFavorites: () => []})},
+            'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '51'},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://Graphene': {default: {Point: class {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {
+                default: {
+                    ActorAlign: {CENTER: 0},
+                    OffscreenRedirect: {ALWAYS: 1},
+                    Orientation: {VERTICAL: 1, HORIZONTAL: 0},
+                },
+            },
+            'gi://St': {default: {Widget: class extends Actor {}}},
+            './effects/tint_effect.js': {TintEffect: class {}},
+            './effects/monochrome_effect.js': {MonochromeEffect: class {}},
+            './dockItems.js': {DockIcon: Actor, DockItemContainer: Actor, DockBackground: Actor},
+            './dockItemMenu.js': {DockItemList: class {}},
+            './autohide.js': {AutoHide: class {}},
+            './animator.js': {Animator: class {}},
+            './utils.js': {get_distance_sqr: () => 0, get_distance: () => 0, isInRect: () => false, isOverlapRect: () => false, tempPath: () => ''},
+        },
+    });
+
+    const dock = new dockModule.Dock({
+        extension: {
+            icon_size: 48,
+            background_style: 1,
+            flare_width: 14,
+            foot_depth: 4,
+            _config: {},
+        },
+    });
+    dock._hidden = false;
+    dock._scaleFactor = 1.0;
+    dock._position = 'left';
+    // Background: x in 0..70, y in 300..700.
+    // Flare width is 14px (top flare is y: 300..314; bottom flare is y: 686..700).
+    // Foot depth is 4px (solid foot is x: 0..4).
+    dock._background = {x: 0, y: 300, width: 70, height: 400, get_transformed_position: () => [0, 300]};
+
+    // 1. Near the top flare edge (y = 305):
+    // Within footDepth (x = 2): solid foot touching monitor edge -> true
+    assert.equal(dock.isWithinHoverArea([2, 305]), true, 'Solid foot near monitor edge is interactive');
+    // Beyond footDepth (x = 30): transparent corner away from monitor edge -> false
+    assert.equal(dock.isWithinHoverArea([30, 305]), false, 'Transparent corner in top flare zone must not activate hover');
+
+    // 2. Near the bottom flare edge (y = 695):
+    assert.equal(dock.isWithinHoverArea([2, 695]), true, 'Solid foot near bottom monitor edge is interactive');
+    assert.equal(dock.isWithinHoverArea([30, 695]), false, 'Transparent corner in bottom flare zone must not activate hover');
+});
+
+test('Dock.isWithinHoverArea: Floating mode strictly bounds the dock capsule', async () => {
+    const dockModule = await loadModule('dash2dock-lite@custom/dock.js', {
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {layoutManager: {primaryIndex: 0}},
+            'resource:///org/gnome/shell/ui/appFavorites.js': {getAppFavorites: () => ({getFavorites: () => []})},
+            'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '51'},
+            'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+            'gi://Shell': {default: {AppSystem: {get_default: () => ({get_installed: () => []})}}},
+            'gi://Gio': {default: {}},
+            'gi://Graphene': {default: {Point: class {}}},
+            'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
+            'gi://Clutter': {
+                default: {
+                    ActorAlign: {CENTER: 0},
+                    OffscreenRedirect: {ALWAYS: 1},
+                    Orientation: {VERTICAL: 1, HORIZONTAL: 0},
+                },
+            },
+            'gi://St': {default: {Widget: class extends Actor {}}},
+            './effects/tint_effect.js': {TintEffect: class {}},
+            './effects/monochrome_effect.js': {MonochromeEffect: class {}},
+            './dockItems.js': {DockIcon: Actor, DockItemContainer: Actor, DockBackground: Actor},
+            './dockItemMenu.js': {DockItemList: class {}},
+            './autohide.js': {AutoHide: class {}},
+            './animator.js': {Animator: class {}},
+            './utils.js': {get_distance_sqr: () => 0, get_distance: () => 0, isInRect: () => false, isOverlapRect: () => false, tempPath: () => ''},
+        },
+    });
+
+    const dock = new dockModule.Dock({
+        extension: {
+            icon_size: 48,
+            background_style: 0, // Floating mode
+            _config: {},
+        },
+    });
+    dock._hidden = false;
+    dock._position = 'bottom';
+    // Floating dock capsule at [500, 1000, 300, 60]
+    dock._background = {x: 500, y: 1000, width: 300, height: 60, get_transformed_position: () => [500, 1000]};
+
+    // Center of floating capsule
+    assert.equal(dock.isWithinHoverArea([650, 1030]), true);
+
+    // Outside bounds with zero tolerance
+    assert.equal(dock.isWithinHoverArea([650, 999]), false, '1px above floating dock is false');
+    assert.equal(dock.isWithinHoverArea([650, 1061]), false, '1px below floating dock is false');
+    assert.equal(dock.isWithinHoverArea([499, 1030]), false, '1px left of floating dock is false');
+    assert.equal(dock.isWithinHoverArea([801, 1030]), false, '1px right of floating dock is false');
+});
+
+test('Animator & Hover Integration: Cursor inside Firefox does not magnify icons or show tooltip', async () => {
+    let pointer = [85, 52]; // Left dock: x=85 is inside Firefox (dock width is 48)
+    const settings = {enable_animations: true, reducedMotion: 0};
+    const distanceSquared = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+    class Overlay extends Actor { update() {} }
+
+    const {Animator} = await loadModule('dash2dock-lite@custom/animator.js', {
+        globals: {global: {get_pointer: () => pointer}},
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {},
+            'gi://St': {default: {Icon: Actor, Settings: {get: () => settings}, ReducedMotion: {REDUCE: 1}}},
+            'gi://Graphene': {default: {Point: class {}}},
+            'gi://Clutter': {default: {}},
+            'gi://Gio': {default: {}},
+            './apps/dot.js': {Dot: class {}},
+            './dock.js': {DockPosition: {TOP: 'top', BOTTOM: 'bottom', LEFT: 'left', RIGHT: 'right'}},
+            './dockItems.js': {DockItemDotsOverlay: Overlay, DockItemBadgeOverlay: Overlay},
+            './utils.js': {get_distance_sqr: distanceSquared, get_distance: (a, b) => Math.sqrt(distanceSquared(a, b)), isInRect() {}, isOverlapRect() {}},
+        },
+    });
+
+    const icons = Array.from({length: 5}, (_, i) => {
+        const icon = new Actor({x: 0, y: i * 56});
+        icon._icon = new Actor({icon_name: 'app', gicon: null});
+        icon._label = new Actor({text: `App ${i}`, opacity: 0});
+        icon.add_child(icon._icon);
+        return icon;
+    });
+
+    const dock = {
+        extension: {
+            animate_icons_unmute: true, animation_rise: 0.5, animation_magnify: 0.5,
+            animation_spread: 0.6, _config: {speed_up: 1}, autohide_speed: 0.5,
+            background_style: 1, flare_width: 14, foot_depth: 4,
+            integrations: {bms_update_size() {}},
+        },
+        _icons: icons, _iconSize: 48, _iconSizeScaledDown: 48, _scaleFactor: 1,
+        _edge_distance: 0, _position: 'left', _separators: [],
+        opacity: 255, width: 48, height: 280, x: 0, y: 0, animation_fps: 1,
+        dash: new Actor(), renderArea: new Actor(), struts: new Actor(),
+        _background: {x: 0, y: 0, width: 48, height: 280, _padding: 0, update() {}, get_transformed_position: () => [0, 0]},
+        layout: () => true, isVertical: () => true,
+        getMonitor: () => ({x: 0, y: 0, width: 1920, height: 1080, geometry_scale: 1}),
+        isWithinHoverArea: (p) => {
+            // Left dock with width 48:
+            return p[0] >= 0 && p[0] < 48 && p[1] >= 0 && p[1] < 280;
+        },
+        _updateTransparenies() {}, _debounceEndAnimation() {},
+        autohider: {_debounceCheckHide() {}},
+    };
+
+    const animator = new Animator();
+    animator.dock = dock;
+    animator.enable();
+
+    // Settle with pointer in Firefox (x = 85, y = 52)
+    for (let i = 0; i < 60; i++) animator.animate(16);
+
+    // 1. Hover target must be null
+    assert.equal(dock._nearestIcon, null, 'Nearest icon must be null when pointer is in Firefox');
+    assert.equal(dock._hoveredIcon, null, 'Hovered icon must be null when pointer is in Firefox');
+
+    // 2. All icons must remain at resting scale 1
+    icons.forEach((icon, i) => {
+        assert.equal(icon._targetScale, 1, `Icon ${i} target scale must remain 1`);
+        assert.ok(Math.abs(icon._renderer.icon_size * icon._renderer.scaleX - dock._iconSizeScaledDown) < 0.1,
+            `Icon ${i} rendered size must remain resting size 48px`);
+        assert.equal(icon._label.opacity, 0, `Icon ${i} label must be hidden`);
+    });
+});
+
+test('Animator & Hover Integration: Entering dock magnifies icons, leaving immediately clears hover and hides tooltip', async () => {
+    let pointer = [24, 52]; // Inside Left dock
+    const settings = {enable_animations: true, reducedMotion: 0};
+    const distanceSquared = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+    class Overlay extends Actor { update() {} }
+
+    const {Animator} = await loadModule('dash2dock-lite@custom/animator.js', {
+        globals: {global: {get_pointer: () => pointer}},
+        mocks: {
+            'resource:///org/gnome/shell/ui/main.js': {},
+            'gi://St': {default: {Icon: Actor, Settings: {get: () => settings}, ReducedMotion: {REDUCE: 1}}},
+            'gi://Graphene': {default: {Point: class {}}},
+            'gi://Clutter': {default: {}},
+            'gi://Gio': {default: {}},
+            './apps/dot.js': {Dot: class {}},
+            './dock.js': {DockPosition: {TOP: 'top', BOTTOM: 'bottom', LEFT: 'left', RIGHT: 'right'}},
+            './dockItems.js': {DockItemDotsOverlay: Overlay, DockItemBadgeOverlay: Overlay},
+            './utils.js': {get_distance_sqr: distanceSquared, get_distance: (a, b) => Math.sqrt(distanceSquared(a, b)), isInRect() {}, isOverlapRect() {}},
+        },
+    });
+
+    const icons = Array.from({length: 5}, (_, i) => {
+        const icon = new Actor({x: 0, y: i * 56});
+        icon._icon = new Actor({icon_name: 'app', gicon: null});
+        icon._label = new Actor({text: `App ${i}`, opacity: 0});
+        icon.add_child(icon._icon);
+        return icon;
+    });
+
+    const dock = {
+        extension: {
+            animate_icons_unmute: true, animation_rise: 0.5, animation_magnify: 0.5,
+            animation_spread: 0.6, _config: {speed_up: 1}, autohide_speed: 0.5,
+            background_style: 1, flare_width: 14, foot_depth: 4,
+            integrations: {bms_update_size() {}},
+        },
+        _icons: icons, _iconSize: 48, _iconSizeScaledDown: 48, _scaleFactor: 1,
+        _edge_distance: 0, _position: 'left', _separators: [],
+        opacity: 255, width: 48, height: 280, x: 0, y: 0, animation_fps: 1,
+        dash: new Actor(), renderArea: new Actor(), struts: new Actor(),
+        _background: {x: 0, y: 0, width: 48, height: 280, _padding: 0, update() {}, get_transformed_position: () => [0, 0]},
+        layout: () => true, isVertical: () => true,
+        getMonitor: () => ({x: 0, y: 0, width: 1920, height: 1080, geometry_scale: 1}),
+        isWithinHoverArea: (p) => {
+            return p[0] >= 0 && p[0] < 48 && p[1] >= 0 && p[1] < 280;
+        },
+        _updateTransparenies() {}, _debounceEndAnimation() {},
+        autohider: {_debounceCheckHide() {}},
+    };
+
+    const animator = new Animator();
+    animator.dock = dock;
+    animator.enable();
+
+    // 1. Settle with pointer inside dock (x = 24, y = 52) over icon 1
+    for (let i = 0; i < 240; i++) animator.animate(16);
+    assert.ok(dock._nearestIcon !== null, 'Nearest icon must be active');
+    assert.ok(icons[1]._targetScale > 1.2, 'Icon 1 target scale must be magnified');
+    assert.ok(icons[1]._renderer.scaleX > 1.8, 'Icon 1 renderer scaleX must be magnified (> 1.8)');
+
+    // 2. Move pointer outside into Firefox (x = 75, y = 52)
+    pointer = [75, 52];
+    animator.animate(16);
+
+    // On the very next frame after exiting:
+    assert.equal(dock._nearestIcon, null, 'Nearest icon must clear to null on exit');
+    assert.equal(dock._hoveredIcon, null, 'Hovered icon must clear to null on exit');
+    assert.equal(icons[1]._label.opacity, 0, 'Tooltip label must hide immediately on exit');
+    assert.equal(icons[1]._targetScale, 1, 'Target scale must reset to 1');
+
+    // 3. Settle outside: all icons smoothly return to resting size (scaleFactor 1.5, size 48)
+    for (let i = 0; i < 240; i++) animator.animate(16);
+    icons.forEach((icon, i) => {
+        assert.equal(icon._targetScale, 1, `Icon ${i} target scale must settle at 1`);
+        assert.ok(Math.abs(icon._renderer.icon_size * icon._renderer.scaleX - dock._iconSizeScaledDown) < 0.1,
+            `Icon ${i} must return to resting size 48px`);
+    });
+
+    // 4. Return pointer into dock: hover reactivates normally
+    pointer = [24, 52];
+    for (let i = 0; i < 240; i++) animator.animate(16);
+    assert.ok(dock._nearestIcon !== null, 'Nearest icon must reactivate upon return');
+    assert.ok(icons[1]._targetScale > 1.2, 'Icon 1 must magnify again');
+});
+

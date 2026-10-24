@@ -107,9 +107,7 @@ export let Animator = class {
   //! begin optimization
   animate(dt) {
     let dock = this.dock;
-    if (dock._hoveredIcon) {
-      dock._lastHoveredIcon = dock._hoveredIcon;
-    }
+    dock._lastHoveredIcon = dock._hoveredIcon;
 
     let simulation = false;
 
@@ -164,7 +162,9 @@ export let Animator = class {
     let [px, py] = pointer;
 
     let vertical = dock.isVertical();
-    let isWithin = dock._isWithinDash([px, py]);
+    let isWithin = dock.isWithinHoverArea
+      ? dock.isWithinHoverArea([px, py])
+      : dock._isWithinDash([px, py]);
 
     if (m.inFullscreen) {
       isWithin = false;
@@ -349,7 +349,7 @@ export let Animator = class {
     //! use better collision test here?
     let total_spread_left = 0;
     let total_spread_right = 0;
-    let hoveredIcon = dock._lastHoveredIcon;
+    let hoveredIcon = nearestIcon ? (dock._lastHoveredIcon || nearestIcon) : null;
     for (let i = 0; i < iconTable.length; i++) {
       if (iconTable.length < 2) break;
       let icon = iconTable[i];
@@ -385,6 +385,11 @@ export let Animator = class {
     // Keep expansion centred without changing the target when the nearest
     // icon changes at the midpoint between two hit areas.
     dock._hoveredIcon = hoveredIcon;
+    if (!nearestIcon) {
+      dock._lastHoveredIcon = null;
+      this._dwellIcon = null;
+      this._dwellTick = 0;
+    }
     if (iconTable.length > 0) {
       const adjust = (iconTable[0]._translate + iconTable[iconTable.length - 1]._translate) / 2;
       for (const icon of iconTable)
@@ -631,6 +636,7 @@ export let Animator = class {
 
         // label
         if (
+          nearestIcon &&
           icon === hoveredIcon &&
           icon._label &&
           icon._label.text &&

@@ -1257,6 +1257,107 @@ export let Dock = GObject.registerClass(
       }
     }
 
+    isWithinHoverArea(p) {
+      if (this._hidden || !p) {
+        return false;
+      }
+
+      let [px, py] = p;
+
+      // 1. If an icon is actively magnified, allow interaction within its
+      // magnified visible actor bounds so interaction remains continuous.
+      if (this._icons && this._icons.length > 0) {
+        for (const icon of this._icons) {
+          if (!icon || !icon._icon) continue;
+          if (icon._scale && icon._scale > 1.05) {
+            let r = icon._renderer || icon;
+            let rPos = r.get_transformed_position?.() || icon.get_transformed_position?.();
+            let rSize = r.get_transformed_size?.() || [icon.width, icon.height];
+            if (rPos && Number.isFinite(rPos[0]) && Number.isFinite(rPos[1])) {
+              let rx = rPos[0];
+              let ry = rPos[1];
+              let rw = Number.isFinite(rSize?.[0]) ? rSize[0] : icon.width;
+              let rh = Number.isFinite(rSize?.[1]) ? rSize[1] : icon.height;
+              if (px >= rx && px < rx + rw && py >= ry && py < ry + rh) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+
+      // 2. Resting / Base Dock Background Hit-Test
+      if (!this._background) {
+        return false;
+      }
+
+      let bgPos = this._background.get_transformed_position?.();
+      let bgX = (bgPos && Number.isFinite(bgPos[0])) ? bgPos[0] : (this.x + (this._background.x || 0));
+      let bgY = (bgPos && Number.isFinite(bgPos[1])) ? bgPos[1] : (this.y + (this._background.y || 0));
+      let bgW = this._background.width || 0;
+      let bgH = this._background.height || 0;
+
+      if (!Number.isFinite(bgW) || !Number.isFinite(bgH) || bgW <= 0 || bgH <= 0) {
+        return false;
+      }
+
+      // Floating Mode (background_style !== 1): strict bounding box of the capsule
+      if (this.extension?.background_style !== 1) {
+        return px >= bgX && px < bgX + bgW && py >= bgY && py < bgY + bgH;
+      }
+
+      // Attached Edge Mode (background_style === 1):
+      // Account for the actual silhouette footprint: flared feet attach to screen edge,
+      // while outer flare corners away from the screen edge are transparent.
+      const pos = this._position || DockPosition.BOTTOM;
+      const flareWidth = (this.extension?.flare_width ?? 14) * (this._scaleFactor || 1);
+      const footDepth = (this.extension?.foot_depth ?? 4) * (this._scaleFactor || 1);
+
+      switch (pos) {
+        case DockPosition.LEFT: {
+          // Screen edge is at x = bgX. Crown facing right is at x = bgX + bgW.
+          if (px < bgX || px >= bgX + bgW) return false;
+          if (py < bgY || py >= bgY + bgH) return false;
+          // In the top flare zone, space beyond footDepth is transparent
+          if (py < bgY + flareWidth && px > bgX + footDepth) return false;
+          // In the bottom flare zone, space beyond footDepth is transparent
+          if (py > bgY + bgH - flareWidth && px > bgX + footDepth) return false;
+          return true;
+        }
+        case DockPosition.RIGHT: {
+          // Crown facing left is at x = bgX. Screen edge is at x = bgX + bgW.
+          if (px < bgX || px >= bgX + bgW) return false;
+          if (py < bgY || py >= bgY + bgH) return false;
+          // In the top flare zone, space beyond footDepth from right edge is transparent
+          if (py < bgY + flareWidth && px < bgX + bgW - footDepth) return false;
+          // In the bottom flare zone, space beyond footDepth from right edge is transparent
+          if (py > bgY + bgH - flareWidth && px < bgX + bgW - footDepth) return false;
+          return true;
+        }
+        case DockPosition.TOP: {
+          // Screen edge is at y = bgY. Crown facing down is at y = bgY + bgH.
+          if (py < bgY || py >= bgY + bgH) return false;
+          if (px < bgX || px >= bgX + bgW) return false;
+          // In the left flare zone, space beyond footDepth from top edge is transparent
+          if (px < bgX + flareWidth && py > bgY + footDepth) return false;
+          // In the right flare zone, space beyond footDepth from top edge is transparent
+          if (px > bgX + bgW - flareWidth && py > bgY + footDepth) return false;
+          return true;
+        }
+        case DockPosition.BOTTOM:
+        default: {
+          // Crown facing up is at y = bgY. Screen edge is at y = bgY + bgH.
+          if (py < bgY || py >= bgY + bgH) return false;
+          if (px < bgX || px >= bgX + bgW) return false;
+          // In the left flare zone, space beyond footDepth from bottom edge is transparent
+          if (px < bgX + flareWidth && py < bgY + bgH - footDepth) return false;
+          // In the right flare zone, space beyond footDepth from bottom edge is transparent
+          if (px > bgX + bgW - flareWidth && py < bgY + bgH - footDepth) return false;
+          return true;
+        }
+      }
+    }
+
     //! move these generic functions outside of this class
     _isWithinDash(p) {
       if (this._hidden) {
