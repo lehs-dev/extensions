@@ -132,6 +132,44 @@ const geometryModule = await loadModule('dash2dock-lite@custom/attachedGeometry.
 const {getAttachedEdgeGeometry, getAttachedPodPickBoxes} = geometryModule;
 const baseGeometry = {width: 44, height: 220, position: 'left', flareWidth: 14, footDepth: 4, cornerRadius: 10};
 
+test('corner-facing pod ends are square and clickable up to the screen edge, retaining the inner foot', () => {
+  const normal = getAttachedEdgeGeometry(baseGeometry);
+  for (const end of ['start', 'end']) {
+    for (const offset of [0, 3, 8]) {
+      const params = {...baseGeometry, [`${end}Flush`]: true, bodyOffset: offset};
+      const g = getAttachedEdgeGeometry(params);
+      const cornerY = end === 'start' ? 0 : g.height;
+      const crown = end === 'start' ? 'topLeft' : 'topRight';
+      assert.equal(g[crown].y, cornerY, 'paint reaches the physical screen edge at full width');
+      assert.equal(g[crown].x, baseGeometry.width + offset);
+      assert.equal(g[`${end}FlareWidth`], 0);
+      const innerFoot = end === 'start' ? 'rightFootTip' : 'leftFootTip';
+      assert.deepEqual(g[innerFoot], normal[innerFoot], 'opposite attachment stays anchored');
+      const boxes = getAttachedPodPickBoxes(params);
+      const picked = (x, y) => boxes.some(b => x >= b.x1 && x < b.x2 && y >= b.y1 && y < b.y2);
+      assert.equal(picked(g.width - 0.5, end === 'start' ? 0.5 : g.height - 0.5), true);
+      assert.equal(picked(g.width - 0.5, end === 'start' ? g.height - 0.5 : 0.5), false,
+        'transparent corner at the retained foot remains click-through');
+      assert.equal(picked(g.width + 1, g.height / 2), false, 'animation reserve stays click-through');
+    }
+  }
+});
+
+test('pod content hugs the left edge even with a previously saved wide body', async () => {
+  const {computeLeftModularGeometry} = await loadModule('dash2dock-lite@custom/systemDock/systemDockLayout.js');
+  const g = computeLeftModularGeometry({monitor: {x: -1920, y: -200, width: 1920, height: 1080},
+    frameThickness: 12, frameRadius: 80, footDepth: 9,
+    quickSettingsWidth: 44, quickSettingsContentWidth: 18, clockWidth: 44, clockContentWidth: 21,
+    quickSettingsContentHeight: 96, clockContentHeight: 70});
+  assert.equal(g.quickSettings.y, -200);
+  assert.equal(g.clock.y + g.clock.height, 880);
+  assert.equal(g.quickSettings.contentLeft, 2);
+  assert.equal(g.quickSettings.contentWidth, 18, 'saved width does not stretch or center the content');
+  assert.equal(g.clock.contentWidth, 21);
+  assert.equal(g.clock.height - g.clock.contentTop - g.clock.contentHeight, 3,
+    'bottom clock text has only the small inner padding before the screen edge');
+});
+
 test('elevation moves every body/corner point equally while both edge tips stay anchored', () => {
   const rest = getAttachedEdgeGeometry(baseGeometry);
   for (let step = 0; step <= 20; step++) {
@@ -458,4 +496,100 @@ test('Left Modular suppresses only the rectangular dock blur and restores the sa
   extension.blur_background = false;
   integration.bms_update_size(animator);
   assert.equal(bms.visible, false);
+});
+
+test('system pod hover elevation does not trigger DesktopLayoutManager or dock relayout', async () => {
+  const env = await setup();
+  let layoutCalls = 0;
+  const mockDock = {
+    layout: () => { layoutCalls++; return true; },
+  };
+  env.extension.docks = [mockDock];
+
+  // Record baseline layout count
+  const initialLayouts = env.layouts;
+  const initialDockLayouts = layoutCalls;
+
+  // Elevate QuickSettings pod through hover enter and steps
+  env.enter(env.quick);
+  assert.equal(env.layouts, initialLayouts, 'Enter must not trigger DesktopLayoutManager.updateLayout');
+  assert.equal(layoutCalls, initialDockLayouts, 'Enter must not trigger dock.layout');
+
+  for (const progress of [0.2, 0.4, 0.6, 0.8, 1.0]) {
+    env.quick._elevation._timeline?.step(progress);
+    assert.equal(env.layouts, initialLayouts, `Progress ${progress} must not trigger DesktopLayoutManager.updateLayout`);
+    assert.equal(layoutCalls, initialDockLayouts, `Progress ${progress} must not trigger dock.layout`);
+  }
+
+  // Elevate Clock pod
+  env.enter(env.clock);
+  for (const progress of [0.3, 0.7, 1.0]) {
+    env.clock._elevation._timeline?.step(progress);
+    assert.equal(env.layouts, initialLayouts, 'Clock hover must not trigger DesktopLayoutManager.updateLayout');
+    assert.equal(layoutCalls, initialDockLayouts, 'Clock hover must not trigger dock.layout');
+  }
+
+  // Leave and return to rest
+  env.leave(env.quick);
+  env.finish(env.quick);
+  env.leave(env.clock);
+  env.finish(env.clock);
+
+  assert.equal(env.layouts, initialLayouts, 'Hover exit must not trigger DesktopLayoutManager.updateLayout');
+  assert.equal(layoutCalls, initialDockLayouts, 'Hover exit must not trigger dock.layout');
+
+  env.destroy();
+});
+
+test('pod content box is reactive and child buttons receive activation directly', async () => {
+  const env = await setup();
+
+  // Verify content box is reactive
+  assert.equal(env.quick._contentBox.reactive, true, 'QuickSettings _contentBox must be reactive');
+  assert.equal(env.clock._contentBox.reactive, true, 'Clock _contentBox must be reactive');
+
+  // Verify individual buttons inside QuickSettings can be activated directly
+  let activated = null;
+  const volumeItem = env.quick._items.get('volume');
+  volumeItem._onActivate = () => { activated = 'volume'; };
+  volumeItem.emit('clicked');
+  assert.equal(activated, 'volume', 'Direct clicked event on VolumeItem activates volume');
+
+  const batteryItem = env.quick._items.get('battery');
+  batteryItem._onActivate = () => { activated = 'battery'; };
+  batteryItem.emit('clicked');
+  assert.equal(activated, 'battery', 'Direct clicked event on BatteryItem activates battery');
+
+  // Single-item pod (ClockPod) activates clock on surface click
+  let clockActivated = false;
+  env.clock._clockItem._onActivate = () => { clockActivated = true; };
+  env.clock._surface.emit('button-release-event', {get_button: () => 1});
+  assert.equal(clockActivated, true, 'Single item pod surface click activates the clock');
+
+  env.destroy();
+});
+
+test('natural height auto-scales when items are toggled without oversized fixed container', async () => {
+  const env = await setup();
+
+  // In setup(), 5 indicators are visible. Measure baseline height
+  const heightAll = env.quick.getMeasuredContentHeight();
+
+  // Hide 2 indicators
+  env.extension.modular_show_bluetooth = false;
+  env.extension.modular_show_battery = false;
+  env.quick._refreshContent();
+
+  const heightReduced = env.quick.getMeasuredContentHeight();
+  assert.ok(heightReduced < heightAll, `Reduced indicators (${heightReduced}px) must be shorter than all indicators (${heightAll}px)`);
+
+  // Restore indicators
+  env.extension.modular_show_bluetooth = true;
+  env.extension.modular_show_battery = true;
+  env.quick._refreshContent();
+
+  const heightRestored = env.quick.getMeasuredContentHeight();
+  assert.equal(heightRestored, heightAll, 'Restoring indicators restores content height');
+
+  env.destroy();
 });

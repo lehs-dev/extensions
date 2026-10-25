@@ -124,28 +124,31 @@ export function computeLeftModularGeometry(params) {
   // coordinates. geometry_scale is a texture scale, not another layout multiplier.
   const monitor = params.monitor ?? {x: 0, y: 0, width: 1920, height: 1080};
   const nonnegative = (value, fallback) => Number.isFinite(value) ? Math.max(0, value) : fallback;
-  const frame = nonnegative(params.frameThickness, 0);
-  const radius = nonnegative(params.frameRadius, frame);
   const flareWidth = nonnegative(params.flareWidth, 14);
   const footDepth = nonnegative(params.footDepth, 4);
   const cornerRadius = nonnegative(params.cornerRadius, 10);
-  const padding = Math.max(6, nonnegative(params.iconSpacing, 6));
+  const podPadding = nonnegative(params.podPadding, 3);
+  const padding = podPadding;
   const spacing = nonnegative(params.minSpacing, 16);
-  const contentLeft = Math.max(frame, footDepth) + 4;
-  // Keep the complete flares clear of the rounded corner, even at offset zero.
-  const top = monitor.y + Math.max(radius, frame + nonnegative(params.upperPodOffset, 12));
-  const bottom = monitor.y + monitor.height - Math.max(radius, frame + nonnegative(params.lowerPodOffset, 12));
-  const makePod = (width, contentHeight, contentWidth, visible) => {
-    width = Math.max(width, contentLeft + contentWidth + 4);
-    const height = Math.max(width, contentHeight + 2 * (flareWidth + padding));
+  const horizontalPadding = nonnegative(params.horizontalPadding, 2);
+  const contentLeft = horizontalPadding;
+  // Sacrifice the screen-facing end of each pod to meet the actual corner.
+  // The frame and connector no longer add empty space around its content.
+  const top = monitor.y + nonnegative(params.upperPodOffset, 0);
+  const bottom = monitor.y + monitor.height - nonnegative(params.lowerPodOffset, 0);
+  const makePod = (width, contentHeight, contentWidth, visible, startFlush, endFlush) => {
+    width = Math.max(width, contentLeft + contentWidth + horizontalPadding);
+    const contentTop = (startFlush ? 0 : flareWidth) + padding;
+    const contentBottom = (endFlush ? 0 : flareWidth) + padding;
+    const height = Math.max(width, contentHeight + contentTop + contentBottom);
     return {x: monitor.x, y: top, width, height, flareWidth, footDepth,
-      cornerRadius, scaleFactor: 1, position: 'left', contentTop: flareWidth + padding,
-      contentLeft, contentHeight, contentWidth: Math.max(1, width - contentLeft - 4), visible};
+      cornerRadius, startFlush, endFlush, scaleFactor: 1, position: 'left', contentTop,
+      contentLeft, contentHeight, contentWidth: Math.max(1, contentWidth || width - contentLeft - horizontalPadding), visible};
   };
-  const quickSettings = makePod(nonnegative(params.quickSettingsWidth ?? params.dockWidth, 44),
-    nonnegative(params.quickSettingsContentHeight, 120), nonnegative(params.quickSettingsContentWidth, 0), params.showQuickSettings ?? true);
-  const clock = makePod(nonnegative(params.clockWidth ?? params.dockWidth, 44),
-    nonnegative(params.clockContentHeight, 100), nonnegative(params.clockContentWidth, 0), params.showClock ?? true);
+  const quickSettings = makePod(nonnegative(params.quickSettingsWidth ?? params.dockWidth, 24),
+    nonnegative(params.quickSettingsContentHeight, 60), nonnegative(params.quickSettingsContentWidth, 0), params.showQuickSettings ?? true, true, false);
+  const clock = makePod(nonnegative(params.clockWidth ?? params.dockWidth, 24),
+    nonnegative(params.clockContentHeight, 50), nonnegative(params.clockContentWidth, 0), params.showClock ?? true, false, true);
   clock.y = bottom - clock.height;
   const topBoundary = quickSettings.visible ? top + quickSettings.height + spacing : top;
   const rawBottom = clock.visible ? clock.y - spacing : bottom;

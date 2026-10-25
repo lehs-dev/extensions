@@ -345,16 +345,16 @@ export const DockItemList = GObject.registerClass(
       let didAnimate = false;
 
       if (dock.isVertical()) {
-        list.translationY = target._icon.translationY;
+        list.translationY = target._animationTranslationY ?? target._icon.translationY;
         list.translationX =
           -((dock._iconSizeScaledDown / 4) * target._scale) *
             (dock._position == 'left' ? -1 : 1) +
-          target._icon.translationX;
+          (target._animationTranslationX ?? target._icon.translationX);
       } else {
-        list.translationX = target._icon.translationX;
+        list.translationX = target._animationTranslationX ?? target._icon.translationX;
         list.translationY =
           -((dock._iconSizeScaledDown / 4) * target._scale) +
-          target._icon.translationY;
+          (target._animationTranslationY ?? target._icon.translationY);
       }
 
       let tw = target.width * target._icon.scaleX;

@@ -75,11 +75,13 @@ export let Animator = class {
       let renderer = new St.Icon({
         icon_name: 'file',
         name: 'd2daIcon',
-        reactive: true,
+        reactive: false,
         icon_size: 24,
       });
       renderer.visible = false;
       target.add_child(renderer);
+      const hitTarget = dock._createIconHitTarget?.(renderer);
+      if (hitTarget) renderer.connect('destroy', () => hitTarget.destroy());
       this._renderers.push(renderer);
 
       // dot
@@ -97,6 +99,7 @@ export let Animator = class {
 
     for (let i = dock._icons.length; i < this._renderers.length; i++) {
       this._renderers[i].visible = false;
+      if (!dock._dragging) this._renderers[i]._hitTarget?.hide();
       this._dots[i].visible = false;
       this._badges[i].visible = false;
     }
@@ -241,6 +244,7 @@ export let Animator = class {
       nearestIcon = null;
     }
     dock._nearestIcon = nearestIcon;
+    dock._hoverPointer = nearestIcon && isWithin ? [px, py] : null;
 
     let didScale = false;
     let didBounce = false;
@@ -436,8 +440,8 @@ export let Animator = class {
         let speed = ANIM_POSITION_PER_SEC * slowDown;
         let targetPosition = new Vector([translationX, translationY, 0]);
         let currentPosition = new Vector([
-          icon._icon.translationX,
-          icon._icon.translationY,
+          icon._animationTranslationX ?? 0,
+          icon._animationTranslationY ?? 0,
           0,
         ]);
         let dst = targetPosition.subtract(currentPosition);
@@ -458,8 +462,8 @@ export let Animator = class {
 
       // The interpolation above already uses elapsed time. A second blend
       // per frame would give 120 Hz a different response from 60 Hz.
-      icon._icon.translationX = translationX;
-      icon._icon.translationY = translationY;
+      icon._animationTranslationX = translationX;
+      icon._animationTranslationY = translationY;
 
       // clear bounce animation
       if (icon._appwell) {
@@ -599,15 +603,11 @@ export let Animator = class {
           let iconContainer = icon._icon.get_parent();
           // iconContainer can be null when dragging icons
           if (iconContainer) {
-            if (vertical) {
-              iconContainer.translationX = adjustX / 2;
-            } else {
-              iconContainer.translationY = adjustY / 2;
-            }
-
-            let ry = p[1] + adjustY + icon._icon.translationY - renderOffset[1];
+            // Source actors supply layout and native DND. Moving their inner
+            // containers feeds animated geometry back into future allocations.
+            let ry = p[1] + adjustY + icon._animationTranslationY - renderOffset[1];
             renderer.set_position(
-              p[0] + adjustX + icon._icon.translationX - renderOffset[0],
+              p[0] + adjustX + icon._animationTranslationX - renderOffset[0],
               ry
             );
 
@@ -627,6 +627,9 @@ export let Animator = class {
             // });
 
             renderer.visible = true;
+            icon._renderBounds = {x: renderOffset[0] + renderer.x + renderer.translationX,
+              y: renderOffset[1] + renderer.y + renderer.translationY,
+              width: targetSize, height: targetSize};
           }
           icon._px = p[0] - renderOffset[0];
           icon._py = p[1] - renderOffset[1];
@@ -793,9 +796,9 @@ export let Animator = class {
       let next = actor._next; // get_next_sibling();
       if (prev && next && prev._icon && next._icon) {
         actor.translationX =
-          (prev._icon.translationX + next._icon.translationX) / 2;
+          ((prev._animationTranslationX ?? 0) + (next._animationTranslationX ?? 0)) / 2;
         actor.translationY =
-          (prev._icon.translationY + next._icon.translationY) / 2;
+          ((prev._animationTranslationY ?? 0) + (next._animationTranslationY ?? 0)) / 2;
         let thickness = dock.extension.separator_thickness || 0;
         if (vertical) {
           actor.width = iconSize * 0.5 * scaleFactor;
@@ -900,20 +903,21 @@ export let Animator = class {
         panel_mode: dock.extension.panel_mode,
         dock,
       });
+      dock._syncIconHitTargets?.();
 
       // allied areas
       //! this should be at the layout -- make independent of background
       // struts
       if (vertical) {
         dock.struts.width =
-          dock._background.width +
+          (dock._modularViewport ? dock._restingWidth ?? iconSize * scaleFactor + 8 : dock._background.width) +
           iconSize * 0.2 * scaleFactor +
           edge_distance -
           dock._background._padding * scaleFactor;
         dock.struts.height = dock.height;
 
         if (dock.extension.autohide_dash) {
-          dock.struts.y = dock._background.y + dock._monitor.y;
+          dock.struts.y = dock._background.y + dock.y;
           dock.struts.height = dock._background.height;
           // X11 .. click through fix ..
           // dock.struts.width *= 1.25;
@@ -934,7 +938,7 @@ export let Animator = class {
           dock._background._padding * scaleFactor;
 
         if (dock.extension.autohide_dash) {
-          dock.struts.x = dock._background.x + dock._monitor.x;
+          dock.struts.x = dock._background.x + dock.x;
           dock.struts.width = dock._background.width;
           // X11 .. click through fix ..
           // dock.struts.height *= 1.25;

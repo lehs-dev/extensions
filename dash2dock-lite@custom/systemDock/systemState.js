@@ -24,6 +24,10 @@ export class SystemState {
     this.battery = {present: false, percentage: null, charging: false, iconName: 'battery-missing-symbolic'};
     this.notifications = {unreadCount: 0, dnd: false, iconName: 'preferences-system-notifications-symbolic'};
     this.inputSource = {available: false, shortName: '', displayName: '', provider: null};
+    this.dynamicIndicators = [];
+    this._dynamicSignals = new Map();
+    this._dynamicIds = new WeakMap();
+    this._nextDynamicId = 0;
     try {
       this._initSettings();
       this._initClock();
@@ -33,7 +37,11 @@ export class SystemState {
       this._initBattery();
       this._initNotifications();
       this._initInputSource();
-      this._connectSafe(Main.extensionManager, 'extension-state-changed', () => this._initInputSource());
+      this._updateDynamicIndicators();
+      this._connectSafe(Main.extensionManager, 'extension-state-changed', () => {
+        this._initInputSource();
+        this._updateDynamicIndicators();
+      });
     } catch (error) {
       this.destroy();
       throw error;
@@ -290,12 +298,96 @@ export class SystemState {
     this._emit('input-source-changed', this.inputSource);
   }
 
+  _updateDynamicIndicators() {
+    if (this._destroyed || this._scanningIndicators) return;
+    this._scanningIndicators = true;
+    try {
+      const area = status() ?? {};
+      const qs = area.quickSettings;
+      const represented = new Set([
+        qs?._network?._primaryIndicator ?? qs?._network?._indicator,
+        qs?._bluetooth?._indicator, volumeIndicator()?._indicator, qs?._system?._indicator,
+      ].filter(Boolean));
+      const visited = new Set();
+      const next = [];
+      const watch = actor => {
+        if (!actor || visited.has(actor)) return;
+        visited.add(actor);
+        if (this._dynamicSignals.has(actor)) return;
+        const signals = [];
+        const names = ['notify::visible', 'child-added', 'child-removed'];
+        for (const prop of ['icon_name', 'gicon'])
+          if (prop in actor) names.push(`notify::${prop.replaceAll('_', '-')}`);
+        for (const name of names) this._connectSafe(actor, name, () => this._updateDynamicIndicators(), signals);
+        this._dynamicSignals.set(actor, signals);
+      };
+      const append = (icon, source, kind) => {
+        if (!this._dynamicIds.has(icon)) this._dynamicIds.set(icon, ++this._nextDynamicId);
+        next.push({id: this._dynamicIds.get(icon), source, kind,
+          iconName: icon.icon_name || 'dialog-information-symbolic', gicon: icon.gicon ?? null,
+          accessibleName: source.accessible_name || icon.accessible_name || icon.icon_name || 'System status'});
+      };
+      const scan = (actor, source, visible = true, kind = 'quick-settings') => {
+        if (!actor) return;
+        watch(actor);
+        visible &&= actor.visible !== false;
+        if (visible && !represented.has(actor) && (actor.icon_name || actor.gicon))
+          append(actor, source, kind);
+        for (const child of actor.get_children?.() ?? []) scan(child, source, visible, kind);
+      };
+      // Observe local visibility, not mapped/paint visibility: the panel's
+      // parent is intentionally hidden, but its providers remain authoritative.
+      const root = qs?._indicators;
+      watch(root);
+      for (const child of root?.get_children?.() ?? []) scan(child, child);
+      for (const [name, kind] of [['screenRecording', 'recording'], ['screenSharing', 'sharing']]) {
+        const source = area[name];
+        if (!source) continue;
+        // Both indicators can contain a timer or two icons. Mirror one compact
+        // action, while still subscribing to the whole native subtree.
+        const before = next.length;
+        scan(source, source, true, kind);
+        if (next.length > before + 1) next.splice(before + 1);
+      }
+      for (const box of [Main.panel?._rightBox, Main.panel?._leftBox]) watch(box);
+      for (const [actor, signals] of this._dynamicSignals) {
+        if (visited.has(actor)) continue;
+        this._disconnect(signals);
+        this._dynamicSignals.delete(actor);
+      }
+      const signature = item => [item.id, item.iconName, item.gicon?.to_string?.() ?? item.gicon, item.accessibleName, item.kind];
+      if (next.length === this.dynamicIndicators.length && next.every((item, i) =>
+        signature(item).every((value, j) => value === signature(this.dynamicIndicators[i])[j]))) return;
+      this.dynamicIndicators = next;
+      this._emit('indicators-changed', next);
+    } finally {
+      this._scanningIndicators = false;
+    }
+  }
+
+  activateDynamicIndicator(item) {
+    const active = this.dynamicIndicators.find(entry => entry.id === item?.id);
+    if (!active) return false;
+    if (active.kind === 'recording') {
+      Main.screenshotUI?.stopScreencast();
+      return true;
+    }
+    if (active.kind === 'sharing' && active.source._stopSharing) {
+      active.source._stopSharing();
+      return true;
+    }
+    return false;
+  }
+
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
     if (this._clockTimeoutId !== null) GLib.source_remove(this._clockTimeoutId);
     this._clockTimeoutId = null;
     this._disconnect(this._signals);
+    for (const signals of this._dynamicSignals.values()) this._disconnect(signals);
+    this._dynamicSignals.clear();
+    this.dynamicIndicators = [];
     for (const group of this._groups.values()) this._disconnect(group.signals);
     this._groups.clear();
     this._listeners.clear();

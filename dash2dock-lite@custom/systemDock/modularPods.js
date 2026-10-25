@@ -9,7 +9,7 @@ import { AttachedDockCanvas } from '../attachedBackground.js';
 import {getAttachedPodPickBoxes} from '../attachedGeometry.js';
 import {PodElevation} from './podElevation.js';
 import {
-  NetworkItem, BluetoothItem, AudioItem, BatteryItem, InputSourceItem, ModularClockItem,
+  NetworkItem, BluetoothItem, AudioItem, BatteryItem, InputSourceItem, ModularClockItem, DynamicIndicatorItem,
 } from './systemDockItems.js';
 
 const isFullscreenObscured = monitor => !!monitor?.inFullscreen &&
@@ -65,7 +65,7 @@ const AttachedPod = GObject.registerClass(
         this._contentBox = new St.BoxLayout({
           style_class: 'modular-pod-box',
           orientation: Clutter.Orientation.VERTICAL,
-          reactive: false,
+          reactive: true,
           x_expand: false,
         });
         if (this._contentBox.layout_manager) {
@@ -91,9 +91,12 @@ const AttachedPod = GObject.registerClass(
         });
         this._surface.connect('button-release-event', (_actor, event) => {
           if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
-          const item = [...this._items.values()].find(button => button.visible);
-          item?._onActivate();
-          return Clutter.EVENT_STOP;
+          if (this._items.size === 1) {
+            const item = [...this._items.values()].find(button => button.visible);
+            item?._onActivate();
+            return Clutter.EVENT_STOP;
+          }
+          return Clutter.EVENT_PROPAGATE;
         });
         this.connect('notify::visible', () => {
           if (!this.visible) this._resetInteraction();
@@ -117,12 +120,11 @@ const AttachedPod = GObject.registerClass(
         systemMenus: this.systemMenus,
         systemState: this.systemState,
         extension: this.extension,
-        iconSize: this.extension?.modular_indicator_icon_size ?? 18,
+        iconSize: this.extension?.modular_indicator_icon_size ?? 16,
         side: St.Side.LEFT,
       });
-      // Override the Dual Edge minimum width: narrow pods must allocate every
-      // button inside the visible body, never spill into application windows.
-      item.set_style('min-width: 0; min-height: 0; padding: 4px;');
+      // Compact pod items allocate buttons inside the visible body
+      item.set_style('min-width: 0; min-height: 0; padding: 2px 1px;');
       item.x_expand = true;
       item.x_align = Clutter.ActorAlign.FILL;
       item._systemPod = this;
@@ -163,9 +165,20 @@ const AttachedPod = GObject.registerClass(
     getMeasuredContentHeight() {
       this._refreshContent();
       const [, natural] = this._contentBox.layout_manager?.get_preferred_height?.(this._contentBox, -1) ??
-        this._contentBox.get_preferred_height(-1);
-      const val = Number.isFinite(natural) && natural > 0 ? natural : 100;
-      this._measuredHeight = Math.ceil(val);
+        this._contentBox.get_preferred_height?.(-1) ?? [0, 0];
+      if (Number.isFinite(natural) && natural > 0) {
+        this._measuredHeight = Math.ceil(natural);
+        return this._measuredHeight;
+      }
+      const visibleItems = [...this._items.values()].filter(item => item.visible);
+      let total = 0;
+      for (const item of visibleItems) {
+        const preferred = item.get_preferred_height?.(-1) ?? [0, 0];
+        total += preferred[1] > 0 ? preferred[1] : (this.extension?.modular_indicator_icon_size ?? 16) + 4;
+      }
+      const spacing = this._spacing ?? (this.extension?.modular_indicator_spacing ?? 3);
+      total += Math.max(0, visibleItems.length - 1) * spacing;
+      this._measuredHeight = Math.ceil(total > 0 ? total : 60);
       return this._measuredHeight;
     }
 
@@ -175,7 +188,7 @@ const AttachedPod = GObject.registerClass(
       const natural = preferred?.[1];
       const val = Number.isFinite(natural) && natural > 0
         ? natural
-        : (this.extension?.modular_indicator_icon_size ?? 18) + 8;
+        : (this.extension?.modular_indicator_icon_size ?? 16) + 2;
       this._measuredWidth = Math.ceil(val);
       return this._measuredWidth;
     }
@@ -191,12 +204,12 @@ const AttachedPod = GObject.registerClass(
       if (!geometry) { this.hide(); return; }
       const gx = Number.isFinite(geometry.x) ? Math.round(geometry.x) : 0;
       const gy = Number.isFinite(geometry.y) ? Math.round(geometry.y) : 0;
-      const gw = Number.isFinite(geometry.width) && geometry.width > 0 ? Math.round(geometry.width) : 44;
-      const gh = Number.isFinite(geometry.height) && geometry.height > 0 ? Math.round(geometry.height) : 100;
+      const gw = Number.isFinite(geometry.width) && geometry.width > 0 ? Math.round(geometry.width) : 24;
+      const gh = Number.isFinite(geometry.height) && geometry.height > 0 ? Math.round(geometry.height) : 60;
 
       this.set_position(gx, gy);
       this._elevation.configure(this.extension);
-      const dist = Number.isFinite(this._elevation.distance) ? this._elevation.distance : 8;
+      const dist = Number.isFinite(this._elevation.distance) ? this._elevation.distance : 3;
       const reserve = dist + 4;
       const totalWidth = gw + reserve;
       this.set_size(totalWidth, gh);
@@ -204,14 +217,17 @@ const AttachedPod = GObject.registerClass(
       this._canvas.set_size(totalWidth, gh);
       this._surface.set_position(0, 0);
       this._surface.set_size(totalWidth, gh);
-      const inset = geometry.contentLeft ?? Math.max(4, geometry.footDepth ?? 4);
-      const safeInset = Number.isFinite(inset) ? Math.round(inset) : 4;
-      const contentTop = Number.isFinite(geometry.contentTop) ? Math.round(geometry.contentTop) : 18;
+      const inset = geometry.contentLeft ?? 2;
+      const safeInset = Number.isFinite(inset) ? Math.round(inset) : 2;
+      const contentTop = Number.isFinite(geometry.contentTop) ? Math.round(geometry.contentTop) : 17;
+      const contentWidth = Number.isFinite(geometry.contentWidth) && geometry.contentWidth > 0
+        ? Math.round(geometry.contentWidth)
+        : Math.max(1, gw - safeInset - 2);
       const contentHeight = Number.isFinite(geometry.contentHeight) && geometry.contentHeight > 0
         ? Math.round(geometry.contentHeight)
         : Math.max(1, gh - 2 * contentTop);
       this._contentBox.set_position(safeInset, contentTop);
-      this._contentBox.set_size(Math.max(1, gw - safeInset - 4), contentHeight);
+      this._contentBox.set_size(contentWidth, contentHeight);
       const monitor = Main.layoutManager.findMonitorForActor?.(this) || Main.layoutManager.primaryMonitor;
       this.visible = geometry.visible !== false && !isFullscreenObscured(monitor);
       this._syncElevation();
@@ -302,7 +318,7 @@ export const QuickSettingsPod = GObject.registerClass(
         this._addItem('battery', BatteryItem);
         this._addItem('input-source', InputSourceItem);
         this._stateListener = event => {
-          if (['network-changed', 'bluetooth-changed', 'battery-changed', 'audio-changed', 'input-source-changed'].includes(event)) {
+          if (['network-changed', 'bluetooth-changed', 'battery-changed', 'audio-changed', 'input-source-changed', 'indicators-changed'].includes(event)) {
             const previousWidth = this._measuredWidth;
             const changed = this._refreshContent();
             if (changed || this.getMeasuredContentWidth() !== previousWidth) this.updateLayout();
@@ -319,6 +335,22 @@ export const QuickSettingsPod = GObject.registerClass(
 
     _refreshContent() {
       const state = this.systemState;
+      const dynamic = new Map((state.dynamicIndicators ?? []).map(item => [`dynamic-${item.id}`, item]));
+      let changed = false;
+      for (const [name, item] of this._items) {
+        if (!name.startsWith('dynamic-') || dynamic.has(name)) continue;
+        this._contentBox.remove_child(item);
+        this._items.delete(name);
+        item.destroy();
+        changed = true;
+      }
+      for (const [name, indicator] of dynamic) {
+        if (!this._items.has(name)) {
+          this._addItem(name, DynamicIndicatorItem);
+          changed = true;
+        }
+        this._items.get(name).updateIndicator(indicator);
+      }
       const available = {
         network: state.network.available !== false,
         bluetooth: !!state.bluetooth.available,
@@ -326,16 +358,15 @@ export const QuickSettingsPod = GObject.registerClass(
         volume: state.audio.available !== false,
         'input-source': !!state.inputSource.available,
       };
-      const iconSize = this.extension?.modular_indicator_icon_size ?? 18;
-      let changed = false;
+      const iconSize = this.extension?.modular_indicator_icon_size ?? 16;
       for (const [name, item] of this._items) {
         const key = `modular_show_${name.replaceAll('-', '_')}`;
-        const visible = (this.extension?.[key] ?? true) && available[name];
+        const visible = name.startsWith('dynamic-') || ((this.extension?.[key] ?? true) && available[name]);
         changed ||= item.visible !== visible;
         item.visible = visible;
         if (item._icon?.icon_size !== iconSize) item.setIconSize?.(iconSize);
       }
-      const spacing = this.extension?.modular_indicator_spacing ?? 6;
+      const spacing = this.extension?.modular_indicator_spacing ?? 3;
       if (this._spacing !== spacing) {
         this._spacing = spacing;
         this._contentBox.set_style(`spacing: ${spacing}px;`);
@@ -351,6 +382,7 @@ export const ClockPod = GObject.registerClass(
       super._init({...params, name: 'ClockPod'});
       try {
         this._clockItem = this._addItem('clock', ModularClockItem);
+        this._clockItem.set_style('min-width: 0; min-height: 0; padding: 2px 0;');
         this._stateListener = event => {
           if (event === 'clock-changed') {
             const previous = this._measuredHeight;

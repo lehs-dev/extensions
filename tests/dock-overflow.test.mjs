@@ -35,6 +35,18 @@ class ScrollView extends NativeActor {
     }
 }
 
+test('a short modular viewport retains a full source icon even at maximum magnification', async () => {
+    const {computeDockViewport} = await loadModule('dash2dock-lite@custom/dockOverflow.js');
+    for (const availableHeight of [124, 160, 300, 600]) {
+        const viewport = computeDockViewport({availableHeight, contentHeight: 1200,
+            iconSize: 48, magnify: 1, spread: 1});
+        assert.equal(viewport.overflow, true);
+        assert.ok(viewport.bodyHeight >= 48, 'keyboard focus can expose an entire source icon');
+        assert.ok(viewport.contentTop + viewport.bodyHeight <= viewport.height - 14,
+            'source viewport stays between both flares');
+    }
+});
+
 async function setup(count = 16) {
     const monitor = {index: 0, x: -1600, y: -100, width: 1600, height: 900, geometry_scale: 1.5};
     const constraints = {availableHeight: 300, centerY: 360, visible: true};
@@ -107,6 +119,7 @@ test('modular overflow keeps native Dash in a Scrollable wrapper, wheel/focus ex
     assert.equal(dock.layout(), true);
     allocate();
     assert.equal(dock._scrollView.child, dock._scrollBox);
+    assert.equal(dock.children.at(-1), dock.renderArea, 'painted click targets sit above native scroll wrappers');
     assert.equal(dash.get_parent(), dock._scrollBox);
     assert.equal(dock._modularViewport.overflow, true);
     assert.equal(dock._scaleFactor, 1, 'fractional monitor scale is not applied twice');
@@ -141,6 +154,31 @@ test('modular overflow keeps native Dash in a Scrollable wrapper, wheel/focus ex
     assert.equal(dock._position, 'bottom', 'previous user position is restored');
 });
 
+test('native BaseIcon size matches the configured source slot and is not reset on ordinary frames', async () => {
+    const {dock, icons} = await setup(3);
+    let calls = 0, cleanups = 0;
+    const previous = icons[0]._icon;
+    dock._cleanupIcon = () => cleanups++;
+    previous._destroyConnectId = previous.connect('destroy', () => dock._cleanupIcon(icons[0]));
+    icons[0]._grid = {iconSize: 64, icon: previous, setIconSize(size) {
+        this.icon.destroy();
+        this.icon = new NativeActor();
+        this.iconSize = size;
+        calls++;
+    }};
+    dock.layout();
+    assert.equal(icons[0]._grid.iconSize, 48, 'native minimum size no longer disagrees with renderer/source layout');
+    assert.equal(icons[0]._icon, icons[0]._grid.icon, 'the renderer references the replacement texture');
+    assert.equal(icons[0]._icon.opacity, 0);
+    assert.equal(previous.destroyed, true);
+    assert.equal(cleanups, 0, 'resizing the texture must not destroy its application menu or label');
+    dock.layout();
+    dock.layout();
+    assert.equal(calls, 1);
+    icons[0]._icon.destroy();
+    assert.equal(cleanups, 1, 'final texture disposal still performs normal cleanup');
+});
+
 test('hidden modular Application Dock has no dwell or hover hit region', async () => {
     const {dock} = await setup(3);
     dock.extension.modular_show_appdock = false;
@@ -148,6 +186,20 @@ test('hidden modular Application Dock has no dwell or hover hit region', async (
     assert.equal(dock.visible, false);
     assert.equal(dock.dwell.visible, false);
     assert.equal(dock.isWithinHoverArea([dock.x + 10, dock.y + 40]), false);
+});
+
+test('modular hover entry stays attached to source icons when the painted background changes size', async () => {
+    const {dock, icons} = await setup(3);
+    dock.layout();
+    const inside = [dock.x + 20, dock.y + dock._modularViewport.contentTop + 20];
+    const outside = [dock.x + dock._iconSizeScaledDown + 9, inside[1]];
+    dock._background = new NativeActor({width: 1, height: 1});
+    assert.equal(dock.isWithinHoverArea(inside), true, 'resting source stays interactive during contraction');
+    dock._background.set_size(500, 500);
+    assert.equal(dock.isWithinHoverArea(outside), false, 'expanded paint cannot initiate hover over an adjacent window');
+    icons[0]._scale = 1.5;
+    icons[0]._renderer = new NativeActor({x: outside[0] - 5, y: outside[1] - 5, width: 72, height: 72});
+    assert.equal(dock.isWithinHoverArea(outside), true, 'actual magnified icons retain direct pointer interaction');
 });
 
 test('modular capsule remains stable while content scrolls and encloses a single magnified application', async () => {
@@ -167,20 +219,22 @@ test('modular capsule remains stable while content scrolls and encloses a single
     background._canvas = new NativeActor();
     background._canvas.set_state = state => {background._canvas.state = state;};
     let scrollY = 0;
-    const dock = {x: 0, y: 200, width: 150, height: 300, _modularViewport: {},
+    const dock = {x: 0, y: 200, width: 150, height: 300, _modularViewport: {overflow: true},
         isVertical: () => true,
         dash: {width: 60, height: 800, translationX: 0, translationY: 0,
             get_transformed_position: () => [0, 235 - scrollY]},
         extension: {desktopLayoutManager: {mode: 1}, background_style: 0,
             animation_magnify: 1, dock_padding: 0, flare_width: 14}};
-    const first = {_icon: {translationX: 0, translationY: 0}};
+    const first = {_icon: {translationX: 0, translationY: 0},
+        _renderer: new NativeActor({x: 0, y: 270, width: 96, height: 96})};
+    dock._icons = [first];
     const params = {first, last: first, iconSize: 48, scaleFactor: 1,
         vertical: true, position: 'left', panel_mode: true, dock};
     background.update(params);
     assert.equal(background.opacity, 255, 'one running application still has an attached capsule');
     assert.equal(background.height, 300);
     assert.equal(background.y, 0);
-    assert.ok(background.width >= 96, 'configured maximum magnification remains inside capsule');
+    assert.ok(background.width >= 96, 'actual magnified renderer remains inside capsule');
     const width = background.width;
     scrollY = 450;
     background.update(params);
@@ -188,6 +242,10 @@ test('modular capsule remains stable while content scrolls and encloses a single
     assert.equal(background.y, 0);
     assert.equal(background.width, width, 'scroll offsets never change capsule geometry');
     assert.equal(background._canvas.state.position, 'left');
+
+    first._renderer.set_size(48, 48);
+    background.update(params);
+    assert.ok(background.width < width, 'overflow capsule also contracts when magnification ends');
 });
 
 test('secondary modular copies stay suppressed', async () => {
@@ -252,4 +310,50 @@ test('Magic Lamp keeps a positive visible viewport target for an application scr
         assert.ok(geometry.y >= 240 && geometry.y + geometry.height <= 460);
         assert.equal(geometry.dockPosition, 'left');
     }
+});
+
+test('native scroll wrappers remain click-through while painted input targets own pointer events', async () => {
+    const {dock} = await setup(5);
+    dock.layout();
+    assert.equal(dock._scrollView.reactive, false, 'unused source viewport cannot eat application-edge clicks');
+    assert.equal(dock._scrollBox.reactive, false, 'scroll wrapper adds no invisible hit rail');
+
+    let scrollHandled = false;
+    dock._onScrollEvent = () => { scrollHandled = true; return true; };
+    dock._scrollView.emit('scroll-event', {get_scroll_direction: () => 1});
+    assert.equal(scrollHandled, true, 'ScrollView forwards scroll events to dock handler');
+});
+
+test('modular Application Dock does not thrash height or y to monitor dimensions during layout passes', async () => {
+    const {dock, monitor} = await setup(6);
+    dock.layout();
+    const stableHeight = dock.height;
+    const stableY = dock.y;
+    assert.ok(stableHeight < monitor.height, 'Modular dock height must be a compact capsule');
+    assert.ok(stableY > monitor.y, 'Modular dock y must be centered between boundaries');
+
+    const assignedHeights = [];
+    const assignedYs = [];
+    Object.defineProperty(dock, 'height', {
+        get() { return this._h; },
+        set(val) { assignedHeights.push(val); this._h = val; },
+        configurable: true,
+    });
+    Object.defineProperty(dock, 'y', {
+        get() { return this._y; },
+        set(val) { assignedYs.push(val); this._y = val; },
+        configurable: true,
+    });
+    dock._h = stableHeight;
+    dock._y = stableY;
+
+    for (let frame = 0; frame < 10; frame++) {
+        dock.layout();
+    }
+
+    // No intermediate assignment should ever set height to monitor.height (900) or y to monitor.y (-100)
+    assert.ok(!assignedHeights.includes(monitor.height), 'Height must never thrash to monitor.height');
+    assert.ok(!assignedYs.includes(monitor.y), 'Y must never thrash to monitor.y');
+    assert.equal(dock.height, stableHeight, 'Height remains stable across frames');
+    assert.equal(dock.y, stableY, 'Y position remains stable across frames');
 });

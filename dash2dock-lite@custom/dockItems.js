@@ -390,60 +390,67 @@ export const DockBackground = GObject.registerClass(
       let dp = dock.dash.get_transformed_position();
       if (isNaN(dp[0]) || isNaN(dp[1])) return;
 
+      const rect = {};
+      const commitRect = () => {
+        for (const key of ['x', 'y', 'width', 'height'])
+          if (this[key] !== rect[key]) this[key] = rect[key];
+        this._paintedRect = {...rect};
+      };
+
       let padding =
         iconSize * 0.1 * (dock.extension.dock_padding || 0) * scaleFactor;
 
       if (first && last) {
-        let tx = first._icon.translationX;
-        let ty = first._icon.translationY;
-        let tx2 = last._icon.translationX;
-        let ty2 = last._icon.translationY;
+        let tx = first._animationTranslationX ?? first._icon.translationX;
+        let ty = first._animationTranslationY ?? first._icon.translationY;
+        let tx2 = last._animationTranslationX ?? last._icon.translationX;
+        let ty2 = last._animationTranslationY ?? last._icon.translationY;
 
         // bottom
-        this.x = dp[0];
-        this.y = dp[1];
+        rect.x = dp[0];
+        rect.y = dp[1];
         let width = dock.dash.width;
         let height = dock.dash.height;
 
         if (dock.isVertical()) {
-          this.y += ty;
+          rect.y += ty;
           height += ty2 - ty;
         } else {
-          this.x += tx;
+          rect.x += tx;
           width += tx2 - tx;
         }
 
         // padding
-        this.x -= padding;
+        rect.x -= padding;
         width += padding * 2;
-        this.y -= padding;
+        rect.y -= padding;
         height += padding * 2;
 
         if (!isNaN(width)) {
-          this.width = width;
+          rect.width = width;
         }
         if (!isNaN(height)) {
-          this.height = height;
+          rect.height = height;
         }
 
-        this.x -= dock.x;
-        this.y -= dock.y;
+        rect.x -= dock.x;
+        rect.y -= dock.y;
         this._padding = padding;
 
         // adjust padding
         let az = -padding;
-        this.x += az / 2;
-        this.width -= az * (1 + !vertical);
-        this.y += az / 2;
-        this.height -= az * (1 + vertical);
+        rect.x += az / 2;
+        rect.width -= az * (1 + !vertical);
+        rect.y += az / 2;
+        rect.height -= az * (1 + vertical);
 
         if (panel_mode) {
           if (vertical) {
-            this.y = 0;
-            this.height = dock.height;
+            rect.y = 0;
+            rect.height = dock.height;
           } else {
-            this.x = 0;
-            this.width = dock.width;
+            rect.x = 0;
+            rect.width = dock.width;
           }
         }
 
@@ -458,46 +465,98 @@ export const DockBackground = GObject.registerClass(
           const fw = Math.round(flareWidth * scaleFactor);
 
           if (position === DockPosition.BOTTOM) {
-            this.x -= fw;
-            this.width += 2 * fw;
+            rect.x -= fw;
+            rect.width += 2 * fw;
             const screenBottom = dock.height + (dock.dash.translationY || 0);
-            this.height = Math.max(1, screenBottom - this.y);
+            rect.height = Math.max(1, screenBottom - rect.y);
           } else if (position === DockPosition.TOP) {
-            this.x -= fw;
-            this.width += 2 * fw;
-            const bodyBottom = this.y + this.height;
+            rect.x -= fw;
+            rect.width += 2 * fw;
+            const bodyBottom = rect.y + rect.height;
             const screenTop = 0 + (dock.dash.translationY || 0);
-            this.y = screenTop;
-            this.height = Math.max(1, bodyBottom - this.y);
+            rect.y = screenTop;
+            rect.height = Math.max(1, bodyBottom - rect.y);
           } else if (position === DockPosition.LEFT) {
-            this.y -= fw;
-            this.height += 2 * fw;
-            const bodyRight = this.x + this.width;
+            rect.y -= fw;
+            rect.height += 2 * fw;
+            const bodyRight = rect.x + rect.width;
             const screenLeft = 0 + (dock.dash.translationX || 0);
-            this.x = screenLeft;
-            this.width = Math.max(1, bodyRight - this.x);
+            rect.x = screenLeft;
+            rect.width = Math.max(1, bodyRight - rect.x);
           } else if (position === DockPosition.RIGHT) {
-            this.y -= fw;
-            this.height += 2 * fw;
+            rect.y -= fw;
+            rect.height += 2 * fw;
             const screenRight = dock.width + (dock.dash.translationX || 0);
-            this.width = Math.max(1, screenRight - this.x);
+            rect.width = Math.max(1, screenRight - rect.x);
           }
 
           if (dock._modularViewport) {
-            // A stable capsule encloses the scroll viewport and its flares.
-            this.y = dock.dash.translationY || 0;
-            this.height = dock.height;
-            const magnification = Math.min(2, 1 + Math.max(0, dock.extension.animation_magnify ?? 0) * 1.8);
-            this.width = Math.max(this.width, iconSize * magnification * scaleFactor + 2 * padding);
+            // Keep input/scroll allocation stable while the painted contour
+            // follows the interpolated renderers, including a single app.
+            const inset = Math.max(4 * scaleFactor, padding);
+            const restingRights = (dock._icons ?? []).filter(icon => Number.isFinite(icon._fixedPosition?.[0]))
+              .map(icon => icon._fixedPosition[0] - dock.x + icon.width / 2 + iconSize * scaleFactor / 2 + inset);
+            if (restingRights.length) dock._restingWidth = Math.max(...restingRights);
+            const bounds = (dock._icons ?? []).flatMap(icon => {
+              const renderer = icon._renderer;
+              if (!renderer || renderer.visible === false) return [];
+              const b = icon._renderBounds;
+              const [x, y] = b ? [b.x, b.y] : renderer.get_transformed_position();
+              const [w, h] = b ? [b.width, b.height] : renderer.get_transformed_size();
+              if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return [];
+              // Scrolled-out apps must not affect the visible capsule width.
+              if (y + h <= dock.y + fw || y >= dock.y + dock.height - fw) return [];
+              return [{top: y - dock.y, bottom: y + h - dock.y, right: x + w - dock.x}];
+            });
+            if (bounds.length) {
+              rect.width = Math.max(1, Math.max(...bounds.map(b => b.right)) + inset - rect.x);
+              rect.y = Math.min(...bounds.map(b => b.top)) - inset - fw;
+              rect.height = Math.max(...bounds.map(b => b.bottom)) + inset + fw - rect.y;
+            }
+            // When moving vertically near the crown, changing icon profiles
+            // must not shrink the painted body out from under the pointer.
+            // Entry is still gated by the previous paint/source area, and an
+            // actual exit clears this floor on the very next frame.
+            if (dock._hoverPointer) {
+              rect.width = Math.max(rect.width, dock._hoverPointer[0] - dock.x - rect.x + 1);
+              const pointerY = dock._hoverPointer[1] - dock.y;
+              const bottom = Math.max(rect.y + rect.height, pointerY + fw + 1);
+              rect.y = Math.min(rect.y, pointerY - fw - 1);
+              rect.height = bottom - rect.y;
+            }
+            if (dock._modularViewport.overflow) {
+              // Long lists scroll through a fixed capsule; scrolling alone
+              // must never move its top or bottom toward the system pods.
+              rect.y = dock.dash.translationY || 0;
+              rect.height = dock.height;
+            } else {
+              const top = Math.max(dock.dash.translationY || 0, rect.y);
+              const bottom = Math.min((dock.dash.translationY || 0) + dock.height, rect.y + rect.height);
+              rect.y = top;
+              rect.height = Math.max(1, bottom - top);
+            }
           }
 
+          if (dock._modularViewport) {
+            const right = Math.ceil(rect.x + rect.width);
+            const bottom = Math.ceil(rect.y + rect.height);
+            rect.x = Math.floor(rect.x);
+            rect.y = Math.floor(rect.y);
+            rect.width = Math.max(1, right - rect.x);
+            rect.height = Math.max(1, bottom - rect.y);
+          }
+          // All measurements happen before actor mutations. Intermediate Dash
+          // sizes must not force a relayout while reading renderer transforms.
+          commitRect();
           if (this._canvas) {
             this._canvas.visible = true;
-            this._canvas.set_position(0, 0);
-            this._canvas.set_size(this.width, this.height);
+            if (this._canvas.x !== 0 || this._canvas.y !== 0)
+              this._canvas.set_position(0, 0);
+            if (this._canvas.width !== rect.width || this._canvas.height !== rect.height)
+              this._canvas.set_size(rect.width, rect.height);
             this._canvas.set_state({
-              width: this.width,
-              height: this.height,
+              width: rect.width,
+              height: rect.height,
               flareWidth,
               footDepth,
               cornerRadius,
@@ -509,6 +568,7 @@ export const DockBackground = GObject.registerClass(
             });
           }
         } else {
+          commitRect();
           if (this._canvas) {
             this._canvas.visible = false;
           }

@@ -139,6 +139,8 @@ export const AttachedDockCanvas = GObject.registerClass(
         prev.cornerRadius !== s.cornerRadius ||
         prev.scaleFactor !== s.scaleFactor ||
         prev.bodyOffset !== s.bodyOffset ||
+        prev.startFlush !== s.startFlush ||
+        prev.endFlush !== s.endFlush ||
         prev.elevationProgress !== s.elevationProgress ||
         prev.borderThickness !== s.borderThickness ||
         !this._colorEqual(prev.backgroundColor, s.backgroundColor) ||
@@ -183,6 +185,8 @@ export const AttachedDockCanvas = GObject.registerClass(
         scaleFactor: this.state.scaleFactor,
         position: this.state.position || 'bottom',
         bodyOffset: this.state.bodyOffset,
+        startFlush: this.state.startFlush,
+        endFlush: this.state.endFlush,
       });
 
       // Subtle ambient shadow along the contour

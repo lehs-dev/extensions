@@ -11,6 +11,8 @@ export function getAttachedEdgeGeometry({
   scaleFactor = 1.0,
   position = 'bottom',
   bodyOffset = 0,
+  startFlush = false,
+  endFlush = false,
 }) {
   const requestedFlare = Math.max(0, flareWidth * scaleFactor);
   let fd = Math.max(0, footDepth * scaleFactor);
@@ -24,9 +26,11 @@ export function getAttachedEdgeGeometry({
   let D = isVertical ? w : h;
 
   const fw = Math.min(requestedFlare, L / 2);
+  const startFlare = startFlush ? 0 : fw;
+  const endFlare = endFlush ? 0 : fw;
 
   // Body length is the length between the flared ends along the screen edge
-  const bodyLength = Math.max(0, L - 2 * fw);
+  const bodyLength = Math.max(0, L - startFlare - endFlare);
 
   // Clamp corner radius so it does not exceed half body length
   if (cr * 2 > bodyLength) {
@@ -41,6 +45,8 @@ export function getAttachedEdgeGeometry({
       fd = (fd / total) * D;
     }
   }
+  const startCorner = startFlush ? 0 : cr;
+  const endCorner = endFlush ? 0 : cr;
 
   // Stretch only the screen-normal connector. The crown, corners and straight
   // body move together; both edge tips and their edge tangents remain anchored.
@@ -76,26 +82,26 @@ export function getAttachedEdgeGeometry({
 
   // Key boundary points in canonical coordinates
   const leftFootTip = transform(0, D);
-  const leftBodyBottom = transform(fw, D - fd);
-  const leftBodyTop = transform(fw, cr);
-  const topLeft = transform(fw + cr, 0);
-  const topRight = transform(L - fw - cr, 0);
-  const rightBodyTop = transform(L - fw, cr);
-  const rightBodyBottom = transform(L - fw, D - fd);
+  const leftBodyBottom = transform(startFlare, D - fd);
+  const leftBodyTop = transform(startFlare, startCorner);
+  const topLeft = transform(startFlare + startCorner, 0);
+  const topRight = transform(L - endFlare - endCorner, 0);
+  const rightBodyTop = transform(L - endFlare, endCorner);
+  const rightBodyBottom = transform(L - endFlare, D - fd);
   const rightFootTip = transform(L, D);
 
   // Control points for cubic Béziers
-  const leftFootCP1 = transform(KAPPA * fw, D);
-  const leftFootCP2 = transform(fw, D - KAPPA * fd);
+  const leftFootCP1 = transform(KAPPA * startFlare, D);
+  const leftFootCP2 = transform(startFlare, D - KAPPA * fd);
 
-  const topLeftCP1 = transform(fw, (1 - KAPPA) * cr);
-  const topLeftCP2 = transform(fw + (1 - KAPPA) * cr, 0);
+  const topLeftCP1 = transform(startFlare, (1 - KAPPA) * startCorner);
+  const topLeftCP2 = transform(startFlare + (1 - KAPPA) * startCorner, 0);
 
-  const topRightCP1 = transform(L - fw - (1 - KAPPA) * cr, 0);
-  const topRightCP2 = transform(L - fw, (1 - KAPPA) * cr);
+  const topRightCP1 = transform(L - endFlare - (1 - KAPPA) * endCorner, 0);
+  const topRightCP2 = transform(L - endFlare, (1 - KAPPA) * endCorner);
 
-  const rightFootCP1 = transform(L - fw, D - KAPPA * fd);
-  const rightFootCP2 = transform(L - KAPPA * fw, D);
+  const rightFootCP1 = transform(L - endFlare, D - KAPPA * fd);
+  const rightFootCP2 = transform(L - KAPPA * endFlare, D);
 
   // Overshoot points into the screen edge to prevent subpixel antialiasing gaps
   const rightFootTipOvershoot = transform(L, D + 2);
@@ -107,6 +113,10 @@ export function getAttachedEdgeGeometry({
     bodyWidth: bodyLength,
     bodyLength,
     flareWidth: fw,
+    startFlareWidth: startFlare,
+    endFlareWidth: endFlare,
+    startCornerRadius: startCorner,
+    endCornerRadius: endCorner,
     footDepth: fd,
     cornerRadius: cr,
     scaleFactor,
@@ -154,30 +164,30 @@ function curveXAtY(points, y) {
  */
 export function getAttachedPodPickBoxes(params) {
   const g = getAttachedEdgeGeometry({...params, position: 'left'});
-  const {flareWidth: fw, cornerRadius: cr, height: h, width: w} = g;
-  const outerX = y => {
-    if (y < fw) return curveXAtY([g.leftFootTip, g.leftFootCP1, g.leftFootCP2, g.leftBodyBottom], y);
-    if (y < fw + cr) return curveXAtY([g.leftBodyTop, g.topLeftCP1, g.topLeftCP2, g.topLeft], y);
-    return w;
-  };
+  const {height: h, width: w} = g;
   const boxes = [];
-  const end = fw + cr;
-  for (let y = 0; y < end; y += 1) {
-    const y2 = Math.min(end, y + 1);
-    // Do not bridge the step from the connector to the crown at y = fw.
-    const split = y < fw && y2 > fw ? fw : y2;
-    const x2 = outerX(y);
-    if (x2 > 0) {
-      boxes.push({x1: 0, y1: y, x2, y2: split});
-      boxes.push({x1: 0, y1: h - split, x2, y2: h - y});
+  const addEnd = (fw, cr, foot, corner, reverse) => {
+    const reflect = points => reverse ? points.map(p => ({x: p.x, y: h - p.y})) : points;
+    foot = reflect(foot);
+    corner = reflect(corner);
+    const end = fw + cr;
+    for (let y = 0; y < end;) {
+      // Keep bands on one side of the connector/crown step.
+      const y2 = Math.min(end, y + 1, y < fw ? fw : end);
+      const x2 = curveXAtY(y < fw ? foot : corner, y);
+      if (x2 > 0) boxes.push({x1: 0, y1: reverse ? h - y2 : y, x2,
+        y2: reverse ? h - y : y2});
+      y = y2;
     }
-    if (split < y2) {
-      const x = outerX(split);
-      boxes.push({x1: 0, y1: split, x2: x, y2});
-      boxes.push({x1: 0, y1: h - y2, x2: x, y2: h - split});
-    }
-  }
-  if (h > 2 * end) boxes.push({x1: 0, y1: end, x2: w, y2: h - end});
+    return end;
+  };
+  const start = addEnd(g.startFlareWidth, g.startCornerRadius,
+    [g.leftFootTip, g.leftFootCP1, g.leftFootCP2, g.leftBodyBottom],
+    [g.leftBodyTop, g.topLeftCP1, g.topLeftCP2, g.topLeft], false);
+  const end = addEnd(g.endFlareWidth, g.endCornerRadius,
+    [g.rightFootTip, g.rightFootCP2, g.rightFootCP1, g.rightBodyBottom],
+    [g.rightBodyTop, g.topRightCP2, g.topRightCP1, g.topRight], true);
+  if (h > start + end) boxes.push({x1: 0, y1: start, x2: w, y2: h - end});
   return boxes;
 }
 

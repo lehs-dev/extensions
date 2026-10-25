@@ -630,7 +630,7 @@ export const SettingsKeys = (patch) => {
       widget_type: 'switch',
     },
     'modular-elevation-distance': {
-      default_value: 8,
+      default_value: 3,
       widget_type: 'scale',
       value_type: 'i',
     },
@@ -640,12 +640,12 @@ export const SettingsKeys = (patch) => {
       value_type: 'i',
     },
     'modular-upper-pod-offset': {
-      default_value: 12,
+      default_value: 0,
       widget_type: 'scale',
       value_type: 'i',
     },
     'modular-lower-pod-offset': {
-      default_value: 12,
+      default_value: 0,
       widget_type: 'scale',
       value_type: 'i',
     },
@@ -655,17 +655,17 @@ export const SettingsKeys = (patch) => {
       value_type: 'i',
     },
     'modular-quicksettings-width': {
-      default_value: 44,
+      default_value: 24,
       widget_type: 'scale',
       value_type: 'i',
     },
     'modular-indicator-icon-size': {
-      default_value: 18,
+      default_value: 16,
       widget_type: 'scale',
       value_type: 'i',
     },
     'modular-indicator-spacing': {
-      default_value: 6,
+      default_value: 3,
       widget_type: 'scale',
       value_type: 'i',
     },
@@ -690,7 +690,7 @@ export const SettingsKeys = (patch) => {
       widget_type: 'switch',
     },
     'modular-clock-width': {
-      default_value: 44,
+      default_value: 24,
       widget_type: 'scale',
       value_type: 'i',
     },

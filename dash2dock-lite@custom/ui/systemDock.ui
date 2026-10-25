@@ -153,7 +153,7 @@
         <child>
           <object class="AdwActionRow" id="modular-upper-pod-offset-row">
             <property name="title" translatable="yes">Upper Pod Offset</property>
-            <property name="subtitle" translatable="yes">Logical pixels from the frame’s inner top boundary.</property>
+            <property name="subtitle" translatable="yes">Logical pixels from the top screen edge. Zero meets the corner.</property>
             <property name="activatable-widget">modular-upper-pod-offset</property>
             <child>
               <object class="GtkScale" id="modular-upper-pod-offset">
@@ -169,7 +169,7 @@
         <child>
           <object class="AdwActionRow" id="modular-lower-pod-offset-row">
             <property name="title" translatable="yes">Lower Pod Offset</property>
-            <property name="subtitle" translatable="yes">Logical pixels from the frame’s inner bottom boundary.</property>
+            <property name="subtitle" translatable="yes">Logical pixels from the bottom screen edge. Zero meets the corner.</property>
             <property name="activatable-widget">modular-lower-pod-offset</property>
             <child>
               <object class="GtkScale" id="modular-lower-pod-offset">
@@ -733,12 +733,12 @@
     <property name="step-increment">1</property>
   </object>
   <object class="GtkAdjustment" id="modular-quicksettings-width-adjust">
-    <property name="lower">32</property>
+    <property name="lower">20</property>
     <property name="upper">72</property>
     <property name="step-increment">2</property>
   </object>
   <object class="GtkAdjustment" id="modular-clock-width-adjust">
-    <property name="lower">32</property>
+    <property name="lower">20</property>
     <property name="upper">72</property>
     <property name="step-increment">2</property>
   </object>

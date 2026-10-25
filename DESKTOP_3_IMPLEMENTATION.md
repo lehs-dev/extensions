@@ -4,7 +4,41 @@ Updated 25 October 2026 for the existing local working tree. This correction sta
 
 The requested composition is an upper-left Quick Settings capsule, the retained Application Dock centered in the remaining left-edge region, and a lower-left Clock capsule. There is wallpaper between them and no right System Dock in Left Modular. Dual Edge remains separate.
 
-## What was wrong and what changed
+## Latest correction: painted click targets, steady hover and live indicators
+
+The October 25 follow-up fixes the issues in the annotated desktop screenshots:
+
+- The hidden native panel is untracked with `untrackChrome()`, releasing its work-area strut while retaining the native menu hierarchy. Original chrome flags and visibility are restored when the replacement is disabled; Just Perfection ownership and fullscreen remain respected. GNOME 51 calculates struts from `affectsStruts` even for hidden actors: see [the GNOME 51 layout implementation](https://github.com/GNOME/gnome-shell/blob/51.0/js/ui/layout.js#L969).
+- Pods now meet the physical top-left and bottom-left screen corners. The corner-facing end is square, with its flare and rounding removed; the end facing the Application Dock retains its foot. Frame thickness and corner radius add no inset. The default upper/lower offsets are zero.
+- Content starts 2 logical pixels from the left edge and keeps its natural width, including when an older wider body preference is saved. Both default body widths are 24 logical pixels (minimum 20); natural content measurement can widen them for localized labels. Indicator size remains 16 pixels and spacing remains 3 pixels.
+- Clock labels use the same 11 px size, weight and color. Default hover elevation is reduced from 8 to 3 logical pixels.
+- The Application Dock background follows interpolated icon bounds, restoring growth and contraction in both directions. Geometry is calculated before any actor changes, committed once, aligned to pixels and left untouched after settling. The previous per-frame intermediate sizes could force repeated allocations while reading renderer transforms. The canvas also resizes only when required.
+- `dockInput.js` supplies real `St.Button` input targets above the source Dash/scroll wrapper, aligned to the painted icons with a 2–4 px margin confined to dock paint. Rendered icons and invisible source wrappers no longer intercept clicks. Primary/middle clicks, native app menus, Show Apps and custom items use their existing actions. The original GNOME 51 DND gesture follows the painted input target and returns to its source on cleanup; the original AppIcon remains the drag delegate. See [GNOME 51 DND](https://github.com/GNOME/gnome-shell/blob/51.0/js/ui/dnd.js).
+- Animation translations are stored in JavaScript rather than applied to invisible native icon/container actors. Renderer bounds are cached from the same frame used to draw them. Native BaseIcon sizes match the configured slots; texture replacements preserve the application menu/label and refresh the texture reference, following [GNOME 51 BaseIcon's replacement behavior](https://github.com/GNOME/gnome-shell/blob/51.0/js/ui/iconGrid.js). Hover no longer changes the work-area reservation beside maximized windows.
+- Hover entry uses the measured resting icon footprint. Active hover also bridges painted space between magnified icons; profile changes cannot shrink the body out from under the pointer. There is no extra hover tolerance beyond the painted crown toward an adjacent application. Long overflowing lists retain fixed vertical bounds and navigation headroom.
+- Quick Settings observes the native indicator tree, including indicators added/removed after enable. Visible indicators beyond the five represented controls get compact buttons, and the pod grows/shrinks with them. Separate native screen-recording and screen-sharing actions are mirrored once each and retain their stop actions. Privacy, microphone, camera, VPN and extension indicators inside native Quick Settings follow their actual local visibility even while the original panel is hidden. Same-size changes reuse the button; removed providers disconnect. See [GNOME 51 panel indicators](https://github.com/GNOME/gnome-shell/blob/51.0/js/ui/panel.js) and [recording/sharing actions](https://github.com/GNOME/gnome-shell/blob/51.0/js/ui/status/remoteAccess.js).
+
+Verification for this follow-up: **355/355 Node tests passed**, native GJS/Gio checks passed, `npm run check` passed (223 JavaScript files and 8 schema directories), and `git diff --check` passed. New regressions exercise activation beyond the original icon slot, middle/right clicks, zero extra hover at an application edge, hover across painted gaps, unchanged source/work-area geometry, native texture replacement, drag-gesture restoration and dynamic recording/sharing/extra indicators. Existing corner, overflow, lifecycle and 60/120 Hz regressions remain. The compiled schema cache is included. Live GNOME Shell rendering and input dispatch have not been tested in the Dev Container.
+
+After copying the updated extension to the host using the deployment instructions below, apply the compact defaults if old values were explicitly saved. Run this from the updated repository on the GNOME host:
+
+```bash
+desktop_schema_dir="$PWD/dash2dock-lite@custom/schemas"
+for key in modular-upper-pod-offset modular-lower-pod-offset \
+           modular-quicksettings-width modular-clock-width \
+           modular-indicator-icon-size modular-indicator-spacing \
+           modular-elevation-distance; do
+  gsettings --schemadir "$desktop_schema_dir" reset org.gnome.shell.extensions.dash2dock-lite "$key"
+done
+gsettings --schemadir "$desktop_schema_dir" set org.gnome.shell.extensions.dash2dock-lite desktop-layout 1
+gsettings --schemadir "$desktop_schema_dir" set org.gnome.shell.extensions.dash2dock-lite system-dock-hide-topbar true
+```
+
+Log out and back in to load the changed JavaScript and CSS. Check maximized windows against the upper screen edge, both pod menus, dock hover/leave, overflow scrolling, and restoring the native bar when disabling the extension. These host steps have not been executed from the container.
+
+For the latest screenshots, click the outer part of the enlarged VS Code icon, test middle/right click and dragging a favorite, then move vertically along the enlarged dock's crown. At rest, placing the cursor just outside the painted dock at the application edge must not magnify or activate anything. Start/stop GNOME recording and a screen-sharing session: the compact status actions must appear/disappear and the upper pod must resize.
+
+## Previous capsule correction
 
 The incoming code already created separate pod actors and reused `AttachedDockCanvas`, but it had **no whole-capsule hover animation**. It also used default pod flares instead of saved Application Dock geometry, could measure a previous fixed allocation as the content's natural size, and relaid out the Application Dock on ordinary clock/audio changes.
 
@@ -82,6 +116,7 @@ desktop_install="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions"
 desktop_backup="$HOME/desktop3-backup-$(date +%Y%m%d-%H%M%S)"
 
 test -f "$desktop_repo/dash2dock-lite@custom/attachedGeometry.js"
+test -f "$desktop_repo/dash2dock-lite@custom/dockInput.js"
 test -f "$desktop_repo/dash2dock-lite@custom/systemDock/podElevation.js"
 test -f "$desktop_repo/tiling-assistant@custom/src/extension/utility.js"
 mkdir -p "$desktop_backup" "$desktop_install"

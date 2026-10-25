@@ -86,6 +86,32 @@ export const SystemDockButton = GObject.registerClass(
   }
 );
 
+export const DynamicIndicatorItem = GObject.registerClass(
+  class DynamicIndicatorItem extends SystemDockButton {
+    _init(params = {}) {
+      super._init({accessibleName: 'System status', side: params.side});
+      this.systemState = params.systemState;
+      this.systemMenus = params.systemMenus;
+      this._icon = new St.Icon({icon_size: params.iconSize ?? 16, style_class: 'system-dock-icon'});
+      this.set_child(this._icon);
+    }
+
+    updateIndicator(indicator) {
+      this.indicator = indicator;
+      this.accessible_name = indicator.accessibleName;
+      if (indicator.gicon) this._icon.gicon = indicator.gicon;
+      else if (this._icon.icon_name !== indicator.iconName) this._icon.icon_name = indicator.iconName;
+    }
+
+    setIconSize(size) { this._icon.icon_size = size; }
+
+    _onActivate() {
+      if (!this.systemState.activateDynamicIndicator?.(this.indicator))
+        this.systemMenus?.toggleQuickSettings(this, null, {side: this.side});
+    }
+  }
+);
+
 export const ClockItem = GObject.registerClass(
   {},
   class ClockItem extends SystemDockButton {

@@ -8,6 +8,11 @@ function registerBackgroundClass(...args) {
         ? registerGObjectClass(...args) : Original;
 }
 
+class HitButton extends Actor {
+    add_action(action) { action.owner = this; }
+    remove_action(action) { assert.equal(action.owner, this); action.owner = null; }
+}
+
 async function setup(position = 'bottom') {
     const vertical = ['left', 'right'].includes(position);
     let pointer = vertical ? [24, 52] : [52, 24];
@@ -55,9 +60,236 @@ async function setup(position = 'bottom') {
     animator.enable();
     const settle = () => { for (let i = 0; i < 240; i++) animator.animate(16); };
     return {animator, dock, icons, settings, settle,
+        point: value => { pointer = value; },
         move: axis => { pointer = vertical ? [24, axis] : [axis, 24]; },
         leave: () => { within = false; }};
 }
+
+async function setupModularAnimation() {
+    const env = await setup('left');
+    const {dock, icons} = env;
+    const {DockBackground} = await loadModule('dash2dock-lite@custom/dockItems.js', {mocks: {
+        'resource:///org/gnome/shell/ui/main.js': {},
+        'resource:///org/gnome/shell/ui/boxpointer.js': {},
+        'resource:///org/gnome/shell/ui/popupMenu.js': {PopupMenu: class {}},
+        'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
+        'gi://Shell': {default: {}}, 'gi://Gio': {default: {}},
+        'gi://GObject': {default: {registerClass: registerBackgroundClass}},
+        'gi://Clutter': {default: {}},
+        'gi://St': {default: {Widget: GObjectActor, DrawingArea: GObjectActor}},
+        'gi://cairo': {default: {}},
+        './utils.js': {trySpawnCommandLine() {}},
+        './dock.js': {DockPosition: {TOP: 'top', BOTTOM: 'bottom', LEFT: 'left', RIGHT: 'right'}},
+    }});
+    dock._background = new DockBackground();
+    dock.extension.desktopLayoutManager = {mode: 1};
+    dock.extension.flare_width = 14;
+    dock.extension.dock_padding = 0;
+    dock.extension.services = {_appNotices: {}, updateIcon() {}};
+    dock._modularViewport = {overflow: false, contentTop: 100, bodyHeight: 280};
+    dock.height = 500;
+    dock.dash.width = 56;
+    dock.dash.height = 280;
+    dock.dash.y = 100;
+    const actions = [];
+    for (const [i, icon] of icons.entries()) {
+        icon.y += 100;
+        icon.set_size(56, 56);
+        icon._appwell = new HitButton({accessible_name: `App ${i}`});
+        icon._appwell.app = {get_id: () => `app-${i}`};
+        icon._appwell.activate = button => actions.push(['activate', i, button]);
+        icon._appwell.popupMenu = () => actions.push(['menu', i]);
+    }
+    const {Dock} = await loadModule('dash2dock-lite@custom/dock.js', {mocks: {
+        'resource:///org/gnome/shell/ui/main.js': {layoutManager: {primaryIndex: 0}},
+        'resource:///org/gnome/shell/ui/appFavorites.js': {getAppFavorites: () => ({getFavorites: () => []})},
+        'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '51'},
+        'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}},
+        'gi://Shell': {default: {}}, 'gi://Gio': {default: {}},
+        'gi://GObject': {default: {registerClass: (...args) => args.at(-1)}},
+        'gi://Clutter': {default: {}}, 'gi://Graphene': {default: {Point: class {}}},
+        'gi://St': {default: {Widget: Actor, Button: HitButton}},
+        './effects/tint_effect.js': {TintEffect: class {}},
+        './effects/monochrome_effect.js': {MonochromeEffect: class {}},
+        './dockItems.js': {DockIcon: Actor, DockItemContainer: Actor, DockBackground: Actor},
+        './dockItemMenu.js': {DockItemList: class {}}, './autohide.js': {AutoHide: class {}},
+        './animator.js': {Animator: class {}},
+        './utils.js': {get_distance_sqr() {}, get_distance() {}, isInRect() {}, isOverlapRect() {}, tempPath() {}},
+    }});
+    dock.isWithinHoverArea = Dock.prototype.isWithinHoverArea.bind(dock);
+    for (const name of ['_createIconHitTarget', '_syncIconHitTargets', '_activateIcon'])
+        dock[name] = Dock.prototype[name].bind(dock);
+    dock._onEnterEvent = dock._onLeaveEvent = dock._onMotionEvent = () => false;
+    return {...env, actions, leave: () => env.point([1000, 1000])};
+}
+
+test('magnified icon and its small click margin activate the matching native app outside the original slot', async () => {
+    const {dock, icons, actions, point, settle, animator} = await setupModularAnimation();
+    point([24, 240]);
+    settle();
+    const item = icons[2], target = item._renderer._hitTarget;
+    const bounds = item._hitBounds;
+    assert.ok(target.visible);
+    assert.ok(bounds.x + bounds.width > 56 + 10, 'click region follows magnification beyond the native slot');
+    const pointer = [bounds.x + bounds.width - 1, bounds.y + bounds.height / 2];
+    point(pointer);
+    animator.animate(16);
+    assert.equal(dock.isWithinHoverArea(pointer), true);
+    target.emit('clicked', 1);
+    target.emit('clicked', 2);
+    target.emit('clicked', 3);
+    assert.deepEqual(actions, [['activate', 2, 1], ['activate', 2, 2], ['menu', 2]]);
+    const paint = dock._background._paintedRect;
+    const besideWindow = [dock.x + paint.x + paint.width + 1, pointer[1]];
+    assert.equal(dock.isWithinHoverArea(besideWindow), false, 'visible application edge has zero extra hover tolerance');
+    assert.ok(bounds.x + bounds.width <= dock.x + paint.x + paint.width, 'click padding stays within dock paint');
+    point(besideWindow);
+    animator.animate(16);
+    assert.equal(dock._nearestIcon, null, 'moving into the application clears the hover');
+});
+
+test('native source geometry and reserved work area stay fixed while hover moves across applications', async () => {
+    const {dock, icons, animator, point, settle} = await setupModularAnimation();
+    point([1000, 1000]);
+    settle();
+    const sourcePositions = icons.map(icon => icon.get_transformed_position());
+    const reservedWidth = dock.struts.width;
+    for (let step = 0; step < 120; step++) {
+        point([24, 128 + step % 80]);
+        animator.animate(1000 / 120);
+        assert.deepEqual(icons.map(icon => icon.get_transformed_position()), sourcePositions);
+        assert.ok(icons.every(icon => icon._icon.translationX === 0 && icon._icon.translationY === 0));
+        assert.equal(dock.struts.width, reservedWidth, 'hover never moves the maximized window edge');
+    }
+});
+
+test('a compact resting dock does not activate at the adjacent application edge', async () => {
+    const {dock, icons, animator, point, settle} = await setupModularAnimation();
+    dock._iconSizeScaledDown = 24;
+    dock._modularViewport.bodyHeight = 130;
+    dock.dash.height = 130;
+    for (const [i, icon] of icons.entries()) {
+        icon.set_size(26, 26);
+        icon.y = 100 + i * 26;
+    }
+    point([1000, 1000]);
+    settle();
+    const paint = dock._background._paintedRect;
+    point([paint.x + paint.width + 1, 165]);
+    for (let i = 0; i < 90; i++) {
+        animator.animate(16);
+        assert.equal(dock._nearestIcon, null, 'unused source-slot margin cannot initiate magnification');
+    }
+    assert.ok(icons.every(icon => icon._renderer.icon_size * icon._renderer.scaleX === 24));
+});
+
+test('hovering the painted space between enlarged icons does not repeatedly collapse the dock', async () => {
+    const {dock, icons, animator, point, settle} = await setupModularAnimation();
+    point([24, 240]);
+    settle();
+    const paint = dock._background._paintedRect;
+    const x = paint.x + paint.width - 1;
+    let gap = null;
+    for (let y = paint.y + 30; y < paint.y + paint.height - 30; y++) {
+        if (icons.every(icon => {
+            const b = icon._hitBounds;
+            return !b || x < b.x || x >= b.x + b.width || y < b.y || y >= b.y + b.height;
+        })) { gap = [x, y]; break; }
+    }
+    assert.ok(gap, 'fixture includes painted space outside all per-icon targets');
+    point(gap);
+    for (let frame = 0; frame < 90; frame++) {
+        animator.animate(16);
+        assert.ok(dock._nearestIcon, `paint bridges per-icon hit rectangles during active hover (frame ${frame})`);
+    }
+});
+
+test('the native drag gesture follows the painted input target and returns on animation cleanup', async () => {
+    const {dock, icons, move, settle, animator} = await setupModularAnimation();
+    const source = icons[2]._appwell;
+    const gesture = {owner: source, get_actor() { return this.owner; }};
+    source._draggable = {_dndGesture: gesture};
+    move(240);
+    settle();
+    const target = icons[2]._renderer._hitTarget;
+    assert.equal(gesture.owner, target);
+    assert.equal(target._delegate, source);
+    dock._dragging = true;
+    dock._syncIconHitTargets();
+    assert.equal(target.visible, true, 'drag does not hide/cancel its own gesture actor');
+    dock._dragging = false;
+    animator.disable();
+    assert.equal(gesture.owner, source, 'native source regains its gesture on cleanup');
+    assert.equal(source.signals.size, 0, 'proxy source listener is released');
+});
+
+test('destroying a native application releases its painted click target without a stale activation', async () => {
+    const {icons, move, settle, actions, animator} = await setupModularAnimation();
+    move(240);
+    settle();
+    const target = icons[2]._renderer._hitTarget;
+    icons[2]._appwell.destroy();
+    assert.equal(target.visible, false);
+    target.emit('clicked', 1);
+    assert.equal(actions.length, 0);
+    animator.disable();
+});
+
+test('Left Modular background grows with actual hover animation and contracts on leave without reallocating the viewport', async () => {
+    const {dock, move, settle, leave} = await setupModularAnimation();
+    move(1000);
+    settle();
+    const rest = {y: dock._background.y, height: dock._background.height, width: dock._background.width};
+    move(236);
+    settle();
+    assert.ok(dock._background.height > rest.height + 10, 'painted capsule expands along the left edge');
+    assert.ok(dock._background.width > rest.width + 10, 'painted capsule follows raised and magnified icons');
+    assert.ok(dock._background.y < rest.y, 'expansion extends above the resting capsule');
+    assert.equal(dock.height, 500, 'hover never reallocates the input viewport');
+    leave();
+    settle();
+    for (const key of ['y', 'height', 'width'])
+        assert.ok(Math.abs(dock._background[key] - rest[key]) < 0.01, `${key} returns to its resting value`);
+});
+
+test('stationary modular hover does not repeatedly reallocate the background or its Cairo canvas', async () => {
+    const {dock, animator, move, settle} = await setupModularAnimation();
+    move(236);
+    settle();
+    const writes = [];
+    for (const actor of [dock._background, dock._background._canvas]) {
+        for (const key of ['x', 'y', 'width', 'height']) {
+            let value = actor[key];
+            Object.defineProperty(actor, key, {get: () => value, set(next) {
+                writes.push([key, value, next]);
+                value = next;
+            }});
+        }
+    }
+    for (let frame = 0; frame < 90; frame++) animator.animate(16);
+    assert.equal(writes.length, 0, 'a settled pointer must not cause transient background/canvas geometry');
+});
+
+test('real modular hover remains settled at the source boundary at 60 and 120 Hz and contracts on exit', async () => {
+    for (const dt of [1000 / 60, 1000 / 120]) {
+        const {dock, animator, icons, point, leave} = await setupModularAnimation();
+        point([55.5, 236]);
+        for (let frame = 0; frame < 1200 / dt; frame++) animator.animate(dt);
+        assert.ok(dock._nearestIcon, 'source-edge hover remains active');
+        const snapshot = () => JSON.stringify([dock._background.x, dock._background.y,
+            dock._background.width, dock._background.height,
+            icons.map(icon => [icon._renderer.x, icon._renderer.y, icon._renderer.scaleX])]);
+        const settled = snapshot();
+        for (let frame = 0; frame < 90; frame++) {
+            animator.animate(dt);
+            assert.equal(snapshot(), settled, 'stationary pointer does not alternate between hover and rest');
+        }
+        leave();
+        for (let frame = 0; frame < 1200 / dt; frame++) animator.animate(dt);
+        assert.equal(dock._nearestIcon, null);
+        assert.ok(icons.every(icon => icon._renderer.icon_size * icon._renderer.scaleX === 48));
+    }
+});
 
 for (const position of ['bottom', 'top', 'left', 'right']) {
     test(`${position}: hover is continuous across an icon midpoint`, async () => {

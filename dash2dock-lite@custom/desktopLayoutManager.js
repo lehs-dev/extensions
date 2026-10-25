@@ -163,9 +163,12 @@ export class DesktopLayoutManager {
 
   updateApplicationDockConstraints() {
     for (const dock of this.extension.docks ?? []) {
+      const before = [dock.x, dock.y, dock.width, dock.height];
       dock.layout();
-      dock._beginAnimation?.();
-      dock._debounceEndAnimation?.();
+      if ([dock.x, dock.y, dock.width, dock.height].some((value, i) => value !== before[i])) {
+        dock._beginAnimation?.();
+        dock._debounceEndAnimation?.();
+      }
     }
   }
 
@@ -174,8 +177,8 @@ export class DesktopLayoutManager {
     this._updating = true;
     try {
       if (this.mode === LayoutMode.LEFT_MODULAR) {
-        this.quickSettingsPod?.updateLayout();
-        this.clockPod?.updateLayout();
+        this.quickSettingsPod?._refreshContent?.();
+        this.clockPod?._refreshContent?.();
         const geometry = this._computeGeometry();
         if (!geometry.fits) throw new Error('Left Modular pods exceed the available monitor height');
         this.quickSettingsPod?.place(geometry.quickSettings);
@@ -238,7 +241,6 @@ export class DesktopLayoutManager {
     try {
       this._jpSettings = jp.stateObj?.getSettings();
       this._jpSignal = this._jpSettings?.connect('changed::panel', () => {
-        if (this._otherExtensionHidesPanel()) this._panelSnapshot = null;
         this._syncTopBar();
       });
     } catch (error) {
@@ -257,25 +259,41 @@ export class DesktopLayoutManager {
   }
 
   _manageTopBar(hide) {
-    const panel = Main.layoutManager?.panelBox;
+    const layout = Main.layoutManager;
+    const panel = layout?.panelBox;
     if (!panel) return;
     this._changingPanelVisibility = true;
     try {
       if (hide) {
-        if (this._otherExtensionHidesPanel()) return;
-        if (!this._panelSnapshot) {
-          if (!panel.visible) return;
-          this._panelSnapshot = {visible: panel.visible};
+        if (this._otherExtensionHidesPanel()) {
+          // Just Perfection moves the panel to overviewGroup and owns its
+          // restoration from that point on.
+          this._panelSnapshot = null;
+          return;
         }
-        // Shell's fullscreen/Overview tracking may show the actor again. Keep
-        // our visual preference without replacing its parent or chrome flags.
+        const tracked = layout._trackedActors?.find(entry => entry.actor === panel);
+        if (!this._panelSnapshot) {
+          this._panelSnapshot = {visible: panel.visible || (!!tracked?.trackFullscreen &&
+            !!layout.primaryMonitor?.inFullscreen && Main.overview?.visible !== true), chrome: tracked ? {
+            affectsStruts: tracked.affectsStruts,
+            trackFullscreen: tracked.trackFullscreen,
+          } : null};
+        }
+        // GNOME 51 builds work-area struts even for hidden chrome actors.
+        // Untracking also stops fullscreen/Overview from showing it again.
+        // Keep the native hierarchy alive for Quick Settings and calendar menus.
+        if (tracked) layout.untrackChrome(panel);
         if (panel.visible) panel.hide();
       } else if (this._panelSnapshot) {
-        const monitor = Main.layoutManager.primaryMonitor;
-        const fullscreen = monitor?.inFullscreen && Main.overview?.visible !== true;
-        if (!panel.visible && !fullscreen && !this._otherExtensionHidesPanel())
-          panel.visible = this._panelSnapshot.visible;
+        const snapshot = this._panelSnapshot;
         this._panelSnapshot = null;
+        if (this._otherExtensionHidesPanel()) return;
+        if (snapshot.chrome && panel.get_parent() === layout.uiGroup &&
+            !layout._trackedActors?.some(entry => entry.actor === panel))
+          layout.trackChrome(panel, snapshot.chrome);
+        const monitor = layout.primaryMonitor;
+        const fullscreen = monitor?.inFullscreen && Main.overview?.visible !== true;
+        panel.visible = snapshot.visible && !fullscreen;
       }
     } finally {
       this._changingPanelVisibility = false;

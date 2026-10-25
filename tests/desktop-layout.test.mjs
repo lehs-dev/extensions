@@ -4,10 +4,22 @@ import {Actor, loadModule} from './helpers/shell.mjs';
 
 async function setup() {
     const monitor = {index: 0, x: -1440, y: -80, width: 1440, height: 900, geometry_scale: 1.5};
-    const panel = new Actor({visible: true, translation_y: 7});
+    const panel = new Actor({visible: true, translation_y: 7, height: 28});
     const uiGroup = new Actor();
     uiGroup.add_child(panel);
     const layout = new Actor({primaryIndex: 0, primaryMonitor: monitor, panelBox: panel, uiGroup});
+    layout._trackedActors = [{actor: panel, affectsStruts: true, trackFullscreen: true}];
+    layout.untrackChrome = actor => {
+        layout._trackedActors = layout._trackedActors.filter(entry => entry.actor !== actor);
+    };
+    layout.trackChrome = (actor, params) => {
+        assert.ok(!layout._trackedActors.some(entry => entry.actor === actor), 'chrome cannot be registered twice');
+        layout._trackedActors.push({actor, ...params});
+        if (params.trackFullscreen) actor.visible = !monitor.inFullscreen;
+    };
+    // GNOME 51 derives struts from chrome flags, including hidden actors.
+    layout.workAreaTop = () => monitor.y + layout._trackedActors.reduce((height, entry) =>
+        height + (entry.affectsStruts ? entry.actor.height : 0), 0);
     const extensionManager = new Actor();
     extensionManager.lookup = () => null;
     const actors = new Set();
@@ -109,14 +121,18 @@ test('failed initial layout restores panel and cleans shared services', async ()
     assert.equal(panel.visible, true);
 });
 
-test('pod geometry uses frame inset once and leaves monitor scale to St/Cairo', async () => {
+test('pods meet the actual screen corners regardless of frame thickness or monitor scale', async () => {
     const {manager, extension, monitor} = await setup();
     extension.desktop_layout = 1;
     manager.enable();
     assert.equal(manager.quickSettingsPod.x, monitor.x);
-    assert.equal(manager.quickSettingsPod.y, monitor.y + 6 + 12);
-    assert.equal(manager.quickSettingsPod.width, 44);
-    assert.equal(manager.clockPod.y + manager.clockPod.height, monitor.y + monitor.height - 18);
+    assert.equal(manager.quickSettingsPod.y, monitor.y);
+    assert.equal(manager.quickSettingsPod.width, 24);
+    assert.equal(manager.quickSettingsPod.startFlush, true);
+    assert.equal(manager.clockPod.endFlush, true);
+    assert.equal(manager.quickSettingsPod.contentLeft, 2);
+    assert.equal(manager.quickSettingsPod.contentTop, 3);
+    assert.equal(manager.clockPod.y + manager.clockPod.height, monitor.y + monitor.height);
     const bounds = manager.getModularConstraints(monitor);
     assert.equal(bounds.topBoundary, manager.quickSettingsPod.y + manager.quickSettingsPod.height + 16);
     assert.equal(bounds.bottomBoundary, manager.clockPod.y - 16);
@@ -180,6 +196,52 @@ test('native chrome visibility updates cannot reveal an owned hidden panel', asy
     manager.destroy();
     assert.equal(panel.visible, false, 'disable does not expose a panel above fullscreen content');
     assert.equal(panel.signals.size, 0);
+});
+
+test('hidden panel releases its work-area strut and restores original chrome on disable', async () => {
+    const {manager, panel, monitor, layout, uiGroup} = await setup();
+    const original = {...layout._trackedActors[0]};
+    panel.visible = false;
+    assert.equal(layout.workAreaTop(), monitor.y + 28, 'hiding alone retains the old top inset');
+    panel.visible = true;
+    manager.enable();
+    assert.equal(layout.workAreaTop(), monitor.y, 'maximized windows regain the full vertical area');
+    assert.equal(panel.get_parent(), uiGroup, 'native menu hierarchy remains alive');
+    for (let i = 0; i < 5; i++) manager.updateLayout();
+    assert.equal(layout._trackedActors.length, 0);
+    manager.destroy();
+    assert.equal(layout.workAreaTop(), monitor.y + 28);
+    assert.deepEqual(layout._trackedActors, [original]);
+    assert.equal(panel.visible, true);
+});
+
+test('top bar preference restores chrome immediately and preserves nonstandard chrome flags', async () => {
+    const {manager, extension, layout, panel} = await setup();
+    layout._trackedActors[0].trackFullscreen = false;
+    manager.enable();
+    assert.equal(layout._trackedActors.length, 0);
+    extension.system_dock_hide_topbar = false;
+    manager.onSettingsChanged('system-dock-hide-topbar', false);
+    assert.equal(layout._trackedActors.length, 1);
+    assert.equal(layout._trackedActors[0].trackFullscreen, false);
+    assert.equal(panel.visible, true);
+    extension.system_dock_hide_topbar = true;
+    manager.onSettingsChanged('system-dock-hide-topbar', true);
+    assert.equal(layout._trackedActors.length, 0);
+    manager.destroy();
+    assert.equal(layout._trackedActors.length, 1);
+});
+
+test('enabling over a fullscreen window does not permanently hide the native panel on disable', async () => {
+    const {manager, panel, monitor, layout} = await setup();
+    monitor.inFullscreen = true;
+    panel.visible = false;
+    manager.enable();
+    assert.equal(layout._trackedActors.length, 0);
+    monitor.inFullscreen = false;
+    manager.destroy();
+    assert.equal(panel.visible, true);
+    assert.equal(layout._trackedActors[0].trackFullscreen, true);
 });
 
 test('Just Perfection can take panel ownership and keeps its hidden state after disable', async () => {

@@ -1790,6 +1790,88 @@ test('Desktop 3: pods own separate nonreactive actors and release shared listene
   state.destroy();
 });
 
+test('Left Modular grows for recording, sharing and extra native indicators, and shrinks when they disappear', async () => {
+  const env = await setupSystemDockEnvironment();
+  const qs = env.nativeQuickSettings;
+  qs._indicators = new MockSignalActor();
+  for (const source of [qs._network, qs._bluetooth, qs._volumeOutputIndicator, qs._system]) {
+    source.add_child(source._indicator);
+    qs._indicators.add_child(source);
+  }
+  const privacy = new MockSignalActor({visible: false});
+  const privacyIcon = new MockSignalActor({icon_name: 'media-record-symbolic'});
+  privacy.add_child(privacyIcon);
+  qs._indicators.add_child(privacy);
+  const recording = new MockSignalActor({visible: false, accessible_name: 'Stop Screencast'});
+  recording.add_child(new MockSignalActor({text: '0:00'}));
+  recording.add_child(new MockSignalActor({icon_name: 'screencast-stop-symbolic'}));
+  const sharing = new MockSignalActor({visible: false, accessible_name: 'Stop Screen Sharing'});
+  sharing.add_child(new MockSignalActor({icon_name: 'screen-shared-symbolic'}));
+  sharing.add_child(new MockSignalActor({icon_name: 'screencast-stop-symbolic'}));
+  env.MainMock.panel.statusArea.screenRecording = recording;
+  env.MainMock.panel.statusArea.screenSharing = sharing;
+  let stops = 0, sharesStopped = 0, menusOpened = 0, layouts = 0;
+  env.MainMock.screenshotUI = {stopScreencast() { stops++; }};
+  sharing._stopSharing = () => sharesStopped++;
+  const {SystemState} = await loadModule('dash2dock-lite@custom/systemDock/systemState.js', {mocks: env.sharedMocks});
+  const {QuickSettingsPod} = await loadModule('dash2dock-lite@custom/systemDock/modularPods.js', {
+    mocks: {...env.sharedMocks, '../attachedBackground.js': {AttachedDockCanvas: env.StMock.DrawingArea}},
+  });
+  const state = new SystemState();
+  const pod = new QuickSettingsPod({extension: {}, systemState: state,
+    systemMenus: {toggleQuickSettings() { menusOpened++; }}, onLayoutChanged: () => layouts++});
+  pod.enable();
+  const baseHeight = pod.getMeasuredContentHeight();
+  assert.equal(state.dynamicIndicators.length, 0, 'fixed network/audio/battery icons are not duplicated');
+  env.panelBox.visible = false;
+  recording.visible = true;
+  recording.emit('notify::visible');
+  assert.equal(state.dynamicIndicators.length, 1, 'local native visibility works despite the hidden top bar');
+  const record = state.dynamicIndicators[0];
+  const recordButton = pod._items.get(`dynamic-${record.id}`);
+  assert.ok(pod.getMeasuredContentHeight() > baseHeight, 'recording increases natural pod height');
+  recordButton.emit('clicked');
+  assert.equal(stops, 1, 'compact stop action reaches the native screencast controller');
+  sharing.visible = true;
+  sharing.emit('notify::visible');
+  assert.equal(state.dynamicIndicators.filter(item => item.kind === 'sharing').length, 1,
+    'two native sharing icons become one compact action');
+  const share = state.dynamicIndicators.find(item => item.kind === 'sharing');
+  pod._items.get(`dynamic-${share.id}`).emit('clicked');
+  assert.equal(sharesStopped, 1);
+  privacy.visible = true;
+  privacy.emit('notify::visible');
+  const status = state.dynamicIndicators.find(item => item.source === privacy);
+  pod._items.get(`dynamic-${status.id}`).emit('clicked');
+  assert.equal(menusOpened, 1, 'other indicators open native Quick Settings');
+  const external = new MockSignalActor({visible: true});
+  const externalIcon = new MockSignalActor({icon_name: 'camera-web-symbolic'});
+  external.add_child(externalIcon);
+  qs._indicators.add_child(external);
+  const entry = state.dynamicIndicators.find(item => item.source === external);
+  assert.ok(entry, 'an indicator added after enable is discovered');
+  const button = pod._items.get(`dynamic-${entry.id}`);
+  pod.getMeasuredContentWidth();
+  const previousLayouts = layouts;
+  externalIcon.icon_name = 'microphone-sensitivity-high-symbolic';
+  externalIcon.emit('notify::icon-name');
+  assert.equal(button._icon.icon_name, 'microphone-sensitivity-high-symbolic');
+  assert.equal(pod._items.get(`dynamic-${entry.id}`), button, 'icon changes reuse the existing control');
+  assert.equal(layouts, previousLayouts, 'a same-size icon update does not move the application dock');
+  qs._indicators.remove_child(external);
+  qs._indicators.emit('child-removed', external);
+  assert.equal(pod._items.has(`dynamic-${entry.id}`), false);
+  assert.equal(externalIcon.signals.size, 0, 'removed indicator subscriptions are released');
+  for (const source of [recording, sharing, privacy]) {
+    source.visible = false;
+    source.emit('notify::visible');
+  }
+  assert.equal(pod.getMeasuredContentHeight(), baseHeight, 'pod returns to its original compact height');
+  pod.destroy(); state.destroy();
+  for (const actor of [qs._indicators, recording, sharing, privacy, privacyIcon])
+    assert.equal(actor.signals.size, 0, 'dynamic provider subscriptions are released on disable');
+});
+
 test('Desktop 3: real Shell 51 providers track stream replacement, battery data and external input methods', async () => {
   const env = await setupSystemDockEnvironment();
   const qs = env.nativeQuickSettings;

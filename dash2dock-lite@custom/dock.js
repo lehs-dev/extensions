@@ -12,6 +12,7 @@ import Graphene from 'gi://Graphene';
 import St from 'gi://St';
 
 import { computeDockViewport } from './dockOverflow.js';
+import {createIconHitTarget, syncIconHitTargets} from './dockInput.js';
 
 import { Dash } from 'resource:///org/gnome/shell/ui/dash.js';
 
@@ -227,6 +228,24 @@ export let Dock = GObject.registerClass(
       return Clutter.EVENT_PROPAGATE;
     }
 
+    _createIconHitTarget(renderer) { return createIconHitTarget(this, renderer); }
+    _syncIconHitTargets() { syncIconHitTargets(this); }
+
+    _activateIcon(item, button = 1) {
+      if (button === 3) {
+        if (item.custom_icon && item._menu) item._menu.popup();
+        else item._appwell?.popupMenu?.();
+      } else if (item === this.dash?._showAppsIcon) {
+        if (button !== 1) return;
+        if (Main.overview.visible) Main.overview.toggle();
+        else Main.overview.showApps();
+      } else if (item.custom_icon && item._onClick) {
+        item._onClick();
+      } else {
+        item._appwell?.activate(button);
+      }
+    }
+
     _onMotionEvent(evt) {
       if (!this._monitor.inFullscreen) {
         this._beginAnimation();
@@ -421,8 +440,8 @@ export let Dock = GObject.registerClass(
       this._separator.name = 'separator';
       this._extraIcons.add_child(this._separator);
 
-      this.dash.reactive = true;
-      this.dash.track_hover = true;
+      this.dash.reactive = false;
+      this.dash.track_hover = false;
       this.dash.connectObject(
         'scroll-event',
         this._onScrollEvent.bind(this),
@@ -445,6 +464,7 @@ export let Dock = GObject.registerClass(
 
     _attachDash(dash) {
       this.add_child(dash);
+      if (this.renderArea) this.set_child_above_sibling(this.renderArea, null);
     }
 
     _destroyScrollView() {
@@ -452,6 +472,10 @@ export let Dock = GObject.registerClass(
       if (this._scrollAdjustmentSignal) {
         this._scrollView.vadjustment.disconnect(this._scrollAdjustmentSignal);
         this._scrollAdjustmentSignal = null;
+      }
+      if (this._scrollEventSignal) {
+        this._scrollView.disconnect(this._scrollEventSignal);
+        this._scrollEventSignal = null;
       }
       if (this.dash?.get_parent() === this._scrollBox)
         this._scrollBox.remove_child(this.dash);
@@ -479,7 +503,11 @@ export let Dock = GObject.registerClass(
           this._beginAnimation();
           this._debounceEndAnimation();
         });
+        this._scrollEventSignal = this._scrollView.connect('scroll-event', (_actor, event) => {
+          return this._onScrollEvent(_actor, event);
+        });
         this.add_child(this._scrollView);
+        this.set_child_above_sibling(this.renderArea, null);
       } else if (!modular && this._scrollView) {
         this._destroyScrollView();
         this.add_child(this.dash);
@@ -758,6 +786,25 @@ export let Dock = GObject.registerClass(
       }
     }
 
+    _syncSourceIconSize(item, size) {
+      const baseIcon = item._grid ?? item.icon;
+      if (!baseIcon?.setIconSize || baseIcon.iconSize === size) return;
+      const previous = item._icon;
+      // BaseIcon.setIconSize() destroys and replaces its texture on GNOME 51.
+      // That is a texture refresh, not removal of the app/menu/label owner.
+      if (previous?._destroyConnectId) {
+        previous.disconnect(previous._destroyConnectId);
+        previous._destroyConnectId = null;
+      }
+      baseIcon.setIconSize(size);
+      const next = baseIcon.icon ?? baseIcon._iconBin?.child ?? previous;
+      if (!next) return;
+      item._icon = next;
+      next.opacity = 0;
+      next.reactive = next.track_hover = false;
+      next._destroyConnectId = next.connect('destroy', () => this._cleanupIcon(item));
+    }
+
     _findIcons() {
       if (this._icons && !this._dragging) {
         let _boxIconsLength = this.dash._box.get_children().length;
@@ -862,8 +909,6 @@ export let Dock = GObject.registerClass(
         }
       }
 
-      let noAnimation = !this.extension.animate_icons_unmute;
-
       let pv = new Point();
       pv.x = 0.5;
       pv.y = 0.5;
@@ -879,16 +924,20 @@ export let Dock = GObject.registerClass(
             }
           };
         }
-        c._icon.track_hover = true;
-        c._icon.reactive = true;
+        c._icon.track_hover = false;
+        c._icon.reactive = false;
+        if (c._appwell) {
+          c._appwell.reactive = false;
+          c._appwell.track_hover = false;
+        }
         if (typeof c._icon.set_pivot_point === 'function') {
           c._icon.set_pivot_point(0.5, 0.5);
         } else {
           c._icon.pivot_point = pv;
         }
         if (c._button) {
-          c._button.reactive = noAnimation;
-          c._button.track_hover = noAnimation;
+          c._button.reactive = false;
+          c._button.track_hover = false;
           c.toggle_mode = false;
         }
         if (c._grid) {
@@ -897,13 +946,13 @@ export let Dock = GObject.registerClass(
         }
         if (c._appwell && !c._appwell._activate) {
           c._appwell._activate = c._appwell.activate;
-          c._appwell.activate = () => {
+          c._appwell.activate = (...args) => {
             try {
               if (!c._menu) {
                 this._maybeBounce(c);
               }
-              this._maybeMinimizeOrMaximize(c._appwell.app);
-              c._appwell._activate();
+              this._maybeMinimizeOrMaximize(c._appwell.app, args[0]);
+              c._appwell._activate(...args);
             } catch (err) {
               // happens with dummy DashIcons
             }
@@ -1223,6 +1272,8 @@ export let Dock = GObject.registerClass(
       }
 
       this._icons.forEach((icon) => {
+        const nativeSize = Math.round(iconSize * scaleFactor);
+        this._syncSourceIconSize(icon, nativeSize);
         const focusActor = icon._appwell || icon;
         if (!icon._modularFocusConnected && focusActor.connectObject) {
           icon._modularFocusConnected = true;
@@ -1245,12 +1296,6 @@ export let Dock = GObject.registerClass(
         }
       });
 
-      //! check with multi-monitor and scaled displays
-      this.x = m.x;
-      this.y = m.y;
-      this.width = m.width;
-      this.height = m.height;
-
       // reorient and reposition the dash
       this.dash.last_child.layout_manager.orientation = vertical;
       this.dash._box.layout_manager.orientation = vertical;
@@ -1258,26 +1303,15 @@ export let Dock = GObject.registerClass(
         this._extraIcons.layout_manager.orientation = vertical;
       }
 
-      // hug the edge
-      // if (vertical) {
-      //   this.dash.x = this.width * f.edgeX + this.dash.width * f.offsetX;
-      //   this.dash.y = this.height / 2 - this.dash.height / 2;
-      // } else {
-      //   this.dash.x = this.width / 2 - this.dash.width / 2;
-      //   this.dash.y = this.height * f.edgeY + this.dash.height * f.offsetY;
-      // }
-
       // computation derived from animation scale
       let magnify = this.extension.animation_magnify * 1.8;
       let fp = iconSize * 2 + iconSize * (0.6 * (1 + magnify));
-      if (vertical) {
-        this.width = fp * scaleFactor;
-      } else {
-        this.height = fp * scaleFactor;
-      }
-      this._snapToContainerEdge(m, this, true);
-      this.x += m.x;
-      this.y += m.y;
+
+      const targetWidth = vertical ? Math.round(fp * scaleFactor) : m.width;
+      let targetHeight = vertical ? m.height : Math.round(fp * scaleFactor);
+      let targetX = m.x;
+      let targetY = m.y;
+
       this._modularViewport = null;
       if (modular) {
         const contentHeight = Math.max(iconSizeSpaced, (this._icons?.length ?? 1) * iconSizeSpaced + iconMargins);
@@ -1287,38 +1321,86 @@ export let Dock = GObject.registerClass(
           iconSize,
           flareWidth: this.extension.flare_width ?? 14,
           magnify: this.extension.animation_magnify ?? 0,
+          spread: this.extension.animation_spread ?? 0.5,
         });
         this._modularViewport = viewport;
-        this.height = Math.round(viewport.height);
+        targetHeight = Math.round(viewport.height);
         const centerY = Number.isFinite(modularConstraints.centerY)
           ? modularConstraints.centerY
           : (m.y + m.height / 2);
-        this.y = Math.round(centerY - this.height / 2);
+        targetY = Math.round(centerY - targetHeight / 2);
+        targetX = m.x;
+
+        if (this.x !== targetX) this.x = targetX;
+        if (this.y !== targetY) this.y = targetY;
+        if (this.width !== targetWidth) this.width = targetWidth;
+        if (this.height !== targetHeight) this.height = targetHeight;
+
         const show = this.extension.modular_show_appdock !== false && modularConstraints.visible;
-        this.visible = show && !fullscreen;
-        this.dwell.visible = show && !fullscreen;
-        this.struts.visible = show && !fullscreen;
+        const shouldBeVisible = show && !fullscreen;
+        if (this.visible !== shouldBeVisible) this.visible = shouldBeVisible;
+        if (this.dwell.visible !== shouldBeVisible) this.dwell.visible = shouldBeVisible;
+        if (this.struts.visible !== shouldBeVisible) this.struts.visible = shouldBeVisible;
+
         if (this._scrollView) {
-          this._scrollView.set_position(0, viewport.contentTop);
-          this._scrollView.set_size(iconSizeSpaced + 8, viewport.bodyHeight);
-          this._scrollView.vscrollbar_policy = St.PolicyType.EXTERNAL;
-          this._scrollView.reactive = false;
+          const scrollW = iconSizeSpaced + 8;
+          const scrollH = viewport.bodyHeight;
+          if (this._scrollView.x !== 0 || this._scrollView.y !== viewport.contentTop)
+            this._scrollView.set_position(0, viewport.contentTop);
+          if (this._scrollView.width !== scrollW || this._scrollView.height !== scrollH)
+            this._scrollView.set_size(scrollW, scrollH);
+          if (this._scrollView.vscrollbar_policy !== St.PolicyType.EXTERNAL)
+            this._scrollView.vscrollbar_policy = St.PolicyType.EXTERNAL;
+          if (this._scrollView.reactive)
+            this._scrollView.reactive = false;
         }
         // Clip both native icon hit actors and their existing animated renderers
         // to the same body; rounded flares never acquire transparent hitboxes.
         const flare = Math.min(this.extension.flare_width ?? 14, this.height / 2);
         this.renderArea.set_clip?.(0, flare, this.width, Math.max(0, this.height - 2 * flare));
-        this.dash.set_size(iconSizeSpaced + 8, contentHeight);
-        this.dash.set_position(0, 0);
-        this._scrollBox.set_width?.(iconSizeSpaced + 8);
+        const dashW = iconSizeSpaced + 8;
+        if (this.dash.width !== dashW || this.dash.height !== contentHeight)
+          this.dash.set_size(dashW, contentHeight);
+        if (this.dash.x !== 0 || this.dash.y !== 0)
+          this.dash.set_position(0, 0);
+        if (this._scrollBox) {
+          if (this._scrollBox.reactive)
+            this._scrollBox.reactive = false;
+          if (this._scrollBox.width !== dashW)
+            this._scrollBox.set_width?.(dashW);
+        }
       } else {
-        this.visible = !fullscreen;
-        this.dwell.visible = !fullscreen;
+        if (vertical) {
+          if (this._position == DockPosition.LEFT) {
+            targetX = m.x;
+          } else {
+            targetX = m.x + m.width - targetWidth;
+          }
+          targetY = m.y;
+        } else {
+          targetX = m.x;
+          if (this._position == DockPosition.TOP) {
+            targetY = m.y;
+          } else {
+            targetY = m.y + m.height - targetHeight;
+          }
+        }
+        if (this.x !== targetX) this.x = targetX;
+        if (this.y !== targetY) this.y = targetY;
+        if (this.width !== targetWidth) this.width = targetWidth;
+        if (this.height !== targetHeight) this.height = targetHeight;
+
+        const shouldBeVisible = !fullscreen;
+        if (this.visible !== shouldBeVisible) this.visible = shouldBeVisible;
+        if (this.dwell.visible !== shouldBeVisible) this.dwell.visible = shouldBeVisible;
         this.renderArea.remove_clip?.();
         if (this._scrollView) {
-          this._scrollView.set_position(0, 0);
-          this._scrollView.set_size(this.width, this.height);
-          this._scrollView.vscrollbar_policy = St.PolicyType.NEVER;
+          if (this._scrollView.x !== 0 || this._scrollView.y !== 0)
+            this._scrollView.set_position(0, 0);
+          if (this._scrollView.width !== this.width || this._scrollView.height !== this.height)
+            this._scrollView.set_size(this.width, this.height);
+          if (this._scrollView.vscrollbar_policy !== St.PolicyType.NEVER)
+            this._scrollView.vscrollbar_policy = St.PolicyType.NEVER;
         }
         this._snapToContainerEdge(this, this.dash, true);
       }
@@ -1450,8 +1532,9 @@ export let Dock = GObject.registerClass(
           if (!icon || !icon._icon) continue;
           if (icon._scale && icon._scale > 1.05) {
             let r = icon._renderer || icon;
-            let rPos = r.get_transformed_position?.() || icon.get_transformed_position?.();
-            let rSize = r.get_transformed_size?.() || [icon.width, icon.height];
+            const bounds = icon._hitBounds ?? icon._renderBounds;
+            let rPos = bounds ? [bounds.x, bounds.y] : r.get_transformed_position?.() || icon.get_transformed_position?.();
+            let rSize = bounds ? [bounds.width, bounds.height] : r.get_transformed_size?.() || [icon.width, icon.height];
             if (rPos && Number.isFinite(rPos[0]) && Number.isFinite(rPos[1])) {
               let rx = rPos[0];
               let ry = rPos[1];
@@ -1463,6 +1546,23 @@ export let Dock = GObject.registerClass(
             }
           }
         }
+      }
+
+      if (this._modularViewport) {
+        // Entry follows the stationary source viewport. The animated contour
+        // cannot decide whether to start/stop the animation that resizes it.
+        // Magnified renderers above still retain direct pointer interaction.
+        const left = this.x + (this.dash?.translationX || 0);
+        const top = this.y + this._modularViewport.contentTop + (this.dash?.translationY || 0);
+        const width = this._restingWidth ?? ((this._iconSizeScaledDown ?? 48) * (this._scaleFactor || 1) + 4);
+        if (px >= left && px < left + width &&
+            py >= top && py < top + this._modularViewport.bodyHeight) return true;
+        // Once entered, the painted body bridges gaps between magnified icons.
+        // Keep no tolerance outside its crown toward an adjacent application.
+        const paint = this._background?._paintedRect;
+        return !!this.animated && !!paint && px >= this.x + paint.x &&
+          px < this.x + paint.x + paint.width && py >= this.y + paint.y + flare &&
+          py < this.y + paint.y + paint.height - flare;
       }
 
       // 2. Resting / Base Dock Background Hit-Test
@@ -1655,7 +1755,7 @@ export let Dock = GObject.registerClass(
       });
     }
 
-    _maybeMinimizeOrMaximize(app) {
+    _maybeMinimizeOrMaximize(app, button = 1) {
       if (!app.get_windows) {
         return;
       }
@@ -1672,7 +1772,7 @@ export let Dock = GObject.registerClass(
       let button2 = (modifiers & Clutter.ModifierType.BUTTON2_MASK) != 0;
       let button3 = (modifiers & Clutter.ModifierType.BUTTON3_MASK) != 0;
       let shift = (modifiers & Clutter.ModifierType.SHIFT_MASK) != 0;
-      let isMiddleButton = button2;
+      let isMiddleButton = button === 2 || button2;
       let isCtrlPressed = (modifiers & Clutter.ModifierType.CONTROL_MASK) != 0;
       let openNewWindow =
         app.can_open_new_window() &&

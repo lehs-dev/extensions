@@ -34,7 +34,16 @@ assert(settings.get_int('modular-clock-format') === 2, 'Clock format did not per
 keys.setValue('modular-show-battery', false);
 assert(!settings.get_boolean('modular-show-battery'), 'Pod setting did not persist');
 assert(settings.get_boolean('modular-group-elevation'), 'Group elevation default disabled');
-assert(settings.get_int('modular-elevation-distance') === 8, 'Wrong elevation default');
+const compactDefaults = {
+  'modular-elevation-distance': 3,
+  'modular-upper-pod-offset': 0, 'modular-lower-pod-offset': 0,
+  'modular-quicksettings-width': 24, 'modular-clock-width': 24,
+  'modular-indicator-icon-size': 16, 'modular-indicator-spacing': 3,
+};
+for (const [name, expected] of Object.entries(compactDefaults)) {
+  assert(settings.get_int(name) === expected, `${name}: wrong compact default`);
+  assert(keys.getKey(name).default_value === expected, `${name}: preference reset disagrees with schema`);
+}
 assert(settings.get_int('modular-animation-duration') === 210, 'Wrong animation default');
 keys.setValue('modular-group-elevation', false);
 keys.setValue('modular-elevation-distance', 10);

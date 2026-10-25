@@ -12,7 +12,7 @@ export class PodElevation {
     this.onProgress = onProgress;
     this.progress = 0;
     this.target = 0;
-    this.distance = 8;
+    this.distance = 3;
     this.duration = 210;
     this.enabled = true;
   }
@@ -25,7 +25,7 @@ export class PodElevation {
 
   configure(extension) {
     this.enabled = extension?.modular_group_elevation !== false;
-    this.distance = Math.max(0, Math.min(16, extension?.modular_elevation_distance ?? 8));
+    this.distance = Math.max(0, Math.min(16, extension?.modular_elevation_distance ?? 3));
     this.duration = Math.max(0, Math.min(600, extension?.modular_animation_duration ?? 210));
   }
 
