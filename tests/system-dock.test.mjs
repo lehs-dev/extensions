@@ -1832,25 +1832,35 @@ test('Left Modular grows for recording, sharing and extra native indicators, and
   const record = state.dynamicIndicators[0];
   const recordButton = pod._items.get(`dynamic-${record.id}`);
   assert.ok(pod.getMeasuredContentHeight() > baseHeight, 'recording increases natural pod height');
+  assert.equal(recordButton.reactive, true, 'the stop icon must receive actual pointer events');
+  assert.equal(recordButton.can_focus, true, 'keyboard users can reach the stop action');
+  assert.equal(recordButton.track_hover, true);
+  env.MainMock.screenshotUI.stopScreencast = undefined;
+  assert.equal(state.activateDynamicIndicator(record), false,
+    'a missing native recorder cannot report a successful stop');
   recordButton.emit('clicked');
-  assert.equal(stops, 0, 'the unified pod opens Quick Settings from every status icon');
-  assert.equal(menusOpened, 1);
-  state.activateDynamicIndicator(record);
-  assert.equal(stops, 1, 'native recording action remains owned by the existing provider');
+  assert.equal(menusOpened, 0, 'an unavailable stop action cannot open an unrelated menu');
+  env.MainMock.screenshotUI.stopScreencast = () => { stops++; };
+  recordButton.emit('clicked');
+  assert.equal(stops, 1, 'clicking the stop icon reaches GNOME screenshotUI exactly once');
+  assert.equal(menusOpened, 0, 'stop does not open Quick Settings');
   sharing.visible = true;
   sharing.emit('notify::visible');
   assert.equal(state.dynamicIndicators.filter(item => item.kind === 'sharing').length, 1,
     'two native sharing icons become one compact action');
   const share = state.dynamicIndicators.find(item => item.kind === 'sharing');
-  pod._items.get(`dynamic-${share.id}`).emit('clicked');
-  assert.equal(sharesStopped, 0);
-  state.activateDynamicIndicator(share);
+  const shareButton = pod._items.get(`dynamic-${share.id}`);
+  assert.equal(shareButton.reactive, true);
+  shareButton.emit('clicked');
   assert.equal(sharesStopped, 1);
+  assert.equal(menusOpened, 0);
   privacy.visible = true;
   privacy.emit('notify::visible');
   const status = state.dynamicIndicators.find(item => item.source === privacy);
   pod._items.get(`dynamic-${status.id}`).emit('clicked');
-  assert.equal(menusOpened, 3, 'every status opens the same native Quick Settings');
+  assert.equal(menusOpened, 1, 'ordinary status indicators still open native Quick Settings');
+  assert.equal(pod._items.get(`dynamic-${status.id}`).reactive, false,
+    'a recording-like privacy glyph is still part of the common status button');
   const external = new MockSignalActor({visible: true});
   const externalIcon = new MockSignalActor({icon_name: 'camera-web-symbolic'});
   external.add_child(externalIcon);
@@ -1873,6 +1883,11 @@ test('Left Modular grows for recording, sharing and extra native indicators, and
     source.visible = false;
     source.emit('notify::visible');
   }
+  const beforeStale = {stops, sharesStopped, menusOpened};
+  recordButton._onActivate();
+  shareButton._onActivate();
+  assert.deepEqual({stops, sharesStopped, menusOpened}, beforeStale,
+    'a stale activation after stopping cannot repeat stop or open a menu');
   assert.equal(pod.getMeasuredContentHeight(), baseHeight, 'pod returns to its original compact height');
   pod.destroy(); state.destroy();
   for (const actor of [qs._indicators, recording, sharing, privacy, privacyIcon])

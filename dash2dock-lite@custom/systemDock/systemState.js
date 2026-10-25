@@ -391,12 +391,12 @@ export class SystemState {
 
   activateDynamicIndicator(item) {
     const active = this.dynamicIndicators.find(entry => entry.id === item?.id);
-    if (!active) return false;
-    if (active.kind === 'recording') {
-      Main.screenshotUI?.stopScreencast();
+    if (!active || active.source?.visible === false) return false;
+    if (active.kind === 'recording' && typeof Main.screenshotUI?.stopScreencast === 'function') {
+      Main.screenshotUI.stopScreencast();
       return true;
     }
-    if (active.kind === 'sharing' && active.source._stopSharing) {
+    if (active.kind === 'sharing' && typeof active.source?._stopSharing === 'function') {
       active.source._stopSharing();
       return true;
     }

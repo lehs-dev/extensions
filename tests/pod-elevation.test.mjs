@@ -122,6 +122,7 @@ async function setup() {
   quick.place(geometry.quickSettings); clock.place(geometry.clock); input.place(geometry.inputMethod);
   function setHover(pod, hover, related) {
     if (related && pod.contains(related)) return;
+    stage.picked = hover ? pod._surface : null;
     pod._surface.hover = hover;
     pod._surface.emit('notify::hover');
   }
@@ -760,4 +761,65 @@ test('native surface hover reveals every pod before any click or keyboard focus 
   }
   assert.equal(env.geometry.inputMethod.y - env.geometry.quickSettings.y - env.geometry.quickSettings.height, 3);
   env.destroy();
+});
+
+test('recording stop is actionable inside the unified pod and crossing its button preserves hover', async () => {
+  const env = await setup();
+  const recording = {id: 41, kind: 'recording', iconName: 'screencast-stop-symbolic',
+    accessibleName: 'Stop Screencast'};
+  const privacy = {id: 42, kind: 'quick-settings', iconName: 'media-record-symbolic',
+    accessibleName: 'Microphone in use'};
+  const actions = [];
+  env.state.activateDynamicIndicator = indicator => {
+    if (!env.state.dynamicIndicators.includes(indicator)) return false;
+    actions.push(indicator.id);
+    return true;
+  };
+  env.state.dynamicIndicators = [recording, privacy];
+  env.state.emit('indicators-changed');
+  const stop = env.quick._items.get('dynamic-41');
+  const passive = env.quick._items.get('dynamic-42');
+  assert.equal(stop.reactive, true);
+  assert.equal(stop.can_focus, true);
+  assert.equal(passive.reactive, false);
+  assert.equal(passive.can_focus, false);
+  const width = env.quick._geom.width;
+  env.enter(env.quick); env.finish(env.quick);
+  const layouts = env.layouts;
+
+  // Native crossing may clear the departing actor before setting the arriving
+  // actor's hover flag. The pointer pick must keep one continuous expansion.
+  env.stage.picked = stop;
+  env.quick._surface.hover = false;
+  env.quick._surface.emit('notify::hover');
+  assert.equal(env.quick._elevation.target, 1);
+  stop.hover = true; stop.emit('notify::hover');
+  assert.equal(env.quick._elevation._timeline, null);
+  stop.emit('clicked');
+  assert.deepEqual(actions, [41]);
+  assert.equal(env.quickMenu.isOpen, false);
+  assert.equal(env.layouts, layouts);
+  assert.equal(env.quick._geom.width, width);
+
+  env.stage.picked = env.quick._surface;
+  stop.hover = false; stop.emit('notify::hover');
+  assert.equal(env.quick._elevation.target, 1);
+  env.quick._surface.hover = true;
+  env.quick._surface.emit('notify::hover');
+  assert.equal(env.quick._elevation._timeline, null);
+  env.quick._surface.emit('clicked');
+  assert.equal(env.quickMenu.isOpen, true, 'the regular cluster retains its native menu');
+  env.menus.closeAll();
+  env.leave(env.quick); env.finish(env.quick);
+  assert.equal(env.quick._elevation.progress, 0);
+
+  env.state.dynamicIndicators = [];
+  env.state.emit('indicators-changed');
+  assert.equal(stop.destroyed, true);
+  assert.equal(env.quick._items.has('dynamic-41'), false);
+  stop._onActivate();
+  assert.deepEqual(actions, [41], 'stale stop callbacks cannot restart or stop another operation');
+  assert.equal(env.quickMenu.isOpen, false);
+  env.destroy();
+  assert.equal(env.listeners.size, 0);
 });

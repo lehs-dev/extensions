@@ -88,10 +88,7 @@ const AttachedPod = GObject.registerClass(
         this._destroyed = false;
         // St.Button handles crossing events itself. Observe its native hover
         // property: the passive root does not reliably receive those events.
-        this._surface.connect('notify::hover', () => {
-          this._pointerInside = this._surface.hover;
-          this._syncElevation();
-        });
+        this._surface.connect('notify::hover', () => this._syncPointerHover());
         this._surface.connect('clicked', () => this._activate());
         this.connect('notify::visible', () => {
           if (!this.visible) this._resetInteraction();
@@ -107,7 +104,7 @@ const AttachedPod = GObject.registerClass(
       }
     }
 
-    _addItem(name, ItemClass) {
+    _addItem(name, ItemClass, {nativeAction = false} = {}) {
       const item = new ItemClass({
         systemMenus: this.systemMenus,
         systemState: this.systemState,
@@ -120,16 +117,28 @@ const AttachedPod = GObject.registerClass(
       item.x_expand = true;
       item.x_align = Clutter.ActorAlign.FILL;
       item._systemPod = this;
-      item._onActivate = () => this._activate();
-      // Reuse the status presenters, but all input belongs to the pod's one
-      // shaped button (including gaps and the information revealed on hover).
-      item.reactive = item.can_focus = item.track_hover = false;
+      // Regular status indicators share the capsule's button. Native stop
+      // controls must keep their own action rather than opening Quick Settings.
+      if (!nativeAction) item._onActivate = () => this._activate();
+      item.reactive = item.can_focus = item.track_hover = nativeAction;
+      if (nativeAction) item.connect('notify::hover', () => this._syncPointerHover());
       this._items.set(name, item);
       this._contentBox.add_child(item);
       return item;
     }
 
     _activate() {}
+
+    _syncPointerHover() {
+      const stage = typeof global !== 'undefined' ? global.stage : null;
+      const pointer = typeof global !== 'undefined' ? global.get_pointer?.() : null;
+      const picked = pointer && stage?.get_actor_at_pos(Clutter.PickMode.REACTIVE, pointer[0], pointer[1]);
+      // Crossing from the capsule button to its stop control can clear the old
+      // hover flag before setting the new one. The current pick bridges that gap.
+      this._pointerInside = picked ? this.contains(picked) :
+        [this._surface, ...this._items.values()].some(actor => actor.visible && actor.reactive && actor.hover);
+      this._syncElevation();
+    }
 
     _menuOptions() { return {side: St.Side.LEFT, focusActor: this._surface}; }
 
@@ -395,7 +404,8 @@ export const QuickSettingsPod = GObject.registerClass(
       }
       for (const [name, indicator] of dynamic) {
         if (!this._items.has(name)) {
-          this._addItem(name, DynamicIndicatorItem);
+          this._addItem(name, DynamicIndicatorItem,
+            {nativeAction: indicator.kind === 'recording' || indicator.kind === 'sharing'});
           changed = true;
         }
         this._items.get(name).updateIndicator(indicator);

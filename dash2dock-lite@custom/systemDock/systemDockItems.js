@@ -106,6 +106,11 @@ export const DynamicIndicatorItem = GObject.registerClass(
     setIconSize(size) { this._icon.icon_size = size; }
 
     _onActivate() {
+      if (this.indicator?.kind === 'recording' || this.indicator?.kind === 'sharing') {
+        // A stale stop button must never turn into an unrelated menu toggle.
+        this.systemState.activateDynamicIndicator?.(this.indicator);
+        return;
+      }
       if (!this.systemState.activateDynamicIndicator?.(this.indicator))
         this.systemMenus?.toggleQuickSettings(this, null, {side: this.side});
     }
