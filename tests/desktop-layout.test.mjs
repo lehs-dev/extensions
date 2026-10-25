@@ -156,6 +156,26 @@ test('disabling a pod releases its actors and restores panel when replacement co
 });
 function envMonitor(manager) { return manager._geometry.monitor; }
 
+test('unchanged pod geometry does not relayout the application dock; height and monitor changes do', async () => {
+    const {manager, extension, monitor} = await setup();
+    extension.desktop_layout = 1;
+    manager.enable();
+    manager.updateLayout();
+    const dock = extension.docks[0];
+    const initial = dock.layouts;
+    for (let i = 0; i < 30; i++) manager.updateLayout();
+    assert.equal(dock.layouts, initial);
+    manager.quickSettingsPod.getMeasuredContentHeight = () => 174;
+    manager.updateLayout();
+    assert.equal(dock.layouts, initial + 1);
+    manager.updateLayout();
+    assert.equal(dock.layouts, initial + 1);
+    monitor.height += 100;
+    manager.updateLayout();
+    assert.equal(dock.layouts, initial + 2);
+    manager.destroy();
+});
+
 test('unavailable menus or empty indicator content keep the native panel accessible', async () => {
     for (const key of ['menusAvailable', 'usable']) {
         const {manager, extension, control, panel} = await setup();

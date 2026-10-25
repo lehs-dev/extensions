@@ -75,7 +75,7 @@ async function setupModularAnimation() {
         'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}, DashIcon: Actor, DashItemContainer: Actor},
         'gi://Shell': {default: {}}, 'gi://Gio': {default: {}},
         'gi://GObject': {default: {registerClass: registerBackgroundClass}},
-        'gi://Clutter': {default: {}},
+        'gi://Clutter': {default: {ActorBox: class {constructor(box) {Object.assign(this, box);}}}},
         'gi://St': {default: {Widget: GObjectActor, DrawingArea: GObjectActor}},
         'gi://cairo': {default: {}},
         './utils.js': {trySpawnCommandLine() {}},
@@ -117,6 +117,8 @@ async function setupModularAnimation() {
         './utils.js': {get_distance_sqr() {}, get_distance() {}, isInRect() {}, isOverlapRect() {}, tempPath() {}},
     }});
     dock.isWithinHoverArea = Dock.prototype.isWithinHoverArea.bind(dock);
+    dock._ensureLayout = Dock.prototype._ensureLayout.bind(dock);
+    dock._layoutReady = true;
     for (const name of ['_createIconHitTarget', '_syncIconHitTargets', '_activateIcon'])
         dock[name] = Dock.prototype[name].bind(dock);
     dock._onEnterEvent = dock._onLeaveEvent = dock._onMotionEvent = () => false;
@@ -235,7 +237,7 @@ test('destroying a native application releases its painted click target without 
     animator.disable();
 });
 
-test('Left Modular background grows with actual hover animation and contracts on leave without reallocating the viewport', async () => {
+test('Left Modular background expands once on hover and contracts on leave without reallocating the viewport', async () => {
     const {dock, move, settle, leave} = await setupModularAnimation();
     move(1000);
     settle();
@@ -250,6 +252,91 @@ test('Left Modular background grows with actual hover animation and contracts on
     settle();
     for (const key of ['y', 'height', 'width'])
         assert.ok(Math.abs(dock._background[key] - rest[key]) < 0.01, `${key} returns to its resting value`);
+});
+
+test('moving through every icon keeps the expanded frame fixed at 60 and 120 Hz without relayout', async () => {
+    for (const dt of [1000 / 60, 1000 / 120]) {
+        const {dock, icons, animator, point, settle} = await setupModularAnimation();
+        dock.layout = () => { throw new Error('pointer movement must not request layout'); };
+        point([1000, 1000]); settle();
+        point([24, 240]); settle();
+        const frame = JSON.stringify(dock._background._paintedRect);
+        const writes = [];
+        for (const actor of [dock._background, dock._background._canvas]) {
+            for (const key of ['x', 'y', 'width', 'height']) {
+                let value = actor[key];
+                Object.defineProperty(actor, key, {get: () => value, set(next) {
+                    writes.push([key, next]); value = next;
+                }});
+            }
+        }
+        for (let step = 0; step < 600; step++) {
+            point([24, 129 + (step % 240)]);
+            animator.animate(dt);
+            assert.equal(JSON.stringify(dock._background._paintedRect), frame);
+            assert.equal(dock._nearestIcon !== null, true);
+        }
+        assert.equal(writes.length, 0, 'moving hover does not reallocate the frame or canvas');
+        assert.ok(icons.some(icon => icon._targetScale > 1), 'per-icon effects remain active');
+    }
+});
+
+test('entry/exit is monotonic, child crossings do not restart it, and interrupted entry returns to rest', async () => {
+    const {dock, animator, point, settle} = await setupModularAnimation();
+    point([1000, 1000]); settle();
+    const rest = {...dock._background._paintedRect};
+    let width = rest.width;
+    for (let frame = 0; frame < 18; frame++) {
+        point([24, 128 + frame * 13]);
+        animator.animate(16);
+        assert.ok(dock._background.width >= width);
+        width = dock._background.width;
+    }
+    const expanded = width;
+    point([1000, 1000]);
+    for (let frame = 0; frame < 20; frame++) {
+        animator.animate(16);
+        assert.ok(dock._background.width <= width);
+        width = dock._background.width;
+    }
+    assert.deepEqual({...dock._background._paintedRect}, rest);
+    point([24, 240]); animator.animate(50);
+    assert.ok(dock._background.width > rest.width && dock._background.width < expanded);
+    point([1000, 1000]); settle();
+    assert.deepEqual({...dock._background._paintedRect}, rest);
+});
+
+test('the dock background picks only painted space, including gaps, and drops input when empty', async () => {
+    const {dock, point, settle} = await setupModularAnimation();
+    point([24, 240]); settle();
+    const background = dock._background;
+    const boxes = [];
+    background.should_pick = () => background.reactive;
+    background.pick_box = (context, box) => context.push(box);
+    background.vfunc_pick(boxes);
+    const picked = (x, y) => boxes.some(b => x >= b.x1 && x < b.x2 && y >= b.y1 && y < b.y2);
+    assert.equal(background.reactive, true);
+    assert.equal(picked(background.width / 2, background.height / 2), true);
+    assert.equal(picked(background.width - 0.5, 0.5), false, 'transparent flare stays click-through');
+    assert.equal(picked(background.width + 1, background.height / 2), false, 'animation reserve stays click-through');
+    assert.equal(dock.isWithinHoverArea([background.width + 1, 240]), false);
+    background.update({dock});
+    assert.equal(background.reactive, false);
+    assert.equal(background._paintedRect, null, 'removing the last icon leaves no invisible input');
+});
+
+test('reduced motion collapses the frame immediately without a rebound when animations resume', async () => {
+    const {dock, animator, settings, point, settle} = await setupModularAnimation();
+    point([1000, 1000]); settle();
+    const rest = JSON.stringify(dock._background._paintedRect);
+    point([24, 240]); settle();
+    settings.reducedMotion = 1;
+    animator.animate(16);
+    assert.equal(JSON.stringify(dock._background._paintedRect), rest);
+    point([1000, 1000]);
+    settings.reducedMotion = 0;
+    animator.animate(16);
+    assert.equal(JSON.stringify(dock._background._paintedRect), rest);
 });
 
 test('stationary modular hover does not repeatedly reallocate the background or its Cairo canvas', async () => {

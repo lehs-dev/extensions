@@ -166,6 +166,8 @@ test('pod content hugs the left edge even with a previously saved wide body', as
   assert.equal(g.quickSettings.contentLeft, 2);
   assert.equal(g.quickSettings.contentWidth, 18, 'saved width does not stretch or center the content');
   assert.equal(g.clock.contentWidth, 21);
+  assert.equal(g.quickSettings.width, 24, 'wide saved rail width leaves no empty shelf');
+  assert.equal(g.clock.width, 25, 'localized clock text determines the compact width');
   assert.equal(g.clock.height - g.clock.contentTop - g.clock.contentHeight, 3,
     'bottom clock text has only the small inner padding before the screen edge');
 });

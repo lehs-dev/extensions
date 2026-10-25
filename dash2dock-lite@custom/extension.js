@@ -686,6 +686,7 @@ export default class Dash2DockLiteExt extends Extension {
         case 'animation-rise':
         case 'animation-rise-curve':
         case 'animation-bounce-height': {
+          for (const dock of this.docks) dock._layoutDirty = true;
           if (this.animate_icons) {
             this.animate({ preview: true });
           }
@@ -766,6 +767,7 @@ export default class Dash2DockLiteExt extends Extension {
         }
         case 'dock-padding':
         case 'edge-distance': {
+          for (const dock of this.docks) dock._layoutDirty = true;
           this.animate();
           break;
         }

@@ -18,6 +18,7 @@ export class DesktopLayoutManager {
     this._activeMode = null;
     this._signals = [];
     this._geometry = null;
+    this._dockConstraints = new WeakMap();
     this.systemDock = this.quickSettingsPod = this.clockPod = null;
   }
 
@@ -162,9 +163,14 @@ export class DesktopLayoutManager {
   }
 
   updateApplicationDockConstraints() {
+    const key = JSON.stringify([this.mode, this._geometry?.appDock,
+      Main.layoutManager.monitors?.map(m => [m.x, m.y, m.width, m.height, m.geometry_scale, m.inFullscreen]),
+      this.extension.modular_show_appdock]);
     for (const dock of this.extension.docks ?? []) {
+      if (this.mode === LayoutMode.LEFT_MODULAR && this._dockConstraints.get(dock) === key && !dock._layoutDirty) continue;
       const before = [dock.x, dock.y, dock.width, dock.height];
       dock.layout();
+      this._dockConstraints.set(dock, key);
       if ([dock.x, dock.y, dock.width, dock.height].some((value, i) => value !== before[i])) {
         dock._beginAnimation?.();
         dock._debounceEndAnimation?.();
@@ -311,6 +317,7 @@ export class DesktopLayoutManager {
     this._dispose(this._actors());
     this.systemDock = this.quickSettingsPod = this.clockPod = null;
     this._geometry = null;
+    this._dockConstraints = new WeakMap();
     this.menus?.destroy();
     this.state?.destroy();
     this.menus = this.state = null;

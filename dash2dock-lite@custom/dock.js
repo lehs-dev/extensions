@@ -76,6 +76,11 @@ export let Dock = GObject.registerClass(
       this._monitorIndex = Main.layoutManager.primaryIndex;
 
       this._background = new DockBackground({ name: 'd2daBackground' });
+      this._background.connectObject(
+        'motion-event', () => this._onMotionEvent(),
+        'enter-event', () => this._onEnterEvent(),
+        'leave-event', () => this._onLeaveEvent(),
+        'scroll-event', (_actor, event) => this._onScrollEvent(_actor, event), this);
       this.add_child(this._background);
 
       // for blur-my-shell
@@ -247,19 +252,20 @@ export let Dock = GObject.registerClass(
     }
 
     _onMotionEvent(evt) {
-      if (!this._monitor.inFullscreen) {
+      if (!this._monitor?.inFullscreen && !this._animationRunning) {
         this._beginAnimation();
       }
       this.autohider._debounceCheckHide();
       return Clutter.EVENT_PROPAGATE;
     }
     _onEnterEvent(evt) {
-      if (!this._monitor.inFullscreen) {
+      if (!this._monitor?.inFullscreen && !this._animationRunning) {
         this._beginAnimation();
       }
       return Clutter.EVENT_PROPAGATE;
     }
     _onLeaveEvent(evt) {
+      if (!this._animationRunning) this._beginAnimation();
       this.autohider._debounceCheckHide();
       this._debounceEndAnimation();
       return Clutter.EVENT_PROPAGATE;
@@ -290,6 +296,7 @@ export let Dock = GObject.registerClass(
       return Clutter.EVENT_PROPAGATE;
     }
     _onFullScreen() {
+      this._layoutDirty = true;
       // this._debouncedBeginAnimation();
       this._beginAnimation();
       this.autohider._debounceCheckHide();
@@ -439,6 +446,13 @@ export let Dock = GObject.registerClass(
       });
       this._separator.name = 'separator';
       this._extraIcons.add_child(this._separator);
+
+      // Native redisplay and DND may finish after the apps-changed signal.
+      // React to actual content changes instead of rediscovering every frame.
+      for (const box of [this.dash._box, this._extraIcons]) {
+        box.connectObject('child-added', () => this._onDockContentChanged(),
+          'child-removed', () => this._onDockContentChanged(), this);
+      }
 
       this.dash.reactive = false;
       this.dash.track_hover = false;
@@ -826,6 +840,8 @@ export let Dock = GObject.registerClass(
         return this._icons;
       }
 
+      this._findingIcons = true;
+      try {
       this._dashItems = [];
       this._separators = [];
       this._icons = [];
@@ -989,6 +1005,9 @@ export let Dock = GObject.registerClass(
       });
 
       return this._icons;
+      } finally {
+        this._findingIcons = false;
+      }
     }
 
     _updateExtraIcons() {
@@ -1120,6 +1139,20 @@ export let Dock = GObject.registerClass(
       }
     }
 
+    _onDockContentChanged() {
+      if (this._inLayout || this._findingIcons) return;
+      this._icons = null;
+      this._layoutDirty = true;
+      if (this._onChrome) this._beginAnimation();
+    }
+
+    _ensureLayout() {
+      if (this.extension.desktopLayoutManager?.mode !== 1 ||
+          !this._layoutReady || this._layoutDirty || !this._icons)
+        return this.layout();
+      return !this._layoutSuppressed;
+    }
+
     layout() {
       if (this._inLayout) return true;
       this._inLayout = true;
@@ -1164,6 +1197,8 @@ export let Dock = GObject.registerClass(
       this._syncOwnedStruts(!!this._layoutSuppressed);
       if (this._layoutSuppressed) {
         this.visible = this.dwell.visible = this.struts.visible = false;
+        this._layoutReady = true;
+        this._layoutDirty = false;
         return false;
       }
       const fullscreen = m.inFullscreen && !Main.overview?.visible;
@@ -1429,6 +1464,9 @@ export let Dock = GObject.registerClass(
         }
       }
 
+      this._modularFrames = null;
+      this._layoutReady = true;
+      this._layoutDirty = false;
       return true;
     } finally {
       this._inLayout = false;
@@ -1493,7 +1531,6 @@ export let Dock = GObject.registerClass(
           this._preview--;
         }
 
-        //! add layout here instead of at the
         this.animator.animate(dt);
 
         // Advance simulation frames iteratively when inserting icons without recursion
@@ -1522,6 +1559,13 @@ export let Dock = GObject.registerClass(
 
       let [px, py] = p;
       if (this._modularViewport && (py < this.y || py >= this.y + this.height)) return false;
+
+      if (this._modularViewport && this._background?._pickBoxes) {
+        const x = px - this.x - this._background.x;
+        const y = py - this.y - this._background.y;
+        return this._background._pickBoxes.some(box =>
+          x >= box.x1 && x < box.x2 && y >= box.y1 && y < box.y2);
+      }
 
       // 1. If an icon is actively magnified, allow interaction within its
       // magnified visible actor bounds so interaction remains continuous.
@@ -1651,6 +1695,10 @@ export let Dock = GObject.registerClass(
     }
 
     _beginAnimation(caller) {
+      if (this._animationRunning) {
+        this._debounceEndAnimation();
+        return;
+      }
       if (this.extension.debug_visual) {
         this.add_style_class_name('hi');
         this.struts.add_style_class_name('hi');
@@ -1669,6 +1717,7 @@ export let Dock = GObject.registerClass(
 
       this.animationInterval = this.extension.animationInterval;
       if (this.extension._hiTimer) {
+        this._animationRunning = true;
         if (!this._animationSeq) {
           this._animationSeq = this.extension._hiTimer.runLoop(
             (s, dt) => {
@@ -1684,6 +1733,7 @@ export let Dock = GObject.registerClass(
     }
 
     _endAnimation() {
+      this._animationRunning = false;
       if (this.extension.debug_visual) {
         this.remove_style_class_name('hi');
         this.struts.remove_style_class_name('hi');
@@ -1697,7 +1747,7 @@ export let Dock = GObject.registerClass(
         this.extension._loTimer.cancel(this.debounceEndSeq);
       }
       this.autohider._debounceCheckHide();
-      this._icons = null;
+      if (!this._modularViewport) this._icons = null;
       this._dragged = null;
       this._lastHoveredIcon = null;
     }
@@ -1726,6 +1776,7 @@ export let Dock = GObject.registerClass(
     }
 
     cancelAnimations() {
+      this._animationRunning = false;
       this.extension._hiTimer.cancel(this._animationSeq);
       this._animationSeq = null;
       this.extension._hiTimer.cancel(this.autohider._animationSeq);

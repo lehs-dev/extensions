@@ -4,6 +4,18 @@ Updated 25 October 2026 for the existing local working tree. This correction sta
 
 The requested composition is an upper-left Quick Settings capsule, the retained Application Dock centered in the remaining left-edge region, and a lower-left Clock capsule. There is wallpaper between them and no right System Dock in Left Modular. Dual Edge remains separate.
 
+## Final hover stability correction
+
+The Desktop 3 application background now interpolates between two frames calculated for the current content and settings. Entry expands once (210 ms); exit contracts once (240 ms), with cubic easing and interruption from the current progress. Moving between icons changes their existing magnification and spreading without changing the expanded frame. Overflow retains fixed vertical bounds, and reduced motion applies the frame immediately. System-pod elevation preferences remain independent.
+
+Desktop 3 animation frames reuse the completed dock layout. Native content additions/removals, app changes, mounts, fullscreen, monitor changes and geometry settings invalidate it. Ordinary pointer motion and child crossings reuse the active animation loop. The layout manager also skips Application Dock layout when the pod boundaries are unchanged. Native separator cleanup is guarded against invalidating its own icon discovery. Content signals use Clutter's documented [child-added and child-removed signals](https://gnome.pages.gitlab.gnome.org/mutter/clutter/class.Actor.html).
+
+The application background uses the existing Attached Edge silhouette pick boxes, so painted gaps can sustain hover while transparent corners and unused allocation remain click-through. Removing all icons also removes the background input region. Existing icon activation, native menus, drag gestures, indicators and Magic Lamp integration remain in place.
+
+Quick Settings and Clock keep their physical left-corner anchors and the shared flare/corner geometry. With measured content, old wide body preferences no longer create empty shelves: the compact base is at most 24 logical pixels, widened as needed for actual indicators or localized text. The dock remains centered between their spacing boundaries, and impossible layouts retain the existing fallback.
+
+Validation: **363/363 Node tests**, native GJS/Gio checks, `npm run check` (223 JavaScript files, 8 schema directories), and `git diff --check`. Regressions cover moving hover at 60/120 Hz with zero frame/canvas geometry writes after expansion, layout and loop reuse, interrupted entry/exit, reduced motion, shaped input, empty input cleanup, native rediscovery, overflow and fullscreen. No settings were added, and nothing was committed, pushed or installed. The supplied screencast was not accessible in this session; this container has no GNOME Shell runtime, so live GNOME Shell 51 rendering/input and host logs remain unverified.
+
 ## Latest correction: painted click targets, steady hover and live indicators
 
 The October 25 follow-up fixes the issues in the annotated desktop screenshots:

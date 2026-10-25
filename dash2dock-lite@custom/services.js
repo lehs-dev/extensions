@@ -218,7 +218,7 @@ export const Services = class {
     let basename = this._getMountName(mount); // mount.get_default_location().get_basename();
     // let appname = `mount-${this._toSafeFileName(basename)}-dash2dock-lite.desktop`;
     this.setupMountIcon(mount);
-    this.extension.animate();
+    this.extension.animate({refresh: true});
     return true;
   }
 
@@ -229,7 +229,7 @@ export const Services = class {
     )}-dash2dock-lite.desktop`;
     let mount_id = tempPath(appname);
     delete this._mounts[mount_id];
-    this.extension.animate();
+    this.extension.animate({refresh: true});
   }
 
   update(elapsed) {

@@ -54,6 +54,24 @@ export let Animator = class {
     this._dots = [];
     this._badges = [];
     this._target = null;
+    this._dockHoverTarget = undefined;
+    this._dockHoverProgress = 0;
+  }
+
+  _animateDockFrame(active, dt, immediate) {
+    const target = active ? 1 : 0;
+    if (target !== this._dockHoverTarget) {
+      this._dockHoverTarget = target;
+      this._dockHoverFrom = this._dockHoverProgress ?? 0;
+      this._dockHoverElapsed = 0;
+    }
+    const duration = target ? 210 : 240;
+    if (immediate) this._dockHoverFrom = target;
+    this._dockHoverElapsed = Math.min(duration, this._dockHoverElapsed + dt);
+    this._dockHoverProgress = immediate ? target : this._dockHoverFrom +
+      (target - this._dockHoverFrom) * CubicEaseOut(this._dockHoverElapsed / duration);
+    this.dock._dockHoverProgress = this._dockHoverProgress;
+    return this._dockHoverProgress !== target;
   }
 
   _precreateResources(dock) {
@@ -114,7 +132,7 @@ export let Animator = class {
 
     let simulation = false;
 
-    if (!dock.layout()) {
+    if (!(dock._ensureLayout ? dock._ensureLayout() : dock.layout())) {
       if (!dock._layoutSuppressed) console.log('unable to layout()');
       return;
     }
@@ -243,6 +261,8 @@ export let Animator = class {
     if ((!simulation && !isWithin) || noAnimation) {
       nearestIcon = null;
     }
+    const frameAnimating = dock._modularViewport
+      ? this._animateDockFrame(isWithin && !noAnimation, dt, noAnimation) : false;
     dock._nearestIcon = nearestIcon;
     dock._hoverPointer = nearestIcon && isWithin ? [px, py] : null;
 
@@ -966,7 +986,7 @@ export let Animator = class {
       didScale = true;
     }
 
-    if (didFadeIn || didScale || dock._dragging || didBounce) {
+    if (didFadeIn || didScale || frameAnimating || dock._dragging || didBounce) {
       dock.autohider._debounceCheckHide();
       dock._debounceEndAnimation();
     }

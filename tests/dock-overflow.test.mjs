@@ -58,7 +58,7 @@ async function setup(count = 16) {
         trackChrome: (actor, params) => chromeChanges.push(['track', actor, params])};
     const {Dock} = await loadModule('dash2dock-lite@custom/dock.js', {mocks: {
         'resource:///org/gnome/shell/ui/main.js': {layoutManager: shellLayout},
-        'resource:///org/gnome/shell/ui/appFavorites.js': {getAppFavorites: () => ({getFavorites: () => []})},
+        'resource:///org/gnome/shell/ui/appFavorites.js': {getAppFavorites: () => ({getFavorites: () => [], _getIds: () => []})},
         'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '51'},
         'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}},
         'gi://Shell': {default: {}}, 'gi://Gio': {default: {}},
@@ -220,12 +220,13 @@ test('modular capsule remains stable while content scrolls and encloses a single
     background._canvas.set_state = state => {background._canvas.state = state;};
     let scrollY = 0;
     const dock = {x: 0, y: 200, width: 150, height: 300, _modularViewport: {overflow: true},
+        _dockHoverProgress: 1,
         isVertical: () => true,
         dash: {width: 60, height: 800, translationX: 0, translationY: 0,
             get_transformed_position: () => [0, 235 - scrollY]},
         extension: {desktopLayoutManager: {mode: 1}, background_style: 0,
             animation_magnify: 1, dock_padding: 0, flare_width: 14}};
-    const first = {_icon: {translationX: 0, translationY: 0},
+    const first = {width: 56, _fixedPosition: [0, 235], _icon: {translationX: 0, translationY: 0},
         _renderer: new NativeActor({x: 0, y: 270, width: 96, height: 96})};
     dock._icons = [first];
     const params = {first, last: first, iconSize: 48, scaleFactor: 1,
@@ -244,8 +245,71 @@ test('modular capsule remains stable while content scrolls and encloses a single
     assert.equal(background._canvas.state.position, 'left');
 
     first._renderer.set_size(48, 48);
+    dock._dockHoverProgress = 0;
     background.update(params);
     assert.ok(background.width < width, 'overflow capsule also contracts when magnification ends');
+});
+
+test('modular frames reuse layout until content, settings or fullscreen really changes', async () => {
+    const {dock} = await setup(5);
+    let layouts = 0;
+    const layout = dock.layout.bind(dock);
+    dock.layout = () => { layouts++; return layout(); };
+    assert.equal(dock._ensureLayout(), true);
+    assert.equal(layouts, 1);
+    for (let frame = 0; frame < 240; frame++) assert.equal(dock._ensureLayout(), true);
+    assert.equal(layouts, 1, 'hover frames never call layout');
+    dock.extension.animation_magnify = 1;
+    dock._layoutDirty = true;
+    dock._ensureLayout();
+    assert.equal(layouts, 2, 'changed geometry preferences invalidate layout once');
+    dock._onDockContentChanged();
+    dock._ensureLayout();
+    assert.equal(layouts, 3, 'native redisplay invalidates layout once');
+    dock.getMonitor().inFullscreen = true;
+    dock.autohider = {_debounceCheckHide() {}};
+    dock._onFullScreen();
+    dock._ensureLayout();
+    assert.equal(layouts, 4);
+    assert.equal(dock.visible, false, 'cached geometry cannot expose the dock over fullscreen');
+    for (let frame = 0; frame < 240; frame++) dock._ensureLayout();
+    assert.equal(layouts, 4);
+});
+
+test('native separator cleanup during rediscovery cannot invalidate the array being built', async () => {
+    const {dock} = await setup(0);
+    const box = dock.dash._box;
+    const remove = box.remove_child.bind(box);
+    box.remove_child = child => { remove(child); box.emit('child-removed', child); };
+    box.connect('child-removed', () => dock._onDockContentChanged());
+    for (let i = 0; i < 2; i++) box.add_child(new NativeActor({_cls: 'dash-separator'}));
+    const icons = Object.getPrototypeOf(dock)._findIcons.call(dock);
+    assert.equal(icons.length, 0);
+    assert.equal(box.get_children().length, 0);
+    assert.equal(dock._icons, icons);
+    assert.equal(dock._findingIcons, false);
+});
+
+test('pointer motion and child crossings never resubscribe an active dock animation loop', async () => {
+    const {dock} = await setup();
+    dock.layout();
+    const prototype = Object.getPrototypeOf(dock);
+    let starts = 0;
+    dock.extension._hiTimer = {runLoop() { starts++; return {}; }, cancel() {}};
+    dock.extension._loTimer = {cancel() {}};
+    dock.autohider = {_debounceCheckHide() {}};
+    dock._updateFocusedIcon = () => {};
+    dock._beginAnimation = prototype._beginAnimation.bind(dock);
+    dock._onEnterEvent();
+    assert.equal(starts, 1);
+    for (let i = 0; i < 240; i++) {
+        dock._onMotionEvent(); dock._onLeaveEvent(); dock._onEnterEvent();
+    }
+    assert.equal(starts, 1, 'one loop serves the entire hover session');
+    dock._endAnimation();
+    dock._onLeaveEvent();
+    assert.equal(starts, 2, 'leaving idle painted space wakes the one return transition');
+    dock._endAnimation();
 });
 
 test('secondary modular copies stay suppressed', async () => {

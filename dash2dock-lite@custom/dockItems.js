@@ -22,6 +22,8 @@ import {
 
 import { DockPosition } from './dock.js';
 import { AttachedDockCanvas } from './attachedBackground.js';
+import {getAttachedPodPickBoxes} from './attachedGeometry.js';
+import {computeDockFrames} from './dockOverflow.js';
 
 class DockItemMenu extends PopupMenu.PopupMenu {
   constructor(sourceActor, side = St.Side.TOP, params = {}) {
@@ -367,6 +369,13 @@ export const DockBackground = GObject.registerClass(
       this.add_child(this._canvas);
     }
 
+    vfunc_pick(context) {
+      if (!this.should_pick(context)) return;
+      if (!this._pickBoxes) { super.vfunc_pick(context); return; }
+      for (const box of this._pickBoxes)
+        this.pick_box(context, new Clutter.ActorBox(box));
+    }
+
     update(params) {
       let {
         first,
@@ -384,6 +393,8 @@ export const DockBackground = GObject.registerClass(
 
       if (!first || !last || (first == last && !dock._modularViewport)) {
         this.opacity = 0;
+        this.reactive = false;
+        this._paintedRect = this._pickKey = this._pickBoxes = null;
         return;
       }
 
@@ -491,50 +502,25 @@ export const DockBackground = GObject.registerClass(
           }
 
           if (dock._modularViewport) {
-            // Keep input/scroll allocation stable while the painted contour
-            // follows the interpolated renderers, including a single app.
             const inset = Math.max(4 * scaleFactor, padding);
-            const restingRights = (dock._icons ?? []).filter(icon => Number.isFinite(icon._fixedPosition?.[0]))
-              .map(icon => icon._fixedPosition[0] - dock.x + icon.width / 2 + iconSize * scaleFactor / 2 + inset);
-            if (restingRights.length) dock._restingWidth = Math.max(...restingRights);
-            const bounds = (dock._icons ?? []).flatMap(icon => {
-              const renderer = icon._renderer;
-              if (!renderer || renderer.visible === false) return [];
-              const b = icon._renderBounds;
-              const [x, y] = b ? [b.x, b.y] : renderer.get_transformed_position();
-              const [w, h] = b ? [b.width, b.height] : renderer.get_transformed_size();
-              if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return [];
-              // Scrolled-out apps must not affect the visible capsule width.
-              if (y + h <= dock.y + fw || y >= dock.y + dock.height - fw) return [];
-              return [{top: y - dock.y, bottom: y + h - dock.y, right: x + w - dock.x}];
-            });
-            if (bounds.length) {
-              rect.width = Math.max(1, Math.max(...bounds.map(b => b.right)) + inset - rect.x);
-              rect.y = Math.min(...bounds.map(b => b.top)) - inset - fw;
-              rect.height = Math.max(...bounds.map(b => b.bottom)) + inset + fw - rect.y;
+            if (!dock._modularFrames) {
+              const rights = (dock._icons ?? []).filter(icon => Number.isFinite(icon._fixedPosition?.[0]))
+                .map(icon => icon._fixedPosition[0] - dock.x - (dock.dash.translationX || 0) +
+                  icon.width / 2 + iconSize * scaleFactor / 2);
+              const contentRight = rights.length ? Math.max(...rights) : iconSize * scaleFactor;
+              dock._restingWidth = contentRight + inset;
+              dock._modularFrames = computeDockFrames({viewport: dock._modularViewport,
+                height: dock.height, restingWidth: dock._restingWidth, contentRight,
+                iconSize: iconSize * scaleFactor, slotSize: first.width, inset, flareWidth: fw,
+                magnify: dock.extension.animation_magnify, spread: dock.extension.animation_spread,
+                rise: dock.extension.animation_rise});
             }
-            // When moving vertically near the crown, changing icon profiles
-            // must not shrink the painted body out from under the pointer.
-            // Entry is still gated by the previous paint/source area, and an
-            // actual exit clears this floor on the very next frame.
-            if (dock._hoverPointer) {
-              rect.width = Math.max(rect.width, dock._hoverPointer[0] - dock.x - rect.x + 1);
-              const pointerY = dock._hoverPointer[1] - dock.y;
-              const bottom = Math.max(rect.y + rect.height, pointerY + fw + 1);
-              rect.y = Math.min(rect.y, pointerY - fw - 1);
-              rect.height = bottom - rect.y;
-            }
-            if (dock._modularViewport.overflow) {
-              // Long lists scroll through a fixed capsule; scrolling alone
-              // must never move its top or bottom toward the system pods.
-              rect.y = dock.dash.translationY || 0;
-              rect.height = dock.height;
-            } else {
-              const top = Math.max(dock.dash.translationY || 0, rect.y);
-              const bottom = Math.min((dock.dash.translationY || 0) + dock.height, rect.y + rect.height);
-              rect.y = top;
-              rect.height = Math.max(1, bottom - top);
-            }
+            const {resting, expanded} = dock._modularFrames;
+            const progress = dock._dockHoverProgress ?? 0;
+            for (const key of ['x', 'y', 'width', 'height'])
+              rect[key] = resting[key] + (expanded[key] - resting[key]) * progress;
+            rect.x += dock.dash.translationX || 0;
+            rect.y += dock.dash.translationY || 0;
           }
 
           if (dock._modularViewport) {
@@ -548,6 +534,17 @@ export const DockBackground = GObject.registerClass(
           // All measurements happen before actor mutations. Intermediate Dash
           // sizes must not force a relayout while reading renderer transforms.
           commitRect();
+          this.reactive = !!dock._modularViewport && !dock._hidden;
+          if (this.reactive) {
+            const pickKey = [rect.width, rect.height, flareWidth, footDepth, cornerRadius].join(':');
+            if (pickKey !== this._pickKey) {
+              this._pickKey = pickKey;
+              this._pickBoxes = getAttachedPodPickBoxes({width: rect.width, height: rect.height,
+                flareWidth, footDepth, cornerRadius});
+            }
+          } else {
+            this._pickKey = this._pickBoxes = null;
+          }
           if (this._canvas) {
             this._canvas.visible = true;
             if (this._canvas.x !== 0 || this._canvas.y !== 0)
@@ -569,6 +566,8 @@ export const DockBackground = GObject.registerClass(
           }
         } else {
           commitRect();
+          this.reactive = false;
+          this._pickKey = this._pickBoxes = null;
           if (this._canvas) {
             this._canvas.visible = false;
           }

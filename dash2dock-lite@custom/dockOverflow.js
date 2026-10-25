@@ -13,7 +13,7 @@ export function computeDockViewport({availableHeight, contentHeight, iconSize, f
   if (magnification > 0.15 && effectiveSpread < 0.55)
     effectiveSpread = 0.55 + effectiveSpread * 0.2;
   // Reserve room for both renderer growth and the centered spread of nearby
-  // icons. This is allocation headroom; the painted background follows icons.
+  // icons. Both the viewport and the expanded frame stay independent of hover.
   const desiredReserve = safeFlare + Math.max(6,
     safeIcon * Math.min(1, magnification) * (0.5 + 2 * effectiveSpread));
   // On a short monitor, retain at least one full source icon for wheel/focus
@@ -29,4 +29,22 @@ export function computeDockViewport({availableHeight, contentHeight, iconSize, f
     bodyHeight: Math.max(1, Math.round(Math.min(safeContent, bodyHeight))),
     overflow,
   };
+}
+
+// The frame has exactly two destinations for a given layout. Icon magnification
+// may move within this envelope without moving the capsule's edges.
+export function computeDockFrames({viewport, height, restingWidth, contentRight,
+  iconSize, slotSize, inset, flareWidth, magnify = 0, spread = 0.5, rise = 0}) {
+  let scale = Math.max(0, magnify) * 1.5;
+  if (spread < 0.2) scale *= 0.8;
+  const size = iconSize * Math.min(2, 1 + scale);
+  const top = viewport.overflow ? 0 : Math.max(0, viewport.contentTop - inset - flareWidth);
+  const bottom = viewport.overflow ? height : Math.min(height,
+    viewport.contentTop + viewport.bodyHeight + inset + flareWidth);
+  const resting = {x: 0, y: top, width: restingWidth, height: Math.max(1, bottom - top)};
+  const expanded = scale > 0 ? {x: 0, y: 0,
+    width: Math.max(restingWidth, contentRight + (size - iconSize) / 2 +
+      Math.max(0, size - slotSize) / 2 + (size - iconSize) * Math.max(0, rise) * 0.5 + inset),
+    height} : {...resting};
+  return {resting, expanded};
 }

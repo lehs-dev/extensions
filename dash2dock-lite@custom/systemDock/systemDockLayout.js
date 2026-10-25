@@ -137,6 +137,9 @@ export function computeLeftModularGeometry(params) {
   const top = monitor.y + nonnegative(params.upperPodOffset, 0);
   const bottom = monitor.y + monitor.height - nonnegative(params.lowerPodOffset, 0);
   const makePod = (width, contentHeight, contentWidth, visible, startFlush, endFlush) => {
+    // Old wide rail preferences should not leave an empty shelf beside these
+    // compact pods. Natural label/indicator widths still take precedence.
+    if (contentWidth > 0) width = Math.min(width, 24);
     width = Math.max(width, contentLeft + contentWidth + horizontalPadding);
     const contentTop = (startFlush ? 0 : flareWidth) + padding;
     const contentBottom = (endFlush ? 0 : flareWidth) + padding;
