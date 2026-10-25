@@ -117,6 +117,34 @@
   padding: 0;
 }
 
+.modular-pod-surface {
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  min-height: 0;
+  background-color: transparent;
+}
+
+.modular-pod-surface:focus {
+  background-color: transparent;
+}
+
+.modular-pod-box .system-dock-button {
+  background-color: transparent;
+}
+
+.modular-pod-details {
+  spacing: 3px;
+  margin: 0;
+  padding: 0;
+}
+
+.modular-pod-detail-label {
+  font-size: 12px;
+  font-feature-settings: "tnum";
+  color: #ffffff;
+}
+
 .modular-clock-box {
   margin: 0;
   padding: 0;

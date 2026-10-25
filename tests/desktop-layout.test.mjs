@@ -51,6 +51,7 @@ async function setup() {
     }
     class Quick extends Pod {}
     class Clock extends Pod {}
+    class Input extends Pod {}
     class Rail extends Pod {}
     const extension = {desktop_layout: 0, enable_system_dock: true,
         modular_show_quicksettings: true, modular_show_clock: true,
@@ -62,7 +63,7 @@ async function setup() {
         'resource:///org/gnome/shell/ui/main.js': {layoutManager: layout, extensionManager},
         './systemDock/systemState.js': {SystemState: State},
         './systemDock/systemMenus.js': {SystemMenus: Menus},
-        './systemDock/modularPods.js': {QuickSettingsPod: Quick, ClockPod: Clock},
+        './systemDock/modularPods.js': {QuickSettingsPod: Quick, InputMethodPod: Input, ClockPod: Clock},
         './systemDock/systemDock.js': {SystemDock: Rail},
     }});
     const manager = new DesktopLayoutManager({extension});
@@ -79,7 +80,7 @@ test('mode transitions keep one provider/menu owner and preserve application doc
     for (let i = 0; i < 30; i++) {
         extension.desktop_layout = i % 2 ? 0 : 1;
         manager.onSettingsChanged('desktop-layout', extension.desktop_layout);
-        assert.equal(actors.size, extension.desktop_layout === 1 ? 2 : 1);
+        assert.equal(actors.size, extension.desktop_layout === 1 ? 3 : 1);
         assert.equal(counts.states, 1);
         assert.equal(counts.menus, 1);
         assert.equal(extension.docks[0], appDock);
@@ -127,14 +128,18 @@ test('pods meet the actual screen corners regardless of frame thickness or monit
     manager.enable();
     assert.equal(manager.quickSettingsPod.x, monitor.x);
     assert.equal(manager.quickSettingsPod.y, monitor.y);
-    assert.equal(manager.quickSettingsPod.width, 24);
+    assert.equal(manager.quickSettingsPod.width, 34);
     assert.equal(manager.quickSettingsPod.startFlush, true);
     assert.equal(manager.clockPod.endFlush, true);
     assert.equal(manager.quickSettingsPod.contentLeft, 2);
     assert.equal(manager.quickSettingsPod.contentTop, 3);
+    assert.equal(manager.inputMethodPod.y, manager.quickSettingsPod.y + manager.quickSettingsPod.height + 3);
+    assert.equal(manager.inputMethodPod.x, monitor.x);
+    assert.equal(manager.inputMethodPod.startFlush, false);
+    assert.equal(manager.inputMethodPod.endFlush, false);
     assert.equal(manager.clockPod.y + manager.clockPod.height, monitor.y + monitor.height);
     const bounds = manager.getModularConstraints(monitor);
-    assert.equal(bounds.topBoundary, manager.quickSettingsPod.y + manager.quickSettingsPod.height + 16);
+    assert.equal(bounds.topBoundary, manager.inputMethodPod.y + manager.inputMethodPod.height + 16);
     assert.equal(bounds.bottomBoundary, manager.clockPod.y - 16);
     assert.equal(bounds.centerY, (bounds.topBoundary + bounds.bottomBoundary) / 2);
     assert.equal(manager.getModularConstraints({...monitor, index: 1, x: 0}), null);
@@ -148,7 +153,7 @@ test('disabling a pod releases its actors and restores panel when replacement co
     extension.modular_show_clock = false;
     manager.onSettingsChanged('modular-show-clock', false);
     assert.equal(manager.clockPod, null);
-    assert.equal(actors.size, 1);
+    assert.equal(actors.size, 2);
     assert.equal(panel.visible, true);
     const bounds = manager.getModularConstraints(envMonitor(manager));
     assert.ok(bounds.availableHeight > 0);

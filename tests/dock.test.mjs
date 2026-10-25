@@ -88,13 +88,14 @@ async function setupModularAnimation() {
     dock.extension.services = {_appNotices: {}, updateIcon() {}};
     dock._modularViewport = {overflow: false, contentTop: 100, bodyHeight: 280};
     dock.height = 500;
-    dock.dash.width = 56;
+    dock.dash.width = 34;
+    dock._iconSize = dock._iconSizeScaledDown = 30;
     dock.dash.height = 280;
     dock.dash.y = 100;
     const actions = [];
     for (const [i, icon] of icons.entries()) {
         icon.y += 100;
-        icon.set_size(56, 56);
+        icon.set_size(34, 56);
         icon._appwell = new HitButton({accessible_name: `App ${i}`});
         icon._appwell.app = {get_id: () => `app-${i}`};
         icon._appwell.activate = button => actions.push(['activate', i, button]);
@@ -132,7 +133,7 @@ test('magnified icon and its small click margin activate the matching native app
     const item = icons[2], target = item._renderer._hitTarget;
     const bounds = item._hitBounds;
     assert.ok(target.visible);
-    assert.ok(bounds.x + bounds.width > 56 + 10, 'click region follows magnification beyond the native slot');
+    assert.ok(bounds.x + bounds.width > 34 + 10, 'click region follows magnification beyond the native slot');
     const pointer = [bounds.x + bounds.width - 1, bounds.y + bounds.height / 2];
     point(pointer);
     animator.animate(16);
@@ -192,7 +193,8 @@ test('hovering the painted space between enlarged icons does not repeatedly coll
     const paint = dock._background._paintedRect;
     const x = paint.x + paint.width - 1;
     let gap = null;
-    for (let y = paint.y + 30; y < paint.y + paint.height - 30; y++) {
+    for (let y = Math.max(paint.y + 30, dock._modularViewport.contentTop + 14);
+        y < dock._modularViewport.contentTop + dock._modularViewport.bodyHeight - 14; y++) {
         if (icons.every(icon => {
             const b = icon._hitBounds;
             return !b || x < b.x || x >= b.x + b.width || y < b.y || y >= b.y + b.height;
@@ -360,7 +362,7 @@ test('stationary modular hover does not repeatedly reallocate the background or 
 test('real modular hover remains settled at the source boundary at 60 and 120 Hz and contracts on exit', async () => {
     for (const dt of [1000 / 60, 1000 / 120]) {
         const {dock, animator, icons, point, leave} = await setupModularAnimation();
-        point([55.5, 236]);
+        point([33.5, 236]);
         for (let frame = 0; frame < 1200 / dt; frame++) animator.animate(dt);
         assert.ok(dock._nearestIcon, 'source-edge hover remains active');
         const snapshot = () => JSON.stringify([dock._background.x, dock._background.y,
@@ -374,7 +376,7 @@ test('real modular hover remains settled at the source boundary at 60 and 120 Hz
         leave();
         for (let frame = 0; frame < 1200 / dt; frame++) animator.animate(dt);
         assert.equal(dock._nearestIcon, null);
-        assert.ok(icons.every(icon => icon._renderer.icon_size * icon._renderer.scaleX === 48));
+        assert.ok(icons.every(icon => icon._renderer.icon_size * icon._renderer.scaleX === 30));
     }
 });
 

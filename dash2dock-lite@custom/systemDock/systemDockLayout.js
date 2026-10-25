@@ -1,5 +1,7 @@
 'use strict';
 
+import {LEFT_MODULAR_WIDTH} from '../attachedGeometry.js';
+
 /**
  * Calculates layout geometry for the vertical System Dock attached to the right screen edge.
  *
@@ -106,10 +108,11 @@ export function computeSystemDockGeometry(params) {
 /**
  * Calculates layout geometry for the Left Modular layout (Desktop 3).
  *
- * Coordinates three independent left-attached modules:
+ * Coordinates four independent left-attached modules:
  * 1. Quick Settings Pod (top-left)
- * 2. Application Dock (center-left, constrained in remaining space)
- * 3. Clock Pod (bottom-left)
+ * 2. Input Method Pod (below Quick Settings)
+ * 3. Application Dock (center-left, constrained in remaining space)
+ * 4. Clock Pod (bottom-left)
  *
  * Guarantees:
  * - Deterministic collision avoidance: Application Dock never overlaps top or bottom pod.
@@ -131,16 +134,17 @@ export function computeLeftModularGeometry(params) {
   const padding = podPadding;
   const spacing = nonnegative(params.minSpacing, 16);
   const horizontalPadding = nonnegative(params.horizontalPadding, 2);
-  const contentLeft = horizontalPadding;
   // Sacrifice the screen-facing end of each pod to meet the actual corner.
   // The frame and connector no longer add empty space around its content.
   const top = monitor.y + nonnegative(params.upperPodOffset, 0);
   const bottom = monitor.y + monitor.height - nonnegative(params.lowerPodOffset, 0);
-  const makePod = (width, contentHeight, contentWidth, visible, startFlush, endFlush) => {
-    // Old wide rail preferences should not leave an empty shelf beside these
-    // compact pods. Natural label/indicator widths still take precedence.
-    if (contentWidth > 0) width = Math.min(width, 24);
-    width = Math.max(width, contentLeft + contentWidth + horizontalPadding);
+  const makePod = (contentHeight, contentWidth, visible, startFlush, endFlush) => {
+    // All four resting bodies share one width, independent of labels, saved
+    // rail widths and running applications. Center the compact content in it.
+    const width = LEFT_MODULAR_WIDTH;
+    contentWidth = Math.max(1, Math.min(contentWidth || width - 2 * horizontalPadding,
+      width - 2 * horizontalPadding));
+    const contentLeft = (width - contentWidth) / 2;
     const contentTop = (startFlush ? 0 : flareWidth) + padding;
     const contentBottom = (endFlush ? 0 : flareWidth) + padding;
     const height = Math.max(width, contentHeight + contentTop + contentBottom);
@@ -148,12 +152,19 @@ export function computeLeftModularGeometry(params) {
       cornerRadius, startFlush, endFlush, scaleFactor: 1, position: 'left', contentTop,
       contentLeft, contentHeight, contentWidth: Math.max(1, contentWidth || width - contentLeft - horizontalPadding), visible};
   };
-  const quickSettings = makePod(nonnegative(params.quickSettingsWidth ?? params.dockWidth, 24),
-    nonnegative(params.quickSettingsContentHeight, 60), nonnegative(params.quickSettingsContentWidth, 0), params.showQuickSettings ?? true, true, false);
-  const clock = makePod(nonnegative(params.clockWidth ?? params.dockWidth, 24),
-    nonnegative(params.clockContentHeight, 50), nonnegative(params.clockContentWidth, 0), params.showClock ?? true, false, true);
+  const quickSettings = makePod(nonnegative(params.quickSettingsContentHeight, 60),
+    nonnegative(params.quickSettingsContentWidth, 0), params.showQuickSettings ?? true, true, false);
+  const inputMethod = makePod(nonnegative(params.inputMethodContentHeight, 20),
+    nonnegative(params.inputMethodContentWidth, 0), params.showInputMethod ?? false, false, false);
+  // The two top capsules have a small gap; the application dock retains the
+  // configured inter-module spacing and is centered in the remaining region.
+  inputMethod.y = quickSettings.visible ? quickSettings.y + quickSettings.height + 3 : top;
+  const clock = makePod(nonnegative(params.clockContentHeight, 50),
+    nonnegative(params.clockContentWidth, 0), params.showClock ?? true, false, true);
   clock.y = bottom - clock.height;
-  const topBoundary = quickSettings.visible ? top + quickSettings.height + spacing : top;
+  const topEnd = inputMethod.visible ? inputMethod.y + inputMethod.height :
+    quickSettings.visible ? quickSettings.y + quickSettings.height : top;
+  const topBoundary = topEnd + (quickSettings.visible || inputMethod.visible ? spacing : 0);
   const rawBottom = clock.visible ? clock.y - spacing : bottom;
   const availableHeight = Math.max(0, rawBottom - topBoundary);
   const height = Math.min(nonnegative(params.appDockContentHeight, availableHeight), availableHeight);
@@ -165,10 +176,11 @@ export function computeLeftModularGeometry(params) {
   // keeping the panel accessible instead of silently painting overlapping pods.
   const fits = (!(params.showAppDock ?? true) || availableHeight >= (params.minimumAppDockHeight ?? 60)) &&
     (!quickSettings.visible || top + quickSettings.height <= bottom) &&
+    (!inputMethod.visible || inputMethod.y + inputMethod.height <= rawBottom) &&
     (!clock.visible || clock.y >= top) &&
     (!(quickSettings.visible && clock.visible) || quickSettings.y + quickSettings.height + spacing <= clock.y);
   return {monitor, scaleFactor: 1, flareWidth, footDepth, cornerRadius,
-    minSpacing: spacing, quickSettings, clock, appDock, fits};
+    minSpacing: spacing, quickSettings, inputMethod, clock, appDock, fits};
 }
 
 /**

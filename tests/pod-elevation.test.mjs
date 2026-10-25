@@ -29,6 +29,7 @@ async function setup() {
     }
     should_pick() { return this.visible && this.reactive; }
     pick_box(context, box) { context.push(box); }
+    set_clip(x, y, width, height) { this.clip = {x, y, width, height}; }
     queue_redraw() { this.redraws = (this.redraws ?? 0) + 1; }
     set_state(state) { this.state = state; this.repaints = (this.repaints ?? 0) + 1; }
   }
@@ -70,9 +71,9 @@ async function setup() {
     menu.dismiss = function () { this._boxPointer.visible = false; this.emit('menu-closed'); };
     return menu;
   }
-  const quickMenu = makeMenu(), dateMenu = makeMenu();
+  const quickMenu = makeMenu(), dateMenu = makeMenu(), inputMenu = makeMenu();
   const Main = {layoutManager: layout, panel: {statusArea: {
-    quickSettings: {menu: quickMenu}, dateMenu: {menu: dateMenu},
+    quickSettings: {menu: quickMenu}, dateMenu: {menu: dateMenu}, keyboard: {menu: inputMenu},
   }}};
   const Clutter = {Timeline, AnimationMode: {EASE_OUT_CUBIC: 1},
     Orientation: {VERTICAL: 1}, ActorAlign: {CENTER: 0, FILL: 1},
@@ -112,18 +113,23 @@ async function setup() {
   const extension = {modular_indicator_icon_size: 18, modular_elevation_distance: 8};
   let layouts = 0;
   const params = {extension, systemMenus: menus, systemState: state, onLayoutChanged: () => layouts++};
-  const quick = new pods.QuickSettingsPod(params), clock = new pods.ClockPod(params);
-  quick.enable(); clock.enable();
+  const quick = new pods.QuickSettingsPod(params), clock = new pods.ClockPod(params), input = new pods.InputMethodPod(params);
+  quick.enable(); clock.enable(); input.enable();
   const geometry = computeLeftModularGeometry({monitor, frameThickness: 6,
+    showInputMethod: true, inputMethodContentHeight: input.getMeasuredContentHeight(), inputMethodContentWidth: input.getMeasuredContentWidth(),
     quickSettingsContentHeight: quick.getMeasuredContentHeight(), clockContentHeight: clock.getMeasuredContentHeight(),
     quickSettingsContentWidth: quick.getMeasuredContentWidth(), clockContentWidth: clock.getMeasuredContentWidth()});
-  quick.place(geometry.quickSettings); clock.place(geometry.clock);
-  const crossing = (related = null) => ({get_related: () => related});
-  function enter(pod, related) { pod.emit('enter-event', crossing(related)); }
-  function leave(pod, related) { pod.emit('leave-event', crossing(related)); }
+  quick.place(geometry.quickSettings); clock.place(geometry.clock); input.place(geometry.inputMethod);
+  function setHover(pod, hover, related) {
+    if (related && pod.contains(related)) return;
+    pod._surface.hover = hover;
+    pod._surface.emit('notify::hover');
+  }
+  function enter(pod, related) { setHover(pod, true, related); }
+  function leave(pod, related) { setHover(pod, false, related); }
   function finish(pod) { pod._elevation._timeline?.step(1); }
-  function destroy() { menus.destroy(); quick.destroy(); clock.destroy(); }
-  return {quick, clock, extension, state, listeners, settings, stage, monitor, geometry, mocks, globals, pods, SystemMenus,
+  function destroy() { menus.destroy(); quick.destroy(); clock.destroy(); input.destroy(); }
+  return {quick, clock, input, inputMenu, Main, extension, state, listeners, settings, stage, monitor, geometry, mocks, globals, pods, SystemMenus,
     menus, quickMenu, dateMenu, nativePanelSource, chrome, timelines, enter, leave, finish, destroy,
     get layouts() { return layouts; }};
 }
@@ -155,7 +161,7 @@ test('corner-facing pod ends are square and clickable up to the screen edge, ret
   }
 });
 
-test('pod content hugs the left edge even with a previously saved wide body', async () => {
+test('pods share the 34 px dock width and center compact content despite old saved widths', async () => {
   const {computeLeftModularGeometry} = await loadModule('dash2dock-lite@custom/systemDock/systemDockLayout.js');
   const g = computeLeftModularGeometry({monitor: {x: -1920, y: -200, width: 1920, height: 1080},
     frameThickness: 12, frameRadius: 80, footDepth: 9,
@@ -163,11 +169,12 @@ test('pod content hugs the left edge even with a previously saved wide body', as
     quickSettingsContentHeight: 96, clockContentHeight: 70});
   assert.equal(g.quickSettings.y, -200);
   assert.equal(g.clock.y + g.clock.height, 880);
-  assert.equal(g.quickSettings.contentLeft, 2);
+  assert.equal(g.quickSettings.contentLeft, 8);
   assert.equal(g.quickSettings.contentWidth, 18, 'saved width does not stretch or center the content');
   assert.equal(g.clock.contentWidth, 21);
-  assert.equal(g.quickSettings.width, 24, 'wide saved rail width leaves no empty shelf');
-  assert.equal(g.clock.width, 25, 'localized clock text determines the compact width');
+  assert.equal(g.quickSettings.width, 34);
+  assert.equal(g.clock.width, 34);
+  assert.equal(g.clock.contentLeft, 6.5);
   assert.equal(g.clock.height - g.clock.contentTop - g.clock.contentHeight, 3,
     'bottom clock text has only the small inner padding before the screen edge');
 });
@@ -204,11 +211,12 @@ test('silhouette picking excludes empty corners and animation reserve at every p
 
 test('both real pod classes move all content together with the shared attached canvas, keeping scales and allocations stable', async () => {
   const env = await setup();
-  for (const pod of [env.quick, env.clock]) {
+  for (const pod of [env.quick, env.input, env.clock]) {
     const size = [pod.x, pod.y, pod.width, pod.height];
     const positions = [...pod._items.values()].map(item => item.get_transformed_position());
     env.enter(pod);
     assert.equal(pod._elevation._timeline.duration, 210);
+    assert.equal(pod._elevation._timeline.actor, pod, 'Mutter 51 needs the pod actor to select its frame clock');
     for (const progress of [0.25, 0.5, 0.75]) {
       pod._elevation._timeline.step(progress);
       const offset = pod._elevation.progress * 8;
@@ -267,9 +275,9 @@ test('crossing between child buttons keeps one elevation and interrupted leave r
 test('only the native menu owning pod stays raised until dismissal finishes and stale grab hover clears', async () => {
   const env = await setup();
   env.enter(env.quick); env.finish(env.quick);
-  const network = env.quick._items.get('network');
-  network._onActivate();
-  assert.equal(env.quickMenu.sourceActor, network);
+  env.quick._surface.emit('clicked');
+  assert.equal(env.quickMenu.sourceActor, env.quick._menuAnchor);
+  assert.equal(env.quickMenu.focusActor, env.quick._surface);
   assert.equal(env.quickMenu._boxPointer._arrowSide, 3);
   assert.equal(env.quick._menuOpen, true);
   assert.equal(env.clock._menuOpen, false);
@@ -282,7 +290,7 @@ test('only the native menu owning pod stays raised until dismissal finishes and 
   env.finish(env.quick);
   assert.equal(env.quick._elevation.progress, 0);
   assert.equal(env.quickMenu.sourceActor, env.nativePanelSource);
-  env.clock._clockItem._onActivate();
+  env.clock._surface.emit('clicked');
   env.finish(env.clock);
   assert.equal(env.clock._elevation.progress, 1, 'Keyboard activation also raises the owner');
   assert.equal(env.quick._elevation.progress, 0);
@@ -295,19 +303,21 @@ test('only the native menu owning pod stays raised until dismissal finishes and 
   env.destroy();
 });
 
-test('menu dismissal over the current pod and keyboard focus retain elevation until interaction leaves', async () => {
+test('hover after menu dismissal retains expansion, but returned keyboard focus cannot latch it open', async () => {
   const env = await setup();
-  const item = env.clock._clockItem;
+  const item = env.clock._surface;
   env.stage.focus = item;
   env.stage.emit('notify::key-focus'); env.finish(env.clock);
-  assert.equal(env.clock._elevation.progress, 1);
-  item._onActivate();
-  env.stage.focus = null;
+  assert.equal(env.clock._elevation.progress, 0, 'focus alone does not reveal hover information');
+  item.emit('clicked');
+  env.finish(env.clock);
+  assert.equal(env.clock._elevation.progress, 1, 'the open native menu retains its capsule');
   env.stage.picked = env.clock._surface;
   env.menus.closeAll();
   assert.equal(env.clock._elevation.target, 1);
   env.leave(env.clock); env.finish(env.clock);
   assert.equal(env.clock._elevation.progress, 0);
+  assert.equal(env.stage.focus, item);
   env.destroy();
 });
 
@@ -337,7 +347,7 @@ test('reduced motion and disabled elevation use immediate or resting geometry an
 
 test('fullscreen hides and resets the whole pod, closes its native menu and does not leave a running animation', async () => {
   const env = await setup();
-  env.enter(env.quick); env.quick._items.get('network')._onActivate();
+  env.enter(env.quick); env.quick._surface.emit('clicked');
   env.monitor.inFullscreen = true;
   env.quick.place(env.geometry.quickSettings);
   // Native Clutter emits notify::visible when chrome changes visibility.
@@ -375,8 +385,10 @@ test('layout uses measured content widths and the existing dock geometry without
   assert.equal(g.flareWidth, 23);
   assert.equal(g.quickSettings.footDepth, 9);
   assert.equal(g.clock.cornerRadius, 13);
-  assert.ok(g.quickSettings.contentWidth >= 40);
-  assert.ok(g.clock.contentWidth >= 34);
+  assert.equal(g.quickSettings.width, 34);
+  assert.equal(g.quickSettings.contentWidth, 30);
+  assert.equal(g.clock.width, 34);
+  assert.equal(g.clock.contentWidth, 30);
   assert.ok(g.quickSettings.y + g.quickSettings.height < g.appDock.topBoundary);
   assert.ok(g.appDock.bottomBoundary < g.clock.y);
   const env = await setup();
@@ -436,7 +448,7 @@ test('natural content measurement bypasses previous fixed allocation requests', 
 
 test('real pod actors and menu anchors release providers, focus listeners and timelines through repeated mode switches', async () => {
   const env = await setup();
-  env.quick.destroy(); env.clock.destroy();
+  env.quick.destroy(); env.clock.destroy(); env.input.destroy();
   let stateOwners = 0;
   class State {
     constructor() { stateOwners++; return env.state; }
@@ -458,7 +470,7 @@ test('real pod actors and menu anchors release providers, focus listeners and ti
     const quick = manager.quickSettingsPod;
     env.enter(quick);
     quick._elevation._timeline.step(0.2);
-    quick._items.get('network')._onActivate();
+    quick._surface.emit('clicked');
     manager.onSettingsChanged('desktop-layout', 0);
     assert.equal(manager.quickSettingsPod, null);
     assert.equal(manager.clockPod, null);
@@ -469,7 +481,7 @@ test('real pod actors and menu anchors release providers, focus listeners and ti
     assert.equal(stateOwners, 1);
     manager.onSettingsChanged('desktop-layout', 1);
     assert.equal(manager.systemDock, null);
-    assert.equal(env.chrome.size, 2);
+    assert.equal(env.chrome.size, 3);
     assert.equal(stateOwners, 1);
   }
   manager.destroy(); env.menus.destroy();
@@ -543,31 +555,28 @@ test('system pod hover elevation does not trigger DesktopLayoutManager or dock r
   env.destroy();
 });
 
-test('pod content box is reactive and child buttons receive activation directly', async () => {
+test('one shaped button owns the entire pod and all status presenters are passive', async () => {
   const env = await setup();
-
-  // Verify content box is reactive
-  assert.equal(env.quick._contentBox.reactive, true, 'QuickSettings _contentBox must be reactive');
-  assert.equal(env.clock._contentBox.reactive, true, 'Clock _contentBox must be reactive');
-
-  // Verify individual buttons inside QuickSettings can be activated directly
-  let activated = null;
-  const volumeItem = env.quick._items.get('volume');
-  volumeItem._onActivate = () => { activated = 'volume'; };
-  volumeItem.emit('clicked');
-  assert.equal(activated, 'volume', 'Direct clicked event on VolumeItem activates volume');
-
-  const batteryItem = env.quick._items.get('battery');
-  batteryItem._onActivate = () => { activated = 'battery'; };
-  batteryItem.emit('clicked');
-  assert.equal(activated, 'battery', 'Direct clicked event on BatteryItem activates battery');
-
-  // Single-item pod (ClockPod) activates clock on surface click
-  let clockActivated = false;
-  env.clock._clockItem._onActivate = () => { clockActivated = true; };
-  env.clock._surface.emit('button-release-event', {get_button: () => 1});
-  assert.equal(clockActivated, true, 'Single item pod surface click activates the clock');
-
+  for (const pod of [env.quick, env.input, env.clock]) {
+    assert.equal(pod._contentBox.reactive, false);
+    assert.equal(pod._surface.reactive, true);
+    assert.equal(pod._surface.can_focus, true);
+    for (const item of pod._items.values()) {
+      assert.equal(item.reactive, false);
+      assert.equal(item.can_focus, false);
+      assert.equal(item.track_hover, false);
+    }
+  }
+  env.quick._surface.emit('clicked');
+  assert.equal(env.quickMenu.isOpen, true);
+  assert.equal(env.quickMenu.sourceActor, env.quick._menuAnchor);
+  env.menus.closeAll();
+  env.clock._surface.emit('clicked');
+  assert.equal(env.dateMenu.isOpen, true);
+  env.menus.closeAll();
+  env.input._surface.emit('clicked');
+  assert.equal(env.inputMenu.isOpen, true);
+  assert.equal(env.inputMenu.sourceActor, env.input._menuAnchor);
   env.destroy();
 });
 
@@ -593,5 +602,162 @@ test('natural height auto-scales when items are toggled without oversized fixed 
   const heightRestored = env.quick.getMeasuredContentHeight();
   assert.equal(heightRestored, heightAll, 'Restoring indicators restores content height');
 
+  env.destroy();
+});
+
+test('all three information pods reveal data with their contour and pick only the visible capsule', async () => {
+  const env = await setup();
+  env.state.network.name = 'Home Wi-Fi';
+  env.state.bluetooth.enabled = true;
+  env.state.audio.volume = 0.42;
+  env.state.battery.percentage = 73;
+  env.state.inputSource.displayName = 'Vietnamese Telex';
+  env.state.inputSource.mode = 'Vietnamese';
+  env.state.time.fullWeekday = 'Sunday';
+  env.state.time.fullDate = '25 October 2026';
+  for (const pod of [env.quick, env.input, env.clock]) pod._refreshContent();
+  assert.equal(env.quick._detailLabels.get('network').text, 'Home Wi-Fi');
+  assert.equal(env.quick._detailLabels.get('bluetooth').text, 'Bluetooth: On');
+  assert.equal(env.quick._detailLabels.get('volume').text, 'Volume: 42%');
+  assert.equal(env.quick._detailLabels.get('battery').text, 'Battery: 73%');
+  assert.match(env.input._detailLabels.get('input-source').text, /Vietnamese Telex.*Vietnamese/);
+  assert.equal(env.clock._detailLabels.get('time').text, '23:56');
+  assert.equal(env.clock._detailLabels.get('weekday').text, 'Sunday');
+  assert.equal(env.clock._detailLabels.get('date').text, '25 October 2026');
+  const layouts = env.layouts;
+  for (const pod of [env.quick, env.input, env.clock]) {
+    const allocation = [pod.x, pod.y, pod.width, pod.height];
+    const otherGeometry = [env.quick._geom, env.input._geom, env.clock._geom];
+    assert.equal(pod._detailsBox.opacity, 0);
+    let geometryWrites = 0;
+    for (const actor of [pod, pod._canvas, pod._surface, pod._contentBox, pod._detailsBox, pod._menuAnchor]) {
+      for (const method of ['set_position', 'set_size']) {
+        const original = actor[method];
+        actor[method] = function (...args) { geometryWrites++; return original.apply(this, args); };
+      }
+    }
+    env.enter(pod);
+    for (const fraction of [0.1, 0.4, 0.7, 1]) {
+      pod._elevation._timeline.step(fraction);
+      const p = pod._elevation.progress;
+      const state = pod._canvas.state;
+      const width = state.width + state.bodyOffset;
+      assert.equal(state.width, pod._geom.width + pod._expansion * p);
+      assert.ok(width > pod._geom.width);
+      assert.ok(pod._detailsBox.opacity > 0);
+      assert.equal(pod._detailsBox.translation_x, pod._contentBox.translation_x);
+      assert.equal(pod._detailsBox.opacity, Math.round(255 * p));
+      assert.ok(pod._detailsBox.clip.width <= pod._expansion * p);
+      assert.ok(pod._surface.boxes.every(box => box.x2 <= width));
+      assert.ok(pod._surface.boxes.some(box => box.x1 === 0), 'attachment stays on the screen edge');
+      assert.deepEqual([pod.x, pod.y, pod.width, pod.height], allocation);
+      assert.deepEqual([env.quick._geom, env.input._geom, env.clock._geom], otherGeometry);
+      assert.equal(env.layouts, layouts);
+    }
+    env.leave(pod); env.finish(pod);
+    assert.equal(pod._detailsBox.opacity, 0);
+    assert.equal(pod._detailsBox.clip.width, 0);
+    assert.equal(geometryWrites, 0, 'hover never changes actor sizes or allocation positions');
+    assert.equal(pod._canvas.state.width, pod._geom.width);
+    assert.ok(pod._surface.boxes.every(box => box.x2 <= pod._geom.width), 'unused reserve never catches the pointer');
+  }
+  env.destroy();
+});
+
+test('input method changes update only its information, anchor the active menu and stay expanded through dismissal', async () => {
+  const env = await setup();
+  // Use the native-menu implementation from this fixture for the Kimpanel owner.
+  env.Main.panel.statusArea.kimpanel = {menu: env.inputMenu};
+  env.state.inputSource.provider = 'kimpanel';
+  env.state.inputSource.displayName = 'Fcitx Telex';
+  env.state.emit('input-source-changed', env.state.inputSource);
+  const geometry = env.input._geom;
+  const layouts = env.layouts;
+  env.input._surface.emit('clicked'); env.finish(env.input);
+  assert.equal(env.inputMenu.isOpen, true);
+  assert.equal(env.input._elevation.progress, 1);
+  env.leave(env.input);
+  env.state.inputSource.mode = 'ASCII';
+  env.state.emit('input-source-changed', env.state.inputSource);
+  assert.equal(env.layouts, layouts);
+  assert.equal(env.input._geom, geometry);
+  assert.match(env.input._detailLabels.get('input-source').text, /ASCII/);
+  assert.equal(env.input._elevation.target, 1);
+  env.inputMenu.close();
+  assert.equal(env.input._elevation.target, 1);
+  env.inputMenu.dismiss(); env.finish(env.input);
+  assert.equal(env.input._elevation.progress, 0);
+  assert.equal(env.inputMenu.sourceActor, env.nativePanelSource);
+  env.destroy();
+});
+
+test('Shell 51 native menu options disable closing animation before restoring its panel anchor', async () => {
+  const env = await setup();
+  env.quickMenu._getPopupAnimationFromParams = () => {};
+  const open = env.quickMenu.open;
+  const close = env.quickMenu.close;
+  env.quickMenu.open = function (options) {
+    assert.deepEqual({...options}, {animate: true});
+    open.call(this);
+  };
+  env.quickMenu.close = function (options) {
+    assert.deepEqual({...options}, {animate: false});
+    close.call(this);
+    this.dismiss();
+  };
+  env.quick._surface.emit('clicked');
+  assert.equal(env.quickMenu.sourceActor, env.quick._menuAnchor);
+  env.menus.closeAll();
+  assert.equal(env.quickMenu.sourceActor, env.nativePanelSource);
+  assert.equal(env.quick._menuOpen, false);
+  env.destroy();
+});
+
+test('time-only compact clock reserves room for the full date without relayout on later clock ticks', async () => {
+  const env = await setup();
+  env.extension.modular_clock_show_weekday = env.extension.modular_clock_show_date = false;
+  const height = env.clock.getMeasuredContentHeight();
+  env.clock.getMeasuredContentWidth();
+  assert.ok(height >= 3 * 16 + 6);
+  env.clock.place({...env.clock._geom, contentHeight: height});
+  const layouts = env.layouts;
+  env.enter(env.clock); env.finish(env.clock);
+  assert.equal(env.clock._detailLabels.size, 3);
+  assert.equal(env.clock._detailsBox.height, height);
+  env.state.time.minutes = '57';
+  env.state.emit('clock-changed', env.state.time);
+  assert.equal(env.layouts, layouts);
+  env.destroy();
+});
+
+test('native surface hover reveals every pod before any click or keyboard focus and click opens only its menu', async () => {
+  const env = await setup();
+  for (const [pod, menu] of [[env.quick, env.quickMenu], [env.input, env.inputMenu], [env.clock, env.dateMenu]]) {
+    assert.equal(env.stage.focus, undefined);
+    assert.equal(menu.isOpen, false);
+    assert.equal(pod._canvas.state.width, 34);
+    pod._surface.hover = true;
+    pod._surface.emit('notify::hover');
+    assert.equal(pod._pointerInside, true);
+    assert.equal(pod._elevation.target, 1);
+    env.finish(pod);
+    assert.equal(pod._detailsBox.opacity, 255);
+    assert.ok(pod._canvas.state.width > 34);
+    assert.equal(menu.isOpen, false, 'hover reveals information without opening the menu');
+    const timelines = env.timelines.length;
+    const width = pod._canvas.state.width;
+    pod._surface.emit('clicked');
+    assert.equal(menu.isOpen, true);
+    assert.equal(env.timelines.length, timelines, 'click does not start another expansion');
+    assert.equal(pod._canvas.state.width, width);
+    pod._surface.hover = false;
+    pod._surface.emit('notify::hover');
+    assert.equal(pod._elevation.target, 1, 'its open menu retains the current expansion');
+    env.menus.closeAll(); env.finish(pod);
+    assert.equal(pod._canvas.state.width, 34);
+    assert.equal(pod._detailsBox.opacity, 0);
+    assert.ok(pod._surface.boxes.every(box => box.x2 <= 34));
+  }
+  assert.equal(env.geometry.inputMethod.y - env.geometry.quickSettings.y - env.geometry.quickSettings.height, 3);
   env.destroy();
 });

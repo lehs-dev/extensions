@@ -1,6 +1,7 @@
 'use strict';
 
 export const KAPPA = (4 * (Math.sqrt(2) - 1)) / 3; // ~0.5522847498307936
+export const LEFT_MODULAR_WIDTH = 34;
 
 export function getAttachedEdgeGeometry({
   width,

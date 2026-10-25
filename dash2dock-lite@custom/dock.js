@@ -12,6 +12,7 @@ import Graphene from 'gi://Graphene';
 import St from 'gi://St';
 
 import { computeDockViewport } from './dockOverflow.js';
+import {LEFT_MODULAR_WIDTH} from './attachedGeometry.js';
 import {createIconHitTarget, syncIconHitTargets} from './dockInput.js';
 
 import { Dash } from 'resource:///org/gnome/shell/ui/dash.js';
@@ -502,6 +503,9 @@ export let Dock = GObject.registerClass(
 
     _configureScrollView(modular) {
       if (modular && !this._scrollView) {
+        this._modularLayouts = [this.dash.last_child, this.dash._box, this._extraIcons].filter(Boolean)
+          .map(actor => [actor, actor.layout_manager?.spacing ?? 0]);
+        for (const [actor] of this._modularLayouts) actor.layout_manager.spacing = 0;
         // Native Dash is St.Widget, not St.Scrollable. St.BoxLayout inherits
         // St.Viewport and supplies the adjustment contract ScrollView requires.
         this._scrollView = new St.ScrollView({overlay_scrollbars: true,
@@ -523,6 +527,16 @@ export let Dock = GObject.registerClass(
         this.add_child(this._scrollView);
         this.set_child_above_sibling(this.renderArea, null);
       } else if (!modular && this._scrollView) {
+        for (const [actor, spacing] of this._modularLayouts ?? []) actor.layout_manager.spacing = spacing;
+        this._modularLayouts = null;
+        for (const actor of this._separators ?? []) {
+          const size = this._modularSeparators?.get(actor);
+          if (size) {
+            actor.set_size(size[0], size[1]);
+            actor.set_style(size[2]);
+          }
+        }
+        this._modularSeparators = null;
         this._destroyScrollView();
         this.add_child(this.dash);
         this.dash.set_size(-1, -1);
@@ -611,6 +625,11 @@ export let Dock = GObject.registerClass(
       if (this.extension._config && this.extension._config.icon_size) {
         iconSize = this.extension._config.icon_size;
       }
+
+      // A 34 px resting body leaves two pixels around its centered source
+      // icon. Native Dash redisplay must not grow it for a new running app.
+      if (this.extension.desktopLayoutManager?.mode === 1)
+        iconSize = Math.min(iconSize, LEFT_MODULAR_WIDTH - 4);
 
       this._iconSize = iconSize;
       return iconSize;
@@ -1208,6 +1227,8 @@ export let Dock = GObject.registerClass(
       let scaleFactor = leftModular ? 1 : m.geometry_scale;
       let vertical = this.isVertical();
       this._scaleFactor = scaleFactor;
+      const modularConstraints = this.extension?.desktopLayoutManager?.getModularConstraints?.(m);
+      const modular = !!modularConstraints && vertical && this._position === DockPosition.LEFT;
 
       this._icons = this._findIcons();
 
@@ -1249,7 +1270,7 @@ export let Dock = GObject.registerClass(
 
       let iconMargins = 0;
       let iconStyle = '';
-      if (this.extension.icon_spacing > 0) {
+      if (!modular && this.extension.icon_spacing > 0) {
         let margin = 8 * this.extension.icon_spacing;
         if (vertical) {
           iconStyle = `margin-top: ${margin}px; margin-bottom: ${margin}px;`;
@@ -1275,9 +1296,6 @@ export let Dock = GObject.registerClass(
       let limit = vertical ? 0.96 : 0.98; // use dock_size_limit
       let maxWidth = (vertical ? m.height : m.width) * limit;
 
-      const modularConstraints =
-        this.extension?.desktopLayoutManager?.getModularConstraints?.(m);
-      const modular = !!modularConstraints && vertical && this._position === DockPosition.LEFT;
       if (!modular && projectedWidth * scaleFactor > maxWidth * 0.98) {
         scaleDown = (maxWidth - iconSize / 2) / (projectedWidth * scaleFactor);
       }
@@ -1291,6 +1309,14 @@ export let Dock = GObject.registerClass(
       // make multiple of 2
       iconSize = Math.floor(iconSize / 2) * 2;
       iconSizeSpaced = Math.floor(iconSizeSpaced / 2) * 2;
+      let iconSlotSize = iconSizeSpaced;
+      if (modular) {
+        // Count spacing once, inside each source allocation. CSS margins are
+        // reset by the dock theme; adding phantom margins to contentHeight
+        // made each favorite lengthen the capsule beyond its actual slot.
+        iconSlotSize += Math.round(16 * Math.max(0, this.extension.icon_spacing || 0));
+        iconStyle = 'margin: 0;';
+      }
       projectedWidth = Math.floor(projectedWidth / 2) * 2;
 
       this._projectedWidth = projectedWidth;
@@ -1324,8 +1350,8 @@ export let Dock = GObject.registerClass(
             this._debounceEndAnimation();
           }, this);
         }
-        icon.width = Math.floor(iconSizeSpaced * scaleFactor);
-        icon.height = Math.floor(iconSizeSpaced * scaleFactor);
+        icon.width = modular ? LEFT_MODULAR_WIDTH : Math.floor(iconSizeSpaced * scaleFactor);
+        icon.height = Math.floor((modular ? iconSlotSize : iconSizeSpaced) * scaleFactor);
         if (icon.style != iconStyle) {
           icon.style = iconStyle;
         }
@@ -1349,7 +1375,19 @@ export let Dock = GObject.registerClass(
 
       this._modularViewport = null;
       if (modular) {
-        const contentHeight = Math.max(iconSizeSpaced, (this._icons?.length ?? 1) * iconSizeSpaced + iconMargins);
+        // Native Dash's separator is horizontal by default (one icon tall).
+        // Rotate its allocation too; it is not an additional application slot.
+        let separatorsHeight = 0;
+        this._modularSeparators ??= new WeakMap();
+        for (const separator of this._separators ?? []) {
+          if (!separator.visible) continue;
+          if (!this._modularSeparators.has(separator))
+            this._modularSeparators.set(separator, [separator.width, separator.height, separator.style ?? null]);
+          separator.set_size(iconSize, 1);
+          separator.set_style('margin: 0;');
+          separatorsHeight += 1;
+        }
+        const contentHeight = Math.max(iconSlotSize, this._icons.length * iconSlotSize + separatorsHeight);
         const viewport = computeDockViewport({
           availableHeight: modularConstraints.availableHeight,
           contentHeight,
@@ -1378,7 +1416,7 @@ export let Dock = GObject.registerClass(
         if (this.struts.visible !== shouldBeVisible) this.struts.visible = shouldBeVisible;
 
         if (this._scrollView) {
-          const scrollW = iconSizeSpaced + 8;
+          const scrollW = LEFT_MODULAR_WIDTH;
           const scrollH = viewport.bodyHeight;
           if (this._scrollView.x !== 0 || this._scrollView.y !== viewport.contentTop)
             this._scrollView.set_position(0, viewport.contentTop);
@@ -1393,7 +1431,7 @@ export let Dock = GObject.registerClass(
         // to the same body; rounded flares never acquire transparent hitboxes.
         const flare = Math.min(this.extension.flare_width ?? 14, this.height / 2);
         this.renderArea.set_clip?.(0, flare, this.width, Math.max(0, this.height - 2 * flare));
-        const dashW = iconSizeSpaced + 8;
+        const dashW = LEFT_MODULAR_WIDTH;
         if (this.dash.width !== dashW || this.dash.height !== contentHeight)
           this.dash.set_size(dashW, contentHeight);
         if (this.dash.x !== 0 || this.dash.y !== 0)
@@ -1598,7 +1636,7 @@ export let Dock = GObject.registerClass(
         // Magnified renderers above still retain direct pointer interaction.
         const left = this.x + (this.dash?.translationX || 0);
         const top = this.y + this._modularViewport.contentTop + (this.dash?.translationY || 0);
-        const width = this._restingWidth ?? ((this._iconSizeScaledDown ?? 48) * (this._scaleFactor || 1) + 4);
+        const width = LEFT_MODULAR_WIDTH;
         if (px >= left && px < left + width &&
             py >= top && py < top + this._modularViewport.bodyHeight) return true;
         // Once entered, the painted body bridges gaps between magnified icons.

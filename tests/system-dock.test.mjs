@@ -1755,7 +1755,7 @@ test('Desktop 3: Quick Settings and Calendar popups open to the RIGHT of left-at
 test('Desktop 3: pods own separate nonreactive actors and release shared listeners on destroy', async () => {
   const env = await setupSystemDockEnvironment();
   const {SystemState} = await loadModule('dash2dock-lite@custom/systemDock/systemState.js', {mocks: env.sharedMocks});
-  const {QuickSettingsPod, ClockPod} = await loadModule('dash2dock-lite@custom/systemDock/modularPods.js', {
+  const {QuickSettingsPod, InputMethodPod, ClockPod} = await loadModule('dash2dock-lite@custom/systemDock/modularPods.js', {
     mocks: {...env.sharedMocks, '../attachedBackground.js': {AttachedDockCanvas: env.StMock.DrawingArea}},
   });
   const state = new SystemState();
@@ -1771,11 +1771,13 @@ test('Desktop 3: pods own separate nonreactive actors and release shared listene
   assert.equal(quick.reactive, false);
   assert.equal(clock.reactive, false);
   assert.notEqual(quick._contentBox, clock._contentBox);
-  assert.deepEqual([...quick._items.keys()], ['network', 'bluetooth', 'volume', 'battery', 'input-source']);
+  assert.deepEqual([...quick._items.keys()], ['network', 'bluetooth', 'volume', 'battery']);
   assert.equal(quick._items.get('bluetooth').visible, false);
   assert.equal(quick._items.get('network')._icon.icon_size, 20);
   assert.equal(quick._items.get('network').side, env.StMock.Side.LEFT);
-  assert.equal(quick._items.get('input-source').visible, false, 'No source is shown when native provider is unavailable');
+  const input = new InputMethodPod({extension, systemState: state, systemMenus: menus});
+  assert.equal(input.hasUsableControls, false, 'No input pod is shown when native provider is unavailable');
+  input.destroy();
   assert.equal(clock._clockItem._dayLabel.visible, false);
   assert.equal(clock._clockItem._hourLabel.text, state.time.hours24);
   const geometry = {x: -1920, y: 35, width: 44, height: 220, contentTop: 18, contentHeight: 184,
@@ -1831,19 +1833,24 @@ test('Left Modular grows for recording, sharing and extra native indicators, and
   const recordButton = pod._items.get(`dynamic-${record.id}`);
   assert.ok(pod.getMeasuredContentHeight() > baseHeight, 'recording increases natural pod height');
   recordButton.emit('clicked');
-  assert.equal(stops, 1, 'compact stop action reaches the native screencast controller');
+  assert.equal(stops, 0, 'the unified pod opens Quick Settings from every status icon');
+  assert.equal(menusOpened, 1);
+  state.activateDynamicIndicator(record);
+  assert.equal(stops, 1, 'native recording action remains owned by the existing provider');
   sharing.visible = true;
   sharing.emit('notify::visible');
   assert.equal(state.dynamicIndicators.filter(item => item.kind === 'sharing').length, 1,
     'two native sharing icons become one compact action');
   const share = state.dynamicIndicators.find(item => item.kind === 'sharing');
   pod._items.get(`dynamic-${share.id}`).emit('clicked');
+  assert.equal(sharesStopped, 0);
+  state.activateDynamicIndicator(share);
   assert.equal(sharesStopped, 1);
   privacy.visible = true;
   privacy.emit('notify::visible');
   const status = state.dynamicIndicators.find(item => item.source === privacy);
   pod._items.get(`dynamic-${status.id}`).emit('clicked');
-  assert.equal(menusOpened, 1, 'other indicators open native Quick Settings');
+  assert.equal(menusOpened, 3, 'every status opens the same native Quick Settings');
   const external = new MockSignalActor({visible: true});
   const externalIcon = new MockSignalActor({icon_name: 'camera-web-symbolic'});
   external.add_child(externalIcon);
@@ -1906,6 +1913,42 @@ test('Desktop 3: real Shell 51 providers track stream replacement, battery data 
   state.destroy();
   for (const provider of [replacement, output, proxy, kim, kim.labelIcon, kim.mainIcon, qs._bluetooth._client])
     assert.equal(provider.signals.size, 0, 'Every provider subscription is disconnected');
+});
+
+test('native Wi-Fi names and Kimpanel property-only mode changes update SystemState and release their subscriptions', async () => {
+  const env = await setupSystemDockEnvironment();
+  const wireless = new MockSignalActor({checked: true, title: 'Wi-Fi', subtitle: 'Home Wi-Fi'});
+  env.nativeQuickSettings._network._wirelessToggle = wireless;
+  const modeLabel = new MockSignalActor({text: 'Vietnamese'});
+  const methodLabel = new MockSignalActor({text: 'Telex'});
+  const kim = new MockSignalActor({visible: true,
+    menu: {box: new MockSignalActor()},
+    labelIcon: new MockSignalActor({text: 'Vi', visible: true}),
+    mainIcon: new MockSignalActor({visible: false}),
+    _properties: {'/Fcitx/im': {label: 'Telex'}},
+    _propertySwitch: {im: {label: methodLabel}, mode: {label: modeLabel}},
+    kimpanel: {enabled: true}});
+  env.MainMock.panel.statusArea.kimpanel = kim;
+  const {SystemState} = await loadModule('dash2dock-lite@custom/systemDock/systemState.js', {mocks: env.sharedMocks});
+  const state = new SystemState();
+  assert.equal(state.network.name, 'Home Wi-Fi');
+  wireless.subtitle = 'Office Wi-Fi'; wireless.emit('notify::subtitle');
+  assert.equal(state.network.name, 'Office Wi-Fi');
+  assert.equal(state.inputSource.displayName, 'Telex');
+  assert.equal(state.inputSource.mode, 'Vietnamese');
+  modeLabel.text = 'ASCII'; modeLabel.emit('notify::text');
+  assert.equal(state.inputSource.shortName, 'Vi', 'the compact glyph may stay unchanged');
+  assert.equal(state.inputSource.mode, 'ASCII');
+  delete kim._propertySwitch.mode;
+  kim.menu.box.emit('child-removed', modeLabel);
+  assert.equal(modeLabel.signals.size, 0);
+  assert.equal(state.inputSource.mode, '');
+  kim.visible = false; kim.emit('notify::visible');
+  assert.equal(state.inputSource.provider, 'keyboard');
+  assert.equal(methodLabel.signals.size, 0);
+  state.destroy();
+  for (const actor of [wireless, kim, kim.labelIcon, kim.mainIcon, kim.menu.box, methodLabel, modeLabel])
+    assert.equal(actor.signals.size, 0);
 });
 
 test('Desktop 3: native menu anchoring preserves BoxPointer ownership, restores on source destruction and failure', async () => {

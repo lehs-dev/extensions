@@ -22,7 +22,7 @@ import {
 
 import { DockPosition } from './dock.js';
 import { AttachedDockCanvas } from './attachedBackground.js';
-import {getAttachedPodPickBoxes} from './attachedGeometry.js';
+import {getAttachedPodPickBoxes, LEFT_MODULAR_WIDTH} from './attachedGeometry.js';
 import {computeDockFrames} from './dockOverflow.js';
 
 class DockItemMenu extends PopupMenu.PopupMenu {
@@ -504,11 +504,10 @@ export const DockBackground = GObject.registerClass(
           if (dock._modularViewport) {
             const inset = Math.max(4 * scaleFactor, padding);
             if (!dock._modularFrames) {
-              const rights = (dock._icons ?? []).filter(icon => Number.isFinite(icon._fixedPosition?.[0]))
-                .map(icon => icon._fixedPosition[0] - dock.x - (dock.dash.translationX || 0) +
-                  icon.width / 2 + iconSize * scaleFactor / 2);
-              const contentRight = rights.length ? Math.max(...rights) : iconSize * scaleFactor;
-              dock._restingWidth = contentRight + inset;
+              // Native source allocations can change during redisplay. Their
+              // transient bounds never determine the resting capsule width.
+              const contentRight = (LEFT_MODULAR_WIDTH + iconSize * scaleFactor) / 2;
+              dock._restingWidth = LEFT_MODULAR_WIDTH;
               dock._modularFrames = computeDockFrames({viewport: dock._modularViewport,
                 height: dock.height, restingWidth: dock._restingWidth, contentRight,
                 iconSize: iconSize * scaleFactor, slotSize: first.width, inset, flareWidth: fw,

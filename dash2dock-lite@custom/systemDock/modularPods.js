@@ -6,7 +6,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { AttachedDockCanvas } from '../attachedBackground.js';
-import {getAttachedPodPickBoxes} from '../attachedGeometry.js';
+import {getAttachedPodPickBoxes, LEFT_MODULAR_WIDTH} from '../attachedGeometry.js';
 import {PodElevation} from './podElevation.js';
 import {
   NetworkItem, BluetoothItem, AudioItem, BatteryItem, InputSourceItem, ModularClockItem, DynamicIndicatorItem,
@@ -15,12 +15,13 @@ import {
 const isFullscreenObscured = monitor => !!monitor?.inFullscreen &&
   ((typeof global !== 'undefined' ? global.window_group?.visible : undefined) ?? !Main.overview?.visible);
 
-// The root reserves the small animation extent but is never reactive. Only
+// The root reserves the information reveal but is never reactive. Only
 // these boxes, entirely inside the painted contour, participate in picking.
 const PodSurface = GObject.registerClass(
-  class PodSurface extends St.Widget {
+  class PodSurface extends St.Button {
     _init() {
-      super._init({reactive: true, can_focus: false});
+      super._init({reactive: true, can_focus: true, track_hover: true,
+        style_class: 'modular-pod-surface'});
       this.boxes = [];
     }
 
@@ -61,49 +62,40 @@ const AttachedPod = GObject.registerClass(
         this._canvas.reactive = false;
         this.add_child(this._canvas);
         this._surface = new PodSurface();
+        this._surface._systemPod = this;
+        this._surface.side = St.Side.LEFT;
         this.add_child(this._surface);
         this._contentBox = new St.BoxLayout({
           style_class: 'modular-pod-box',
           orientation: Clutter.Orientation.VERTICAL,
-          reactive: true,
+          reactive: false,
           x_expand: false,
         });
         if (this._contentBox.layout_manager) {
           this._contentBox.layout_manager.orientation = Clutter.Orientation.VERTICAL;
         }
         this.add_child(this._contentBox);
+        this._detailsBox = new St.BoxLayout({style_class: 'modular-pod-details',
+          orientation: Clutter.Orientation.VERTICAL, reactive: false});
+        this.add_child(this._detailsBox);
+        this._detailLabels = new Map();
+        // A point on the moving contour anchors the native popup. Its focus
+        // returns to the single shaped button, never to an invisible reserve.
+        this._menuAnchor = new St.Widget({reactive: false});
+        this._menuAnchor._systemPod = this;
+        this._menuAnchor.set_size(1, 1);
+        this.add_child(this._menuAnchor);
         this._destroyed = false;
-        this.connect('enter-event', (_actor, event) => {
-          const related = event.get_related();
-          if (!related || !this.contains(related)) {
-            this._pointerInside = true;
-            this._syncElevation();
-          }
-          return Clutter.EVENT_PROPAGATE;
+        // St.Button handles crossing events itself. Observe its native hover
+        // property: the passive root does not reliably receive those events.
+        this._surface.connect('notify::hover', () => {
+          this._pointerInside = this._surface.hover;
+          this._syncElevation();
         });
-        this.connect('leave-event', (_actor, event) => {
-          const related = event.get_related();
-          if (!related || !this.contains(related)) {
-            this._pointerInside = false;
-            this._syncElevation();
-          }
-          return Clutter.EVENT_PROPAGATE;
-        });
-        this._surface.connect('button-release-event', (_actor, event) => {
-          if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
-          if (this._items.size === 1) {
-            const item = [...this._items.values()].find(button => button.visible);
-            item?._onActivate();
-            return Clutter.EVENT_STOP;
-          }
-          return Clutter.EVENT_PROPAGATE;
-        });
+        this._surface.connect('clicked', () => this._activate());
         this.connect('notify::visible', () => {
           if (!this.visible) this._resetInteraction();
         });
-        const stage = typeof global !== 'undefined' ? global.stage : null;
-        if (stage?.connect)
-          this._signals.push([stage, stage.connect('notify::key-focus', () => this._syncElevation())]);
         const settings = St.Settings?.get();
         if (settings?.connect) {
           for (const signal of ['notify::reduced-motion', 'notify::enable-animations'])
@@ -128,9 +120,59 @@ const AttachedPod = GObject.registerClass(
       item.x_expand = true;
       item.x_align = Clutter.ActorAlign.FILL;
       item._systemPod = this;
+      item._onActivate = () => this._activate();
+      // Reuse the status presenters, but all input belongs to the pod's one
+      // shaped button (including gaps and the information revealed on hover).
+      item.reactive = item.can_focus = item.track_hover = false;
       this._items.set(name, item);
       this._contentBox.add_child(item);
       return item;
+    }
+
+    _activate() {}
+
+    _menuOptions() { return {side: St.Side.LEFT, focusActor: this._surface}; }
+
+    _setDetails(entries) {
+      let changed = false;
+      const keys = new Set(entries.map(([key]) => key));
+      for (const [key, label] of this._detailLabels) {
+        if (keys.has(key)) continue;
+        label.destroy();
+        this._detailLabels.delete(key);
+        changed = true;
+      }
+      for (const [key, text] of entries) {
+        let label = this._detailLabels.get(key);
+        if (!label) {
+          label = new St.Label({style_class: 'modular-pod-detail-label', reactive: false,
+            y_expand: true, y_align: Clutter.ActorAlign.CENTER});
+          this._detailLabels.set(key, label);
+          this._detailsBox.add_child(label);
+          changed = true;
+        }
+        if (label.text !== text) { label.text = text; changed = true; }
+      }
+      this._surface.accessible_name = entries.map(([, text]) => text).join(', ') || this.name;
+      // Provider changes can resize this pod's reserve, but never the desktop
+      // geometry. Hover frames only update clip, opacity, translations and paint.
+      if (changed && this._geom) this._sizeExpansion();
+    }
+
+    _sizeExpansion() {
+      const g = this._geom;
+      const monitor = Main.layoutManager.findMonitorForActor?.(this) || Main.layoutManager.primaryMonitor;
+      const natural = this._detailsBox.layout_manager?.get_preferred_width?.(this._detailsBox, -1)?.[1] ??
+        Math.max(0, ...[...this._detailLabels.values()].map(label => label.get_preferred_width?.(-1)?.[1] ?? 0));
+      const available = Math.max(0, (monitor?.width ?? 1920) - g.width - this._elevation.distance - 12);
+      this._expansion = Math.min(320, available, Math.ceil(natural) + 18);
+      const reserve = g.width + this._expansion + this._elevation.distance + 4;
+      this.set_size(reserve, g.height);
+      this._canvas.set_size(reserve, g.height);
+      this._surface.set_size(reserve, g.height);
+      this._detailsBox.set_position(g.width + 8, g.contentTop);
+      this._detailsBox.set_size(Math.max(1, this._expansion - 16), g.contentHeight);
+      this._applyElevation();
     }
 
     enable() {
@@ -204,19 +246,13 @@ const AttachedPod = GObject.registerClass(
       if (!geometry) { this.hide(); return; }
       const gx = Number.isFinite(geometry.x) ? Math.round(geometry.x) : 0;
       const gy = Number.isFinite(geometry.y) ? Math.round(geometry.y) : 0;
-      const gw = Number.isFinite(geometry.width) && geometry.width > 0 ? Math.round(geometry.width) : 24;
+      const gw = Number.isFinite(geometry.width) && geometry.width > 0 ? Math.round(geometry.width) : LEFT_MODULAR_WIDTH;
       const gh = Number.isFinite(geometry.height) && geometry.height > 0 ? Math.round(geometry.height) : 60;
 
       this.set_position(gx, gy);
       this._elevation.configure(this.extension);
-      const dist = Number.isFinite(this._elevation.distance) ? this._elevation.distance : 3;
-      const reserve = dist + 4;
-      const totalWidth = gw + reserve;
-      this.set_size(totalWidth, gh);
       this._canvas.set_position(0, 0);
-      this._canvas.set_size(totalWidth, gh);
       this._surface.set_position(0, 0);
-      this._surface.set_size(totalWidth, gh);
       const inset = geometry.contentLeft ?? 2;
       const safeInset = Number.isFinite(inset) ? Math.round(inset) : 2;
       const contentTop = Number.isFinite(geometry.contentTop) ? Math.round(geometry.contentTop) : 17;
@@ -228,6 +264,9 @@ const AttachedPod = GObject.registerClass(
         : Math.max(1, gh - 2 * contentTop);
       this._contentBox.set_position(safeInset, contentTop);
       this._contentBox.set_size(contentWidth, contentHeight);
+      this._menuAnchor.set_position(gw - 1, gh / 2);
+      this._geom = {...geometry, width: gw, height: gh, contentTop, contentHeight};
+      this._sizeExpansion();
       const monitor = Main.layoutManager.findMonitorForActor?.(this) || Main.layoutManager.primaryMonitor;
       this.visible = geometry.visible !== false && !isFullscreenObscured(monitor);
       this._syncElevation();
@@ -236,8 +275,8 @@ const AttachedPod = GObject.registerClass(
 
     _syncElevation(immediate = false) {
       if (this._destroyed) return;
-      const focus = typeof global !== 'undefined' ? global.stage?.get_key_focus() : null;
-      const active = this.visible && (this._pointerInside || this._menuOpen || (!!focus && this.contains(focus)));
+      // Focus returning after a popup closes must not latch the capsule open.
+      const active = this.visible && (this._pointerInside || this._menuOpen);
       this._elevation.setActive(active, immediate);
     }
 
@@ -265,9 +304,15 @@ const AttachedPod = GObject.registerClass(
     _applyElevation() {
       if (!this._geom || this._destroyed) return;
       const offset = this._elevation.progress * this._elevation.distance;
+      const reveal = (this._expansion ?? 0) * this._elevation.progress;
       this._contentBox.translation_x = offset;
-      this._surface.boxes = getAttachedPodPickBoxes({...this._geom, bodyOffset: offset});
+      this._detailsBox.translation_x = offset;
+      this._detailsBox.opacity = Math.round(255 * this._elevation.progress);
+      this._detailsBox.set_clip?.(0, 0, Math.max(0, reveal - 8), this._geom.contentHeight);
+      this._surface.boxes = getAttachedPodPickBoxes({...this._geom,
+        width: this._geom.width + reveal, bodyOffset: offset});
       this._surface.queue_redraw?.();
+      this._menuAnchor.translation_x = reveal + offset;
       this.systemMenus?.updateAnchor?.(this);
       this.updateTheme();
     }
@@ -276,6 +321,7 @@ const AttachedPod = GObject.registerClass(
       if (!this._geom) return;
       this._canvas.set_state({
         ...this._geom,
+        width: this._geom.width + (this._expansion ?? 0) * this._elevation.progress,
         // Geometry is already in Shell's logical coordinate space.
         scaleFactor: 1,
         position: 'left',
@@ -316,9 +362,8 @@ export const QuickSettingsPod = GObject.registerClass(
         this._addItem('bluetooth', BluetoothItem);
         this._addItem('volume', AudioItem);
         this._addItem('battery', BatteryItem);
-        this._addItem('input-source', InputSourceItem);
         this._stateListener = event => {
-          if (['network-changed', 'bluetooth-changed', 'battery-changed', 'audio-changed', 'input-source-changed', 'indicators-changed'].includes(event)) {
+          if (['network-changed', 'bluetooth-changed', 'battery-changed', 'audio-changed', 'indicators-changed'].includes(event)) {
             const previousWidth = this._measuredWidth;
             const changed = this._refreshContent();
             if (changed || this.getMeasuredContentWidth() !== previousWidth) this.updateLayout();
@@ -331,6 +376,10 @@ export const QuickSettingsPod = GObject.registerClass(
 
     get hasUsableControls() {
       return [...this._items.values()].some(item => item.visible);
+    }
+
+    _activate() {
+      this.systemMenus.toggleQuickSettings(this._menuAnchor, null, this._menuOptions());
     }
 
     _refreshContent() {
@@ -356,7 +405,6 @@ export const QuickSettingsPod = GObject.registerClass(
         bluetooth: !!state.bluetooth.available,
         battery: !!state.battery.present,
         volume: state.audio.available !== false,
-        'input-source': !!state.inputSource.available,
       };
       const iconSize = this.extension?.modular_indicator_icon_size ?? 16;
       for (const [name, item] of this._items) {
@@ -370,7 +418,55 @@ export const QuickSettingsPod = GObject.registerClass(
       if (this._spacing !== spacing) {
         this._spacing = spacing;
         this._contentBox.set_style(`spacing: ${spacing}px;`);
+        this._detailsBox.set_style(`spacing: ${spacing}px;`);
       }
+      const details = {
+        network: state.network.name || (state.network.connected ? 'Network connected' : 'Network disconnected'),
+        bluetooth: `Bluetooth: ${state.bluetooth.enabled ? 'On' : 'Off'}`,
+        volume: state.audio.muted ? 'Volume: Muted' : Number.isFinite(state.audio.volume)
+          ? `Volume: ${Math.round(state.audio.volume * 100)}%` : 'Volume',
+        battery: Number.isFinite(state.battery.percentage)
+          ? `Battery: ${Math.round(state.battery.percentage)}%${state.battery.charging ? ' · Charging' : ''}` : 'Battery',
+      };
+      this._setDetails([...this._items].filter(([, item]) => item.visible).map(([name, item]) =>
+        [name, details[name] || item.indicator?.accessibleName || 'System status']));
+      return changed;
+    }
+  }
+);
+
+export const InputMethodPod = GObject.registerClass(
+  class InputMethodPod extends AttachedPod {
+    _init(params = {}) {
+      super._init({...params, name: 'InputMethodPod'});
+      try {
+        this._addItem('input-source', InputSourceItem);
+        this._stateListener = event => {
+          if (event !== 'input-source-changed') return;
+          const previousWidth = this._measuredWidth;
+          const changed = this._refreshContent();
+          if (changed || this.getMeasuredContentWidth() !== previousWidth) this.updateLayout();
+        };
+        this.systemState.addListener(this._stateListener);
+        this._refreshContent();
+      } catch (error) { this.destroy(); throw error; }
+    }
+
+    get hasUsableControls() { return !!this._items.get('input-source')?.visible; }
+
+    _activate() {
+      this.systemMenus.toggleKeyboardMenu(this._menuAnchor, this._menuOptions());
+    }
+
+    _refreshContent() {
+      const state = this.systemState.inputSource;
+      const item = this._items.get('input-source');
+      const visible = !!state.available && this.extension?.modular_show_input_source !== false;
+      const changed = item.visible !== visible;
+      item.visible = visible;
+      const iconSize = this.extension?.modular_indicator_icon_size ?? 16;
+      if (item._sourceIcon?.icon_size !== iconSize) item.setIconSize?.(iconSize);
+      this._setDetails([['input-source', [...new Set([state.displayName, state.mode, state.shortName].filter(Boolean))].join(' · ') || 'Input Method']]);
       return changed;
     }
   }
@@ -385,6 +481,7 @@ export const ClockPod = GObject.registerClass(
         this._clockItem.set_style('min-width: 0; min-height: 0; padding: 2px 0;');
         this._stateListener = event => {
           if (event === 'clock-changed') {
+            this._refreshContent();
             const previous = this._measuredHeight;
             const previousWidth = this._measuredWidth;
             const height = this.getMeasuredContentHeight();
@@ -399,6 +496,29 @@ export const ClockPod = GObject.registerClass(
 
     _refreshContent() {
       this._clockItem?.updatePreferences();
+      const time = this.systemState.time;
+      const format = this.extension?.modular_clock_format ?? 0;
+      const is12h = format === 2 || (format === 0 && time.is12h);
+      const hours = format === 1 ? time.hours24 : format === 2 ? time.hours12 : time.hours;
+      this._setDetails([
+        ['time', `${hours || '00'}:${time.minutes || '00'}${is12h && time.dayPeriod ? ` ${time.dayPeriod}` : ''}`],
+        ['weekday', time.fullWeekday || time.dayOfWeek || ''],
+        ['date', time.fullDate || [time.dayOfMonth, time.month].filter(Boolean).join(' ')],
+      ]);
+    }
+
+    getMeasuredContentHeight() {
+      const compact = super.getMeasuredContentHeight();
+      // A time-only compact clock still needs room for all three information
+      // lines. Reserve it during placement, never during a hover frame.
+      const details = [...this._detailLabels.values()].reduce((sum, label) =>
+        sum + (label.get_preferred_height?.(-1)?.[1] || 16), 0) + 6;
+      this._measuredHeight = Math.max(compact, Math.ceil(details));
+      return this._measuredHeight;
+    }
+
+    _activate() {
+      this.systemMenus.toggleDateMenu(this._menuAnchor, this._menuOptions());
     }
   }
 );

@@ -132,6 +132,8 @@ export class SystemState {
       dayOfWeek: now.format('%a'),
       dayOfMonth: now.format('%e')?.trim(),
       month: now.format('%b'),
+      fullWeekday: now.format('%A'),
+      fullDate: now.format('%e %B %Y')?.trim(),
       accessible: now.format('%A %e %B %Y %H:%M'),
     };
     if (JSON.stringify(next) === JSON.stringify(this.time)) return;
@@ -150,11 +152,16 @@ export class SystemState {
     const indicator = status()?.quickSettings?._network;
     const icon = indicator?._primaryIndicator || indicator?._indicator;
     const client = indicator?._client;
-    this._watch('network-client', client, ['notify::state', 'notify::connectivity'], () => this._updateNetwork());
+    this._watch('network-client', client, ['notify::state', 'notify::connectivity', 'notify::primary-connection'], () => this._updateNetwork());
+    const wireless = indicator?._wirelessToggle;
+    this._watch('network-wireless', wireless, ['notify::subtitle', 'notify::title', 'notify::checked'], () => this._updateNetwork());
+    const connection = client?.get_primary_connection?.() ?? client?.primary_connection;
+    this._watch('network-connection', connection, ['notify::id', 'notify::state'], () => this._updateNetwork());
     const iconName = icon?.icon_name || 'network-offline-symbolic';
     const connected = client?.get_state ? client.get_state() >= 50 :
       !!indicator && indicator.visible !== false && !/offline|disconnected|no-route/.test(iconName);
-    this.network = {available: !!indicator, connected, iconName, state: connected ? 'connected' : 'disconnected'};
+    const name = wireless?.checked ? wireless.subtitle || wireless.title : connection?.get_id?.() || connection?.id || '';
+    this.network = {available: !!indicator, connected, iconName, name, state: connected ? 'connected' : 'disconnected'};
     this._emit('network-changed', this.network);
   }
 
@@ -279,6 +286,7 @@ export class SystemState {
     this._watch('input-kimpanel', kim, ['notify::visible'], () => this._updateInputSource());
     this._watch('input-label', kim?.labelIcon, ['notify::text', 'notify::visible'], () => this._updateInputSource());
     this._watch('input-icon', kim?.mainIcon, ['notify::gicon', 'notify::visible'], () => this._updateInputSource());
+    this._watch('input-properties', kim?.menu?.box, ['child-added', 'child-removed'], () => this._updateInputSource());
     this._updateInputSource();
   }
 
@@ -287,11 +295,27 @@ export class SystemState {
     const kim = status()?.kimpanel;
     const source = keyboard?._getCurrentSource?.() || keyboard?._inputSourceManager?.currentSource || keyboard?._currentSource;
     const useKim = !!kim?.visible;
+    // Observe Kimpanel's own property labels. Mode changes need not change the
+    // compact glyph or icon, and its native menu remains the property owner.
+    const labels = new Set(Object.values(useKim ? kim._propertySwitch ?? {} : {}).map(item => item.label).filter(Boolean));
+    for (const label of this._inputPropertyLabels ?? []) {
+      if (!labels.has(label)) {
+        this._watch(label, null, [], null);
+        this._groups.delete(label);
+      }
+    }
+    for (const label of labels)
+      this._watch(label, label, ['notify::text'], () => this._updateInputSource());
+    this._inputPropertyLabels = labels;
     const shortName = useKim ? (kim.labelIcon?.visible ? kim.labelIcon.text : '') :
       source?.shortName || keyboard?._indicatorLabel?.text || '';
     const available = useKim ? !!kim.menu : !!source && !!keyboard?.menu;
+    const property = useKim ? kim._properties?.['/Fcitx/im'] : null;
+    const displayName = useKim ? property?.label || shortName || 'Input Method' : source?.displayName || shortName;
+    const modes = useKim ? [...labels].map(label => label.text).filter(text => text && text !== displayName) : [];
+    if (useKim && kim.kimpanel?.enabled === false) modes.unshift('Inactive');
     this.inputSource = {available, shortName,
-      displayName: useKim ? shortName || 'Input Method' : source?.displayName || shortName,
+      displayName, mode: [...new Set(modes)].join(' · '),
       provider: useKim ? 'kimpanel' : 'keyboard',
       gicon: useKim && kim.mainIcon?.visible ? kim.mainIcon.gicon : null,
       iconName: 'input-keyboard-symbolic'};

@@ -6,6 +6,9 @@ import {PopupAnimation} from 'resource:///org/gnome/shell/ui/boxpointer.js';
 
 const ST_SIDE_RIGHT = St.Side.RIGHT;
 const ST_SIDE_LEFT = St.Side.LEFT;
+// Shell 51 takes an options object; earlier Shells take PopupAnimation flags.
+const animationOptions = (menu, animate) => typeof menu._getPopupAnimationFromParams === 'function'
+  ? {animate} : animate ? PopupAnimation.FULL : PopupAnimation.NONE;
 
 /** A temporary anchor for Shell-owned menus. Native actors and modal grabs stay owned by Shell. */
 export class SystemMenus {
@@ -33,7 +36,7 @@ export class SystemMenus {
     }
     this.closeAll();
     // A menu may already be open from the native panel. Close it before changing its anchor.
-    if (menu.isOpen) menu.close(PopupAnimation.NONE);
+    if (menu.isOpen) menu.close(animationOptions(menu, false));
 
     const pointer = menu._boxPointer;
     const monitor = Main.layoutManager.findMonitorForActor?.(sourceButton) ||
@@ -91,7 +94,7 @@ export class SystemMenus {
       });
       sourceSignal = sourceButton.connect('destroy', () => this.closeAll());
       menu.sourceActor = sourceButton;
-      menu.focusActor = sourceButton;
+      menu.focusActor = options.focusActor ?? sourceButton;
       menu._arrowAlignment = 0.5;
       if (pointer) {
         // Both fields matter: BoxPointer recalculates flips from _userArrowSide on allocation.
@@ -107,7 +110,7 @@ export class SystemMenus {
         menu.actor.style = `${style}${style && !style.endsWith(';') ? ';' : ''} max-height: ${Math.max(1, workArea.height - 24)}px; max-width: ${Math.max(1, workArea.width - 24)}px;`;
       }
       owner?.onMenuStateChanged?.(true);
-      menu.open(PopupAnimation.FULL);
+      menu.open(animationOptions(menu, true));
       if (!menu.isOpen) {
         cleanup();
         return false;
@@ -115,7 +118,7 @@ export class SystemMenus {
       return true;
     } catch (error) {
       console.error('dash2dock-lite: native menu could not open', error);
-      try { menu.close(PopupAnimation.NONE); } finally { cleanup(); }
+      try { menu.close(animationOptions(menu, false)); } finally { cleanup(); }
       return false;
     }
   }
@@ -149,7 +152,7 @@ export class SystemMenus {
   closeAll() {
     const adapter = this._activeAdapter;
     if (!adapter) return;
-    try { adapter.menu.close(PopupAnimation.NONE); }
+    try { adapter.menu.close(animationOptions(adapter.menu, false)); }
     finally { adapter.cleanup(); }
   }
 

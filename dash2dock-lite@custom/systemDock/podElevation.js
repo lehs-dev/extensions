@@ -19,7 +19,7 @@ export class PodElevation {
 
   get reducedMotion() {
     const settings = St.Settings?.get();
-    return (St.ReducedMotion && settings?.reducedMotion === St.ReducedMotion.REDUCE) ||
+    return (St.ReducedMotion && (settings?.reduced_motion ?? settings?.reducedMotion) === St.ReducedMotion.REDUCE) ||
       settings?.enable_animations === false;
   }
 
@@ -42,7 +42,7 @@ export class PodElevation {
     // Reversals start at the current value. A partial return takes only the
     // remaining fraction of the duration, without a jump or oscillation.
     const duration = Math.max(1, Math.round((this.duration + (target ? 0 : 30)) * Math.abs(target - from)));
-    const timeline = new Clutter.Timeline({duration});
+    const timeline = new Clutter.Timeline({actor: this.actor, duration});
     this._timeline = timeline;
     timeline.set_progress_mode(Clutter.AnimationMode.EASE_OUT_CUBIC);
     this._frameSignal = timeline.connect('new-frame', () =>

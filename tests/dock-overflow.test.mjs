@@ -107,6 +107,7 @@ async function setup(count = 16) {
     dock._debounceEndAnimation = () => {};
     const allocate = () => {
         const view = dock._scrollView;
+        icons.forEach((icon, i) => { icon.y = i * icon.height; });
         view.vadjustment.upper = Math.max(dock.dash.height, view.height);
         view.vadjustment.page_size = view.height;
     };
@@ -129,7 +130,7 @@ test('modular overflow keeps native Dash in a Scrollable wrapper, wheel/focus ex
     const scroll = dock._scrollView;
     assert.equal(scroll.enable_mouse_scrolling, false, 'custom wheel handler owns each adjustment once');
     dock._onScrollEvent(dock.renderArea, {get_scroll_direction: () => 1});
-    assert.equal(scroll.vadjustment.value, 48);
+    assert.equal(scroll.vadjustment.value, 30);
     icons.at(-1).emit('key-focus-in');
     const [, lastY] = icons.at(-1).get_transformed_position();
     const [, viewportY] = scroll.get_transformed_position();
@@ -167,7 +168,7 @@ test('native BaseIcon size matches the configured source slot and is not reset o
         calls++;
     }};
     dock.layout();
-    assert.equal(icons[0]._grid.iconSize, 48, 'native minimum size no longer disagrees with renderer/source layout');
+    assert.equal(icons[0]._grid.iconSize, 30, 'native minimum size no longer disagrees with renderer/source layout');
     assert.equal(icons[0]._icon, icons[0]._grid.icon, 'the renderer references the replacement texture');
     assert.equal(icons[0]._icon.opacity, 0);
     assert.equal(previous.destroyed, true);
@@ -202,7 +203,7 @@ test('modular hover entry stays attached to source icons when the painted backgr
     assert.equal(dock.isWithinHoverArea(outside), true, 'actual magnified icons retain direct pointer interaction');
 });
 
-test('modular capsule remains stable while content scrolls and encloses a single magnified application', async () => {
+async function createBackground() {
     const {DockBackground} = await loadModule('dash2dock-lite@custom/dockItems.js', {mocks: {
         'resource:///org/gnome/shell/ui/main.js': {},
         'resource:///org/gnome/shell/ui/boxpointer.js': {},
@@ -218,6 +219,11 @@ test('modular capsule remains stable while content scrolls and encloses a single
     const background = new DockBackground();
     background._canvas = new NativeActor();
     background._canvas.set_state = state => {background._canvas.state = state;};
+    return background;
+}
+
+test('modular capsule remains stable while content scrolls and encloses a single magnified application', async () => {
+    const background = await createBackground();
     let scrollY = 0;
     const dock = {x: 0, y: 200, width: 150, height: 300, _modularViewport: {overflow: true},
         _dockHoverProgress: 1,
@@ -226,16 +232,16 @@ test('modular capsule remains stable while content scrolls and encloses a single
             get_transformed_position: () => [0, 235 - scrollY]},
         extension: {desktopLayoutManager: {mode: 1}, background_style: 0,
             animation_magnify: 1, dock_padding: 0, flare_width: 14}};
-    const first = {width: 56, _fixedPosition: [0, 235], _icon: {translationX: 0, translationY: 0},
-        _renderer: new NativeActor({x: 0, y: 270, width: 96, height: 96})};
+    const first = {width: 34, _fixedPosition: [0, 235], _icon: {translationX: 0, translationY: 0},
+        _renderer: new NativeActor({x: 0, y: 270, width: 60, height: 60})};
     dock._icons = [first];
-    const params = {first, last: first, iconSize: 48, scaleFactor: 1,
+    const params = {first, last: first, iconSize: 30, scaleFactor: 1,
         vertical: true, position: 'left', panel_mode: true, dock};
     background.update(params);
     assert.equal(background.opacity, 255, 'one running application still has an attached capsule');
     assert.equal(background.height, 300);
     assert.equal(background.y, 0);
-    assert.ok(background.width >= 96, 'actual magnified renderer remains inside capsule');
+    assert.ok(background.width >= 60, 'actual magnified renderer remains inside capsule');
     const width = background.width;
     scrollY = 450;
     background.update(params);
@@ -244,7 +250,7 @@ test('modular capsule remains stable while content scrolls and encloses a single
     assert.equal(background.width, width, 'scroll offsets never change capsule geometry');
     assert.equal(background._canvas.state.position, 'left');
 
-    first._renderer.set_size(48, 48);
+    first._renderer.set_size(30, 30);
     dock._dockHoverProgress = 0;
     background.update(params);
     assert.ok(background.width < width, 'overflow capsule also contracts when magnification ends');
@@ -420,4 +426,108 @@ test('modular Application Dock does not thrash height or y to monitor dimensions
     assert.ok(!assignedYs.includes(monitor.y), 'Y must never thrash to monitor.y');
     assert.equal(dock.height, stableHeight, 'Height remains stable across frames');
     assert.equal(dock.y, stableY, 'Y position remains stable across frames');
+});
+
+test('pin/unpin changes the capsule by exactly one allocated icon slot with constant flares and padding', async () => {
+    const {computeDockFrames} = await loadModule('dash2dock-lite@custom/dockOverflow.js');
+    const {getAttachedEdgeGeometry} = await loadModule('dash2dock-lite@custom/attachedGeometry.js');
+    for (const iconSpacing of [0, 0.5, 1]) {
+        const {dock, icons, constraints} = await setup(12);
+        dock.extension.icon_spacing = iconSpacing;
+        constraints.availableHeight = 2000;
+        const allIcons = [...icons];
+        let previous;
+        for (const count of [1, 2, 3, 7, 12, 7, 2, 1]) {
+            icons.splice(0, icons.length, ...allIcons.slice(0, count));
+            dock.layout();
+            const viewport = dock._modularViewport;
+            const frames = computeDockFrames({viewport, height: dock.height,
+                restingWidth: 34, contentRight: 32, iconSize: 30, slotSize: icons[0].width,
+                inset: 4, flareWidth: 14, magnify: 0.5});
+            const g = getAttachedEdgeGeometry({...frames.resting, position: 'left', flareWidth: 14});
+            assert.equal(dock.dash.height, count * icons[0].height);
+            assert.equal(frames.resting.height, count * icons[0].height + 2 * (14 + 4));
+            assert.equal(g.flareWidth, 14);
+            assert.equal(dock._iconSizeScaledDown, 30);
+            assert.equal(dock.extension.animation_magnify, 0.5);
+            assert.ok(Math.abs(dock.y + dock.height / 2 - constraints.centerY) <= 0.5);
+            if (previous) {
+                const delta = (count - previous.count) * icons[0].height;
+                assert.equal(frames.resting.height - previous.restingHeight, delta);
+                assert.equal(dock.height - previous.height, delta);
+            }
+            previous = {count, restingHeight: frames.resting.height, height: dock.height};
+        }
+    }
+});
+
+test('vertical native separators and layout spacing cannot add another icon slot and restore on mode exit', async () => {
+    const {dock, icons, layoutManager} = await setup(3);
+    const separator = new NativeActor({width: 1, height: 64, style: 'margin-left: 8px;'});
+    dock.dash._box.add_child(separator);
+    dock._separators = [separator];
+    dock.dash._box.layout_manager.spacing = 9;
+    dock.layout();
+    assert.equal(separator.height, 1);
+    assert.equal(separator.width, 30);
+    assert.equal(dock.dash._box.layout_manager.spacing, 0);
+    assert.equal(dock.dash.height, 3 * icons[0].height + 1);
+    layoutManager.mode = 0;
+    dock.layout();
+    assert.equal(separator.width, 1);
+    assert.equal(separator.height, 64);
+    assert.equal(separator.style, 'margin-left: 8px;');
+    assert.equal(dock.dash._box.layout_manager.spacing, 9);
+});
+
+test('opening and closing an unpinned app keeps the resting dock at 34 px despite native redisplay bounds', async () => {
+    const {dock, icons, allocate, constraints, layoutManager} = await setup(3);
+    constraints.availableHeight = 1200;
+    const background = await createBackground();
+    function paint(progress, transientOffset = 0) {
+        dock._dockHoverProgress = progress;
+        for (const icon of icons) icon._fixedPosition = icon.get_transformed_position();
+        icons.at(-1)._fixedPosition[0] += transientOffset;
+        background.update({first: icons[0], last: icons.at(-1),
+            iconSize: dock._iconSizeScaledDown, scaleFactor: 1, vertical: true,
+            position: 'left', panel_mode: false, dock});
+    }
+    dock.layout(); allocate(); paint(0);
+    assert.equal(background.width, 34);
+    const initialHeight = dock.dash.height;
+    paint(1);
+    const expandedWidth = background.width;
+    assert.ok(expandedWidth > 34, 'existing hover magnification is retained');
+
+    const running = new NativeActor();
+    running._icon = new NativeActor();
+    running._grid = {iconSize: 48, icon: running._icon, setIconSize(size) {
+        this.iconSize = size;
+        this.icon = new NativeActor();
+    }};
+    dock.dash._box.add_child(running);
+    icons.push(running);
+    dock._onDockContentChanged();
+    dock._ensureLayout(); allocate(); paint(0, 80);
+    assert.equal(background.width, 34, 'native bounds cannot widen the resting body');
+    assert.equal(background._canvas.state.width, 34);
+    assert.equal(dock._restingWidth, 34);
+    assert.equal(dock.dash.width, 34);
+    assert.equal(dock._scrollView.width, 34);
+    assert.ok(icons.every(icon => icon.width === 34));
+    assert.equal(running._grid.iconSize, 30, 'new native 48 px textures fit the fixed body');
+    assert.equal(dock.dash.height - initialHeight, running.height);
+    paint(1);
+    assert.equal(background.width, expandedWidth, 'expanded width also ignores app count');
+
+    dock.dash._box.remove_child(running);
+    icons.pop();
+    dock._onDockContentChanged();
+    dock._ensureLayout(); allocate(); paint(0);
+    assert.equal(background.width, 34);
+    assert.equal(dock.dash.height, initialHeight);
+    assert.equal(dock.extension.icon_size, 48, 'Dual Edge preference is preserved');
+    layoutManager.mode = 0;
+    dock.layout();
+    assert.equal(dock._iconSizeScaledDown, 48);
 });

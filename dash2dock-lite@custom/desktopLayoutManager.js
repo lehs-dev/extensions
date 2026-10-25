@@ -2,7 +2,7 @@
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {SystemDock} from './systemDock/systemDock.js';
-import {QuickSettingsPod, ClockPod} from './systemDock/modularPods.js';
+import {QuickSettingsPod, InputMethodPod, ClockPod} from './systemDock/modularPods.js';
 import {SystemState} from './systemDock/systemState.js';
 import {SystemMenus} from './systemDock/systemMenus.js';
 import {computeLeftModularGeometry} from './systemDock/systemDockLayout.js';
@@ -19,7 +19,7 @@ export class DesktopLayoutManager {
     this._signals = [];
     this._geometry = null;
     this._dockConstraints = new WeakMap();
-    this.systemDock = this.quickSettingsPod = this.clockPod = null;
+    this.systemDock = this.quickSettingsPod = this.inputMethodPod = this.clockPod = null;
   }
 
   get mode() { return this._activeMode ?? LayoutMode.DUAL_EDGE; }
@@ -50,7 +50,7 @@ export class DesktopLayoutManager {
     if (object?.connect) this._signals.push([object, object.connect(name, callback)]);
   }
 
-  _actors() { return [this.systemDock, this.quickSettingsPod, this.clockPod].filter(Boolean); }
+  _actors() { return [this.systemDock, this.quickSettingsPod, this.inputMethodPod, this.clockPod].filter(Boolean); }
 
   _dispose(actors) {
     for (const actor of actors) {
@@ -59,7 +59,8 @@ export class DesktopLayoutManager {
     }
   }
 
-  _computeGeometry(quickSettingsPod = this.quickSettingsPod, clockPod = this.clockPod) {
+  _computeGeometry(quickSettingsPod = this.quickSettingsPod, clockPod = this.clockPod,
+    inputMethodPod = this.inputMethodPod) {
     const ext = this.extension;
     const monitor = Main.layoutManager.primaryMonitor;
     if (!monitor) throw new Error('Left Modular requires an active primary monitor');
@@ -77,11 +78,14 @@ export class DesktopLayoutManager {
       clockWidth: ext.modular_clock_width,
       quickSettingsContentWidth: quickSettingsPod?.getMeasuredContentWidth?.() ?? 0,
       clockContentWidth: clockPod?.getMeasuredContentWidth?.() ?? 0,
+      inputMethodContentWidth: inputMethodPod?.getMeasuredContentWidth?.() ?? 0,
+      inputMethodContentHeight: inputMethodPod?.getMeasuredContentHeight() ?? 0,
       iconSpacing: ext.modular_indicator_spacing,
       quickSettingsContentHeight: quickSettingsPod?.getMeasuredContentHeight() ?? 0,
       clockContentHeight: clockPod?.getMeasuredContentHeight() ?? 0,
       showQuickSettings: !!quickSettingsPod,
       showClock: !!clockPod,
+      showInputMethod: !!inputMethodPod && inputMethodPod.hasUsableControls,
       showAppDock: ext.modular_show_appdock !== false,
       minimumAppDockHeight: 2 * (ext.flare_width ?? 14) + Math.max(24, ...(ext.docks ?? []).map(dock => dock._preferredIconSize?.() ?? 48)) *
         (1 + 1.8 * Math.max(0, ext.animation_magnify ?? 0)),
@@ -95,7 +99,7 @@ export class DesktopLayoutManager {
     const oldActors = this._actors();
     try {
       this.menus.closeAll();
-      let systemDock = null, quickSettingsPod = null, clockPod = null;
+      let systemDock = null, quickSettingsPod = null, inputMethodPod = null, clockPod = null;
       if (mode === LayoutMode.LEFT_MODULAR) {
         const params = {extension: this.extension, systemMenus: this.menus,
           systemState: this.state, onLayoutChanged: () => this.updateLayout()};
@@ -109,9 +113,13 @@ export class DesktopLayoutManager {
           pending.push(clockPod);
           clockPod.enable();
         }
-        const geometry = this._computeGeometry(quickSettingsPod, clockPod);
+        inputMethodPod = new InputMethodPod(params);
+        pending.push(inputMethodPod);
+        inputMethodPod.enable();
+        const geometry = this._computeGeometry(quickSettingsPod, clockPod, inputMethodPod);
         if (!geometry.fits) throw new Error('Left Modular pods exceed the available monitor height');
         quickSettingsPod?.place(geometry.quickSettings);
+        inputMethodPod.place(geometry.inputMethod);
         clockPod?.place(geometry.clock);
         this._geometry = geometry;
       } else if (this.extension.enable_system_dock !== false) {
@@ -122,6 +130,7 @@ export class DesktopLayoutManager {
       // Commit the transition only once all requested components are usable.
       this.systemDock = systemDock;
       this.quickSettingsPod = quickSettingsPod;
+      this.inputMethodPod = inputMethodPod;
       this.clockPod = clockPod;
       this._activeMode = mode;
       this._layoutHealthy = true;
@@ -184,10 +193,12 @@ export class DesktopLayoutManager {
     try {
       if (this.mode === LayoutMode.LEFT_MODULAR) {
         this.quickSettingsPod?._refreshContent?.();
+        this.inputMethodPod?._refreshContent?.();
         this.clockPod?._refreshContent?.();
         const geometry = this._computeGeometry();
         if (!geometry.fits) throw new Error('Left Modular pods exceed the available monitor height');
         this.quickSettingsPod?.place(geometry.quickSettings);
+        this.inputMethodPod?.place(geometry.inputMethod);
         this.clockPod?.place(geometry.clock);
         this._geometry = geometry;
       } else {
@@ -315,7 +326,7 @@ export class DesktopLayoutManager {
     if (this._jpSettings) this._jpSettings.disconnect(this._jpSignal);
     this._jpSettings = null;
     this._dispose(this._actors());
-    this.systemDock = this.quickSettingsPod = this.clockPod = null;
+    this.systemDock = this.quickSettingsPod = this.inputMethodPod = this.clockPod = null;
     this._geometry = null;
     this._dockConstraints = new WeakMap();
     this.menus?.destroy();
