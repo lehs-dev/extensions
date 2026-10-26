@@ -405,7 +405,7 @@ test('invisible source icons retain stable geometry for SVG and PNG textures', a
         assert.equal(icon._icon.scaleX, 1);
         assert.equal(icon._icon.scaleY, 1);
     }
-    assert.ok(icons[1]._renderer.scaleX > 1);
+    assert.ok(icons[1]._renderer.icon_size * icons[1]._renderer.scaleX > 48);
 });
 
 test('stationary hover settles exactly and leaving returns every icon to its base size', async () => {
@@ -433,18 +433,20 @@ test('reduced motion disables magnification while retaining usable renderers', a
     }
 });
 
-test('Left Modular group elevation preferences preserve the existing application icon animation', async () => {
+test('system pod elevation preferences preserve the unified application icon animation', async () => {
     const baseline = await setup('left');
+    baseline.dock.extension.desktopLayoutManager = {mode: 1};
+    baseline.dock.extension.global_scale = 1.5;
     baseline.settle();
     const expected = baseline.icons.map(icon => [icon._renderer.x, icon._renderer.y, icon._renderer.scaleX]);
     for (const enabled of [true, false]) {
         const env = await setup('left');
-        Object.assign(env.dock.extension, {desktopLayoutManager: {mode: 1},
+        Object.assign(env.dock.extension, {desktopLayoutManager: {mode: 1}, global_scale: 1.5,
             modular_group_elevation: enabled, modular_elevation_distance: 16,
             modular_animation_duration: 600});
         env.settle();
         assert.deepEqual(env.icons.map(icon => [icon._renderer.x, icon._renderer.y, icon._renderer.scaleX]), expected);
-        assert.ok(env.icons.some(icon => icon._renderer.scaleX > 1));
+        assert.ok(env.icons.some(icon => icon._renderer.icon_size * icon._renderer.scaleX > env.dock._iconSizeScaledDown));
         env.leave(); env.settle();
         assert.ok(env.icons.every(icon => icon._targetScale === 1));
     }
@@ -2439,7 +2441,7 @@ test('Animator & Hover Integration: Entering dock magnifies icons, leaving immed
     for (let i = 0; i < 240; i++) animator.animate(16);
     assert.ok(dock._nearestIcon !== null, 'Nearest icon must be active');
     assert.ok(icons[1]._targetScale > 1.2, 'Icon 1 target scale must be magnified');
-    assert.ok(icons[1]._renderer.scaleX > 1.8, 'Icon 1 renderer scaleX must be magnified (> 1.8)');
+    assert.ok(icons[1]._renderer.icon_size * icons[1]._renderer.scaleX > 48 * 1.2, 'Painted icon must magnify even when its texture is rendered at higher resolution');
 
     // 2. Move pointer outside into Firefox (x = 75, y = 52)
     pointer = [75, 52];
@@ -2547,13 +2549,13 @@ test('Dock recursion protection: re-entrant layout() calls return safely without
         },
         _findIcons: () => [],
         _updateExtraIcons() {},
-        getMonitor: () => ({ x: 0, y: 0, width: 1920, height: 1080 }),
+        getMonitor: () => ({ x: 0, y: 0, width: 1920, height: 1080, geometry_scale: 1 }),
         _syncOwnedStruts() {},
         isVertical: () => true,
         _preferredIconSize: () => 48,
         _configureScrollView() {},
         _snapToContainerEdge() {},
-        renderArea: {},
+        renderArea: new Actor(),
         dwell: {},
         struts: {},
         _icons: [],
@@ -2605,3 +2607,105 @@ test('Dock recursion protection: re-entrant layout() calls return safely without
     assert.equal(fakeDock._inLayout, false, '_inLayout re-entrancy lock released');
 });
 
+
+
+test('icon textures cover full magnification, retain saved quality and do not reload as the pointer moves', async () => {
+    for (const size of [15, 30, 38, 45, 60]) for (const quality of [1, 3, 4]) {
+        const env = await setup('bottom');
+        const {dock, icons, animator} = env;
+        dock._iconSizeScaledDown = dock._iconSize = size;
+        dock.extension.icon_quality = quality;
+        dock.extension.animation_magnify = 1;
+        for (const icon of icons) icon.set_size(size, size);
+        env.move(56 + size / 2);
+        env.settle();
+        for (const icon of icons) {
+            const renderer = icon._renderer;
+            assert.ok(renderer.icon_size >= 32 * quality, 'never lower the saved texture quality budget');
+            assert.ok(renderer.icon_size >= size * 2, 'maximum magnification must not upscale a small raster');
+            assert.equal(renderer.icon_size % size, 0, 'resting icon uses a whole-number texture reduction');
+            assert.ok(renderer.scaleX <= 1);
+        }
+        assert.ok(icons.some(icon => icon._renderBounds.width > size * 1.5), 'magnification retains its visible size');
+        let reloads = 0;
+        for (const icon of icons) {
+            const renderer = icon._renderer;
+            const original = renderer.set_icon_size;
+            renderer.set_icon_size = function (next) { reloads++; return original.call(this, next); };
+        }
+        for (let frame = 0; frame < 60; frame++) { env.move(40 + frame * 2); animator.animate(1000 / 120); }
+        env.leave(); env.settle();
+        assert.equal(reloads, 0, 'hover animation cannot trigger asynchronous texture-size reloads');
+        for (const icon of icons) assert.ok(Math.abs(icon._renderer.icon_size * icon._renderer.scaleX - size) < 1e-9);
+    }
+});
+
+test('resting painted icons align to physical pixels while animation and native source geometry remain continuous', async () => {
+    for (const scale of [1, 1.25, 1.5, 2]) {
+        const env = await setup('bottom');
+        const {icons, dock, animator} = env;
+        for (const icon of icons) { icon.x += 0.35; icon.y += 0.45; }
+        const source = icons.map(icon => icon.get_transformed_position());
+        animator.animate(16);
+        for (const icon of icons) icon._renderer.get_resource_scale = () => scale;
+        env.leave(); env.settle();
+        for (const icon of icons) {
+            const b = icon._renderBounds;
+            assert.ok(Math.abs(b.x * scale - Math.round(b.x * scale)) < 1e-9);
+            assert.ok(Math.abs(b.y * scale - Math.round(b.y * scale)) < 1e-9);
+        }
+        assert.deepEqual(icons.map(icon => icon.get_transformed_position()), source);
+        // Resume hovering without changing the mock's native source allocation.
+        const active = await setup('bottom');
+        active.animator.animate(16);
+        active.icons[1]._renderer.get_resource_scale = () => scale;
+        active.move(80.25);
+        active.animator.animate(1000 / 120);
+        assert.equal(active.icons[1]._paintSettled, false);
+        const b = active.icons[1]._renderBounds;
+        assert.ok(Math.abs(b.x * scale - Math.round(b.x * scale)) > 1e-6,
+            'in-flight motion is not rounded into pixel-sized jumps');
+    }
+});
+
+test('unified magnification keeps padded native Dash allocations inside the attached edge on every frame', async () => {
+    for (const edge of ['left', 'right', 'top', 'bottom']) for (const rise of [0, 1]) {
+        const env = await setup(edge);
+        const {dock, icons, animator} = env;
+        const vertical = edge === 'left' || edge === 'right';
+        dock.x = 0; dock.y = 0;
+        dock.width = vertical ? 100 : 450;
+        dock.height = vertical ? 450 : 100;
+        dock.extension.global_scale = 1;
+        dock.extension.desktopLayoutManager = {mode: 1};
+        dock.extension.animation_magnify = 1;
+        dock.extension.animation_rise = rise;
+        dock._iconSizeScaledDown = dock._iconSize = 30;
+        for (const [index, icon] of icons.entries()) {
+            // Real Shell 51 Dash takes 6 px padding from either side of the
+            // requested 34 px width, leaving a non-square source allocation.
+            icon.set_size(vertical ? 22 : 39, vertical ? 39 : 22);
+            icon.x = vertical ? edge === 'left' ? 6 : 72 : 100 + index * 39;
+            icon.y = vertical ? 100 + index * 39 : edge === 'top' ? 6 : 72;
+        }
+        const center = icons[2].get_transformed_position();
+        env.point([center[0] + icons[2].width / 2, center[1] + icons[2].height / 2]);
+        for (let frame = 0; frame < 120; frame++) {
+            animator.animate(16);
+            for (const icon of icons) {
+                const b = icon._renderBounds;
+                assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.width <= dock.width && b.y + b.height <= dock.height,
+                    `${edge} rise ${rise}, frame ${frame}: painted icon stays inside the screen`);
+            }
+        }
+        env.leave();
+        for (let frame = 0; frame < 120; frame++) {
+            animator.animate(16);
+            for (const icon of icons) {
+                const b = icon._renderBounds;
+                assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.width <= dock.width && b.y + b.height <= dock.height,
+                    `${edge} rise ${rise}, collapse ${frame}: painted icon stays inside the screen`);
+            }
+        }
+    }
+});

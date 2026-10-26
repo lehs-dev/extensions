@@ -41,6 +41,7 @@ import { runTests } from './diagnostics.js';
 import { ScreenFrame } from './screenFrame.js';
 import { DebugVisuals } from './debugVisuals.js';
 import { DesktopLayoutManager } from './desktopLayoutManager.js';
+import {migrateUnifiedSettings} from './unifiedDock.js';
 import { WindowGapCoordinator } from './windowGaps.js';
 
 import {
@@ -324,7 +325,7 @@ export default class Dash2DockLiteExt extends Extension {
 
   enableDesktopLayoutManager() {
     if (this.desktopLayoutManager) return;
-    const currentConfigKey = `${this.desktop_layout}:${this.enable_system_dock}:${this.modular_show_quicksettings}:${this.modular_show_clock}`;
+    const currentConfigKey = `${this.unified_edge}:${this.global_scale}:${this.preferred_monitor}:${this.modular_show_quicksettings}:${this.modular_show_clock}`;
     if (this._lastFailedLayoutConfig === currentConfigKey) {
       return;
     }
@@ -332,7 +333,6 @@ export default class Dash2DockLiteExt extends Extension {
       this.desktopLayoutManager = new DesktopLayoutManager({ extension: this });
       this.desktopLayoutManager.enable();
       this.systemDock = this.desktopLayoutManager.systemDock;
-      this._applyDesktopLayoutDefaults();
       this._lastFailedLayoutConfig = null;
       console.log('dash2dock-lite: Desktop Layout Manager enabled successfully');
     } catch (err) {
@@ -346,13 +346,6 @@ export default class Dash2DockLiteExt extends Extension {
       }
       this.systemDock = null;
       for (const dock of this.docks ?? []) dock.layout();
-    }
-  }
-
-  _applyDesktopLayoutDefaults() {
-    if (this.desktopLayoutManager?.mode === 1 &&
-        this._settings?.get_user_value?.('enable-screen-frame') === null) {
-      this._settings.set_boolean('enable-screen-frame', true);
     }
   }
 
@@ -475,9 +468,7 @@ export default class Dash2DockLiteExt extends Extension {
     if (this.enable_window_outer_gap) {
       this.enableWindowGapCoordinator();
     }
-    if (this.enable_system_dock || this.desktop_layout === 1) {
-      this.enableDesktopLayoutManager();
-    }
+    this.enableDesktopLayoutManager();
     this._loTimer.runOnce(() => {
       this._updateWidgetStyle();
       this.animate({ refresh: true });
@@ -635,6 +626,7 @@ export default class Dash2DockLiteExt extends Extension {
     }
 
     this._settings = this.getSettings(schemaId);
+    migrateUnifiedSettings(this._settings);
     this._settingsKeys = SettingsKeys();
 
     this._settingsKeys.connectSettings(this._settings, (name, value) => {
@@ -756,6 +748,7 @@ export default class Dash2DockLiteExt extends Extension {
           break;
         case 'icon-size':
         case 'preferred-monitor': {
+          this.desktopLayoutManager?.onSettingsChanged(name, value);
           this._updateLayout();
           this.animate({ refresh: true });
           break;
@@ -817,6 +810,7 @@ export default class Dash2DockLiteExt extends Extension {
         }
         // case 'topbar-background-color':
         // case 'topbar-blur-background':
+        case 'background-opacity':
         case 'background-color':
         case 'blur-resolution':
         case 'blur-background':
@@ -836,7 +830,8 @@ export default class Dash2DockLiteExt extends Extension {
           this.animate({ refresh: true });
           break;
         }
-        case 'desktop-layout':
+        case 'unified-edge':
+        case 'global-scale':
         case 'modular-show-quicksettings':
         case 'modular-show-appdock':
         case 'modular-show-clock':
@@ -845,16 +840,9 @@ export default class Dash2DockLiteExt extends Extension {
         case 'modular-min-spacing':
         case 'enable-system-dock': {
           this._lastFailedLayoutConfig = null;
-          if (this.enable_system_dock || this.desktop_layout === 1) {
-            if (!this.desktopLayoutManager) {
-              this.enableDesktopLayoutManager();
-            } else {
-              this.desktopLayoutManager.onSettingsChanged(name, value);
-            }
-          } else {
-            this.disableDesktopLayoutManager();
-          }
-          this._applyDesktopLayoutDefaults();
+          if (!this.desktopLayoutManager) this.enableDesktopLayoutManager();
+          else this.desktopLayoutManager.onSettingsChanged(name, value);
+          this._updateStyle();
           this.docks.forEach((dock) => {
             dock._icons = null;
             dock.layout();
@@ -1309,6 +1297,8 @@ export default class Dash2DockLiteExt extends Extension {
       'background-color', 'border-color', 'separator-color', 'running-indicator-color',
     ].map(name => [name, dockColor(name, this[name.replace(/-/g, '_')], scheme,
       Boolean(this._settings?.get_user_value(name)))]));
+    this._dockColors['background-color'] = [...this._dockColors['background-color']];
+    this._dockColors['background-color'][3] = this.background_opacity ?? 0.72;
 
     let rads = [0, 8, 16, 20, 24, 28, 32, 36, 40, 42];
 

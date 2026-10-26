@@ -2,6 +2,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import { SettingsKeys, schemaId } from '../dash2dock-lite@custom/preferences/keys.js';
+import {migrateUnifiedSettings} from '../dash2dock-lite@custom/unifiedDock.js';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -83,4 +84,34 @@ assert(settings.get_int('modular-quicksettings-width') === 54, 'Widget did not w
 keys.disconnectBuilder();
 keys.disconnectSettings();
 assert(callbacks.size === 0, 'Widget signal leaked after close');
+// Migration retains legacy values and respects explicit new preferences.
+settings.set_int('desktop-layout', 0);
+settings.set_int('dock-location', 2);
+settings.set_value('background-color', new GLib.Variant('(dddd)', [0.2, 0.3, 0.4, 0.37]));
+settings.set_boolean('system-dock-show-volume', false);
+settings.reset('modular-show-volume');
+migrateUnifiedSettings(settings);
+assert(settings.get_int('unified-edge') === 3, 'Right edge migration lost placement');
+assert(settings.get_double('background-opacity') === 0.37, 'Saved alpha lost during migration');
+assert(!settings.get_boolean('modular-show-volume'), 'Legacy indicator choice lost');
+assert(settings.get_int('desktop-layout') === 0 && settings.get_int('system-dock-width') === 60, 'Legacy settings were overwritten');
+settings.set_int('unified-edge', 0);
+settings.set_double('global-scale', 1.5);
+migrateUnifiedSettings(settings);
+assert(settings.get_int('unified-edge') === 0, 'Migration overwrote new edge');
+assert(settings.get_double('global-scale') === 1.5, 'Global scale did not persist');
+settings.set_int('unified-config-version', 0);
+settings.set_int('desktop-layout', 1);
+migrateUnifiedSettings(settings);
+assert(settings.get_int('unified-edge') === 0, 'Rerun overwrote explicit edge');
+assert(settings.get_double('background-opacity') === 0.37, 'Rerun overwrote explicit opacity');
+for (const corner of [0, 1, 2, 3]) {
+  settings.reset('unified-edge');
+  settings.set_int('unified-position', corner);
+  settings.set_int('unified-config-version', 1);
+  migrateUnifiedSettings(settings);
+  assert(settings.get_int('unified-edge') === (corner >= 2 ? 3 : 2), 'Corner-to-edge migration lost its edge');
+  assert(settings.get_int('unified-position') === corner, 'Legacy corner was overwritten');
+  assert(settings.get_int('unified-config-version') === 2, 'Edge migration did not complete');
+}
 print('Native Desktop 3 settings: types, persistence, live updates and cleanup passed');

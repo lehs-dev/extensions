@@ -2,6 +2,7 @@
 
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
+import {unifiedAppearance} from '../unifiedDock.js';
 
 /** One normalized progress value for content, contour, connector and shadow.
  * Timelines exist only while entering/leaving; state providers never poll.
@@ -25,7 +26,7 @@ export class PodElevation {
 
   configure(extension) {
     this.enabled = extension?.modular_group_elevation !== false;
-    this.distance = Math.max(0, Math.min(16, extension?.modular_elevation_distance ?? 3));
+    this.distance = Math.max(0, Math.min(16, extension?.modular_elevation_distance ?? 3)) * unifiedAppearance(extension).scale;
     this.duration = Math.max(0, Math.min(600, extension?.modular_animation_duration ?? 210));
   }
 

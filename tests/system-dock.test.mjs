@@ -302,7 +302,8 @@ async function setupSystemDockEnvironment() {
       PopupMenuItem: class extends MockSignalActor { constructor(text) { super(); this.text = text; } },
       PopupSeparatorMenuItem: class extends MockSignalActor {},
     },
-    'gi://St': { default: StMock },
+    'gi://Pango': {default: {WrapMode: {WORD_CHAR: 2}, EllipsizeMode: {NONE: 0, END: 3}}},
+        'gi://St': { default: StMock },
     'gi://Clutter': { default: ClutterMock },
     'gi://GObject': { default: GObjectMock },
     'gi://GLib': { default: GLibMock },
@@ -1660,57 +1661,25 @@ test('Desktop 3: Window Outer Gap coordinator adds frame thickness and coordinat
   assert.equal(coordinator._enabled, false);
 });
 
-test('Desktop 3: DesktopLayoutManager dynamically switches between Dual Edge and Left Modular', async () => {
+test('Unified Dock ignores legacy mode writes and moves the existing pods between corners', async () => {
   const env = await setupSystemDockEnvironment();
-  const { DesktopLayoutManager, LayoutMode } = await loadModule(
-    'dash2dock-lite@custom/desktopLayoutManager.js',
-    {
-      mocks: {
-        ...env.sharedMocks,
-        '../attachedBackground.js': { AttachedDockCanvas: env.StMock.DrawingArea },
-      },
-    }
-  );
-
-  const extensionMock = {
-    desktop_layout: LayoutMode.DUAL_EDGE,
-    enable_system_dock: true,
-    system_dock_width: 48,
-    system_dock_icon_size: 18,
-    system_dock_icon_spacing: 6,
-    modular_upper_pod_offset: 12,
-    modular_lower_pod_offset: 12,
-    modular_min_spacing: 16,
-    docks: [],
-  };
-
-  const manager = new DesktopLayoutManager({ extension: extensionMock });
+  const {DesktopLayoutManager} = await loadModule('dash2dock-lite@custom/desktopLayoutManager.js', {
+    mocks: {...env.sharedMocks, '../attachedBackground.js': {AttachedDockCanvas: env.StMock.DrawingArea}},
+  });
+  const extension = {desktop_layout: 0, enable_system_dock: true, docks: []};
+  const manager = new DesktopLayoutManager({extension});
   manager.enable();
-
-  // 1. Initial mode: Dual Edge
-  assert.equal(manager.mode, LayoutMode.DUAL_EDGE);
-  assert.ok(manager.systemDock !== null, 'System Dock active in Dual Edge');
-  assert.equal(manager.quickSettingsPod, null, 'Quick Settings Pod not active in Dual Edge');
-  assert.equal(manager.clockPod, null, 'Clock Pod not active in Dual Edge');
-
-  // 2. Switch to Left Modular
-  extensionMock.desktop_layout = LayoutMode.LEFT_MODULAR;
-  manager.onSettingsChanged('desktop-layout', LayoutMode.LEFT_MODULAR);
-
-  assert.equal(manager.systemDock, null, 'System Dock cleanly destroyed on switch to Left Modular');
-  assert.ok(manager.quickSettingsPod !== null, 'Quick Settings Pod initialized in Left Modular');
-  assert.ok(manager.clockPod !== null, 'Clock Pod initialized in Left Modular');
-  assert.equal(manager.quickSettingsPod.dockPosition, 'left', 'Quick Settings Pod attached to left edge');
-  assert.equal(manager.clockPod.dockPosition, 'left', 'Clock Pod attached to left edge');
-
-  // 3. Switch back to Dual Edge
-  extensionMock.desktop_layout = LayoutMode.DUAL_EDGE;
-  manager.onSettingsChanged('desktop-layout', LayoutMode.DUAL_EDGE);
-
-  assert.ok(manager.systemDock !== null, 'System Dock re-enabled on switch back to Dual Edge');
-  assert.equal(manager.quickSettingsPod, null, 'Quick Settings Pod cleaned up on return to Dual Edge');
-  assert.equal(manager.clockPod, null, 'Clock Pod cleaned up on return to Dual Edge');
-
+  const quick = manager.quickSettingsPod;
+  assert.equal(manager.mode, 1);
+  assert.equal(manager.systemDock, null);
+  manager.onSettingsChanged('desktop-layout', 0);
+  assert.equal(manager.quickSettingsPod, quick);
+  for (const position of [0, 1, 2, 3, 0]) {
+    extension.unified_edge = position;
+    manager.onSettingsChanged('unified-edge', position);
+    assert.equal(manager.quickSettingsPod, quick);
+    assert.equal(quick.dockPosition, ['top', 'bottom', 'left', 'right'][position]);
+  }
   manager.destroy();
 });
 
@@ -1773,7 +1742,7 @@ test('Desktop 3: pods own separate nonreactive actors and release shared listene
   assert.notEqual(quick._contentBox, clock._contentBox);
   assert.deepEqual([...quick._items.keys()], ['network', 'bluetooth', 'volume', 'battery']);
   assert.equal(quick._items.get('bluetooth').visible, false);
-  assert.equal(quick._items.get('network')._icon.icon_size, 20);
+  assert.equal(quick._items.get('network')._icon.icon_size, 16);
   assert.equal(quick._items.get('network').side, env.StMock.Side.LEFT);
   const input = new InputMethodPod({extension, systemState: state, systemMenus: menus});
   assert.equal(input.hasUsableControls, false, 'No input pod is shown when native provider is unavailable');

@@ -12,7 +12,7 @@ import Graphene from 'gi://Graphene';
 import St from 'gi://St';
 
 import { computeDockViewport } from './dockOverflow.js';
-import {LEFT_MODULAR_WIDTH} from './attachedGeometry.js';
+import {unifiedAppearance, unifiedAppMetrics, unifiedEdge} from './unifiedDock.js';
 import {createIconHitTarget, syncIconHitTargets} from './dockInput.js';
 
 import { Dash } from 'resource:///org/gnome/shell/ui/dash.js';
@@ -68,7 +68,10 @@ export let Dock = GObject.registerClass(
         clip_to_allocation: true,
         x_align: Clutter.ActorAlign.CENTER,
         y_align: Clutter.ActorAlign.CENTER,
-        offscreen_redirect: Clutter.OffscreenRedirect.ALWAYS,
+        // Let Clutter composite the group for fades. Keeping two permanent
+        // flattened buffers around moving/scaled icons adds another sampling
+        // and damage-cache path to normal on-screen paints.
+        offscreen_redirect: Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY,
       });
 
       this.extension = params.extension;
@@ -107,7 +110,7 @@ export let Dock = GObject.registerClass(
 
       this.renderArea = new St.Widget({
         name: 'DockRenderArea',
-        offscreen_redirect: Clutter.OffscreenRedirect.ALWAYS,
+        offscreen_redirect: Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY,
         reactive: false,
         track_hover: false,
       });
@@ -132,13 +135,13 @@ export let Dock = GObject.registerClass(
 
       this.struts = new St.Widget({
         name: 'DockStruts',
-        offscreen_redirect: Clutter.OffscreenRedirect.ALWAYS,
+        offscreen_redirect: Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY,
       });
       this.dwell = new St.Widget({
         name: 'DockDwell',
         reactive: true,
         track_hover: true,
-        offscreen_redirect: Clutter.OffscreenRedirect.ALWAYS,
+        offscreen_redirect: Clutter.OffscreenRedirect.AUTOMATIC_FOR_OPACITY,
       });
       this.dwell.connectObject(
         'motion-event',
@@ -237,8 +240,17 @@ export let Dock = GObject.registerClass(
     _createIconHitTarget(renderer) { return createIconHitTarget(this, renderer); }
     _syncIconHitTargets() { syncIconHitTargets(this); }
 
+    closeMenus() {
+      for (const item of this._icons ?? []) {
+        item._menu?.close?.();
+        item._appwell?._menu?.close?.({animate: false});
+      }
+      this._destroyList();
+    }
+
     _activateIcon(item, button = 1) {
       if (button === 3) {
+        this.extension.desktopLayoutManager?.menus?.closeAll();
         if (item.custom_icon && item._menu) item._menu.popup();
         else item._appwell?.popupMenu?.();
       } else if (item === this.dash?._showAppsIcon) {
@@ -399,7 +411,7 @@ export let Dock = GObject.registerClass(
     getMonitor() {
       const layout = this.extension.desktopLayoutManager;
       if (layout?.mode === 1 && (!layout.applicationDock || layout.applicationDock === this)) {
-        this._monitor = Main.layoutManager.primaryMonitor;
+        this._monitor = layout.monitor ?? Main.layoutManager.primaryMonitor;
         return this._monitor;
       }
       this._monitorIndex = this.extension._queryDisplay(this._monitorIndex);
@@ -484,10 +496,8 @@ export let Dock = GObject.registerClass(
 
     _destroyScrollView() {
       if (!this._scrollView) return;
-      if (this._scrollAdjustmentSignal) {
-        this._scrollView.vadjustment.disconnect(this._scrollAdjustmentSignal);
-        this._scrollAdjustmentSignal = null;
-      }
+      for (const [adjustment, id] of this._scrollAdjustmentSignals ?? []) adjustment.disconnect(id);
+      this._scrollAdjustmentSignals = [];
       if (this._scrollEventSignal) {
         this._scrollView.disconnect(this._scrollEventSignal);
         this._scrollEventSignal = null;
@@ -517,10 +527,11 @@ export let Dock = GObject.registerClass(
         this.remove_child(this.dash);
         this._scrollBox.add_child(this.dash);
         this._scrollView.set_child(this._scrollBox);
-        this._scrollAdjustmentSignal = this._scrollView.vadjustment.connect('notify::value', () => {
-          this._beginAnimation();
-          this._debounceEndAnimation();
-        });
+        this._scrollAdjustmentSignals = [this._scrollView.vadjustment, this._scrollView.hadjustment].filter(Boolean)
+          .map(adjustment => [adjustment, adjustment.connect('notify::value', () => {
+            this._beginAnimation();
+            this._debounceEndAnimation();
+          })]);
         this._scrollEventSignal = this._scrollView.connect('scroll-event', (_actor, event) => {
           return this._onScrollEvent(_actor, event);
         });
@@ -605,7 +616,18 @@ export let Dock = GObject.registerClass(
       );
     }
 
+    getUnifiedContentHeight() {
+      const a = unifiedAppMetrics(this.extension);
+      const icons = this.dash ? this._findIcons() : [];
+      const separators = (this._separators ?? []).filter(actor => actor.visible).length;
+      return Math.max(a.slotSize, icons.length * a.slotSize + separators * a.scale);
+    }
+
     _preferredIconSize() {
+      if (this.extension.desktopLayoutManager?.mode === 1) {
+        this._iconSize = unifiedAppMetrics(this.extension).iconSize;
+        return this._iconSize;
+      }
       let iconSize = 48;
 
       let raw = this.extension.icon_size;
@@ -625,11 +647,6 @@ export let Dock = GObject.registerClass(
       if (this.extension._config && this.extension._config.icon_size) {
         iconSize = this.extension._config.icon_size;
       }
-
-      // A 34 px resting body leaves two pixels around its centered source
-      // icon. Native Dash redisplay must not grow it for a new running app.
-      if (this.extension.desktopLayoutManager?.mode === 1)
-        iconSize = Math.min(iconSize, LEFT_MODULAR_WIDTH - 4);
 
       this._iconSize = iconSize;
       return iconSize;
@@ -1162,6 +1179,7 @@ export let Dock = GObject.registerClass(
       if (this._inLayout || this._findingIcons) return;
       this._icons = null;
       this._layoutDirty = true;
+      this.extension.desktopLayoutManager?.updateLayout?.();
       if (this._onChrome) this._beginAnimation();
     }
 
@@ -1201,7 +1219,7 @@ export let Dock = GObject.registerClass(
       }
 
       const leftModular = this.extension?.desktopLayoutManager?.mode === 1;
-      if (leftModular) this._position = DockPosition.LEFT;
+      if (leftModular) this._position = unifiedEdge(this.extension);
 
       this._updateExtraIcons();
 
@@ -1212,7 +1230,8 @@ export let Dock = GObject.registerClass(
 
       const modularOwner = this.extension.desktopLayoutManager?.applicationDock;
       this._layoutSuppressed = leftModular &&
-        (this.extension.modular_show_appdock === false || (modularOwner && modularOwner !== this));
+        (this.extension.modular_show_appdock === false || (modularOwner && modularOwner !== this) ||
+          this.extension.desktopLayoutManager?.getModularConstraints?.(m)?.visible === false);
       this._syncOwnedStruts(!!this._layoutSuppressed);
       if (this._layoutSuppressed) {
         this.visible = this.dwell.visible = this.struts.visible = false;
@@ -1228,7 +1247,8 @@ export let Dock = GObject.registerClass(
       let vertical = this.isVertical();
       this._scaleFactor = scaleFactor;
       const modularConstraints = this.extension?.desktopLayoutManager?.getModularConstraints?.(m);
-      const modular = !!modularConstraints && vertical && this._position === DockPosition.LEFT;
+      const modular = !!modularConstraints;
+      const appearance = unifiedAppearance(this.extension);
 
       this._icons = this._findIcons();
 
@@ -1307,14 +1327,16 @@ export let Dock = GObject.registerClass(
       projectedWidth *= scaleDown;
 
       // make multiple of 2
-      iconSize = Math.floor(iconSize / 2) * 2;
-      iconSizeSpaced = Math.floor(iconSizeSpaced / 2) * 2;
+      if (!modular) {
+        iconSize = Math.floor(iconSize / 2) * 2;
+        iconSizeSpaced = Math.floor(iconSizeSpaced / 2) * 2;
+      }
       let iconSlotSize = iconSizeSpaced;
       if (modular) {
         // Count spacing once, inside each source allocation. CSS margins are
         // reset by the dock theme; adding phantom margins to contentHeight
         // made each favorite lengthen the capsule beyond its actual slot.
-        iconSlotSize += Math.round(16 * Math.max(0, this.extension.icon_spacing || 0));
+        iconSlotSize = unifiedAppMetrics(this.extension).slotSize;
         iconStyle = 'margin: 0;';
       }
       projectedWidth = Math.floor(projectedWidth / 2) * 2;
@@ -1333,6 +1355,13 @@ export let Dock = GObject.registerClass(
       }
 
       this._icons.forEach((icon) => {
+        if (modular) {
+          const side = St.Side[this._position.toUpperCase()];
+          if (icon._appwell) icon._appwell._popupMenuSide = side;
+          for (const menu of [icon._menu, icon._appwell?._menu].filter(Boolean))
+            menu._boxPointer?.updateArrowSide?.(side);
+          icon._label?.set_style?.(`font-size: ${appearance.detailFontSize}px;`);
+        }
         const nativeSize = Math.round(iconSize * scaleFactor);
         this._syncSourceIconSize(icon, nativeSize);
         const focusActor = icon._appwell || icon;
@@ -1340,18 +1369,20 @@ export let Dock = GObject.registerClass(
           icon._modularFocusConnected = true;
           focusActor.connectObject('key-focus-in', () => {
             if (!this._modularViewport?.overflow) return;
-            const adjustment = this._scrollView?.vadjustment;
+            const adjustment = this.isVertical() ? this._scrollView?.vadjustment : this._scrollView?.hadjustment;
             if (!adjustment) return;
-            const [, y] = icon.get_transformed_position();
-            const [, top] = this._scrollView.get_transformed_position();
-            const shift = y < top ? y - top : Math.max(0, y + icon.height - top - this._modularViewport.bodyHeight);
+            const axis = this.isVertical() ? 1 : 0;
+            const point = icon.get_transformed_position()[axis];
+            const start = this._scrollView.get_transformed_position()[axis];
+            const size = this.isVertical() ? icon.height : icon.width;
+            const shift = point < start ? point - start : Math.max(0, point + size - start - this._modularViewport.bodyHeight);
             adjustment.value = Math.max(adjustment.lower, Math.min(adjustment.upper - adjustment.page_size, adjustment.value + shift));
             this._beginAnimation();
             this._debounceEndAnimation();
           }, this);
         }
-        icon.width = modular ? LEFT_MODULAR_WIDTH : Math.floor(iconSizeSpaced * scaleFactor);
-        icon.height = Math.floor((modular ? iconSlotSize : iconSizeSpaced) * scaleFactor);
+        icon.width = modular ? vertical ? appearance.width : iconSlotSize : Math.floor(iconSizeSpaced * scaleFactor);
+        icon.height = modular ? vertical ? iconSlotSize : appearance.width : Math.floor(iconSizeSpaced * scaleFactor);
         if (icon.style != iconStyle) {
           icon.style = iconStyle;
         }
@@ -1368,7 +1399,7 @@ export let Dock = GObject.registerClass(
       let magnify = this.extension.animation_magnify * 1.8;
       let fp = iconSize * 2 + iconSize * (0.6 * (1 + magnify));
 
-      const targetWidth = vertical ? Math.round(fp * scaleFactor) : m.width;
+      let targetWidth = vertical ? Math.round(fp * scaleFactor) : m.width;
       let targetHeight = vertical ? m.height : Math.round(fp * scaleFactor);
       let targetX = m.x;
       let targetY = m.y;
@@ -1383,26 +1414,36 @@ export let Dock = GObject.registerClass(
           if (!separator.visible) continue;
           if (!this._modularSeparators.has(separator))
             this._modularSeparators.set(separator, [separator.width, separator.height, separator.style ?? null]);
-          separator.set_size(iconSize, 1);
+          separator.set_size(vertical ? iconSize : appearance.scale, vertical ? appearance.scale : iconSize);
           separator.set_style('margin: 0;');
-          separatorsHeight += 1;
+          separatorsHeight += appearance.scale;
         }
         const contentHeight = Math.max(iconSlotSize, this._icons.length * iconSlotSize + separatorsHeight);
+        if (this._unifiedContentHeight !== contentHeight) {
+          this._unifiedContentHeight = contentHeight;
+          this._notifyUnifiedLayout = true;
+        }
         const viewport = computeDockViewport({
           availableHeight: modularConstraints.availableHeight,
           contentHeight,
           iconSize,
-          flareWidth: this.extension.flare_width ?? 14,
+          flareWidth: appearance.flareWidth,
+          scale: appearance.scale,
           magnify: this.extension.animation_magnify ?? 0,
           spread: this.extension.animation_spread ?? 0.5,
         });
         this._modularViewport = viewport;
-        targetHeight = Math.round(viewport.height);
-        const centerY = Number.isFinite(modularConstraints.centerY)
-          ? modularConstraints.centerY
-          : (m.y + m.height / 2);
-        targetY = Math.round(centerY - targetHeight / 2);
-        targetX = m.x;
+        if (vertical) {
+          targetHeight = viewport.height;
+          targetY = Number.isFinite(modularConstraints.y) ? modularConstraints.y :
+            Math.round((modularConstraints.centerY ?? m.y + m.height / 2) - targetHeight / 2);
+          targetX = this._position === DockPosition.RIGHT ? m.x + m.width - targetWidth : m.x;
+        } else {
+          targetWidth = viewport.height;
+          targetX = Number.isFinite(modularConstraints.x) ? modularConstraints.x :
+            Math.round((modularConstraints.centerX ?? m.x + m.width / 2) - targetWidth / 2);
+          targetY = this._position === DockPosition.BOTTOM ? m.y + m.height - targetHeight : m.y;
+        }
 
         if (this.x !== targetX) this.x = targetX;
         if (this.y !== targetY) this.y = targetY;
@@ -1416,31 +1457,30 @@ export let Dock = GObject.registerClass(
         if (this.struts.visible !== shouldBeVisible) this.struts.visible = shouldBeVisible;
 
         if (this._scrollView) {
-          const scrollW = LEFT_MODULAR_WIDTH;
-          const scrollH = viewport.bodyHeight;
-          if (this._scrollView.x !== 0 || this._scrollView.y !== viewport.contentTop)
-            this._scrollView.set_position(0, viewport.contentTop);
-          if (this._scrollView.width !== scrollW || this._scrollView.height !== scrollH)
-            this._scrollView.set_size(scrollW, scrollH);
-          if (this._scrollView.vscrollbar_policy !== St.PolicyType.EXTERNAL)
-            this._scrollView.vscrollbar_policy = St.PolicyType.EXTERNAL;
-          if (this._scrollView.reactive)
-            this._scrollView.reactive = false;
+          const scrollW = vertical ? appearance.width : viewport.bodyHeight;
+          const scrollH = vertical ? viewport.bodyHeight : appearance.width;
+          const scrollX = vertical ? this._position === DockPosition.RIGHT ? targetWidth - scrollW : 0 : viewport.contentTop;
+          const scrollY = vertical ? viewport.contentTop : this._position === DockPosition.BOTTOM ? targetHeight - scrollH : 0;
+          this._scrollView.set_position(scrollX, scrollY);
+          this._scrollView.set_size(scrollW, scrollH);
+          this._scrollView.vscrollbar_policy = vertical ? St.PolicyType.EXTERNAL : St.PolicyType.NEVER;
+          this._scrollView.hscrollbar_policy = vertical ? St.PolicyType.NEVER : St.PolicyType.EXTERNAL;
+          this._scrollView.reactive = false;
         }
-        // Clip both native icon hit actors and their existing animated renderers
-        // to the same body; rounded flares never acquire transparent hitboxes.
-        const flare = Math.min(this.extension.flare_width ?? 14, this.height / 2);
-        this.renderArea.set_clip?.(0, flare, this.width, Math.max(0, this.height - 2 * flare));
-        const dashW = LEFT_MODULAR_WIDTH;
-        if (this.dash.width !== dashW || this.dash.height !== contentHeight)
-          this.dash.set_size(dashW, contentHeight);
-        if (this.dash.x !== 0 || this.dash.y !== 0)
-          this.dash.set_position(0, 0);
+        const length = vertical ? this.height : this.width;
+        const flare = Math.min(appearance.flareWidth, length / 2);
+        this.renderArea.set_clip?.(vertical ? 0 : flare, vertical ? flare : 0,
+          this.width - (vertical ? 0 : 2 * flare), this.height - (vertical ? 2 * flare : 0));
+        const dashW = vertical ? appearance.width : contentHeight;
+        const dashH = vertical ? contentHeight : appearance.width;
+        this.dash.set_size(dashW, dashH);
+        this.dash.set_position(0, 0);
         if (this._scrollBox) {
-          if (this._scrollBox.reactive)
-            this._scrollBox.reactive = false;
-          if (this._scrollBox.width !== dashW)
-            this._scrollBox.set_width?.(dashW);
+          this._scrollBox.reactive = false;
+          const orientation = vertical ? Clutter.Orientation.VERTICAL : Clutter.Orientation.HORIZONTAL;
+          this._scrollBox.orientation = orientation;
+          if (this._scrollBox.layout_manager) this._scrollBox.layout_manager.orientation = orientation;
+          this._scrollBox.set_size(dashW, dashH);
         }
       } else {
         if (vertical) {
@@ -1478,6 +1518,13 @@ export let Dock = GObject.registerClass(
         this._snapToContainerEdge(this, this.dash, true);
       }
 
+      // The paint viewport is the dock allocation, independent of the much
+      // larger unscaled icon textures and their animated child positions.
+      // An implicit/natural size here can be zero initially and change every
+      // frame, invalidating the bounds used for clipped redraws and effects.
+      if (this.renderArea.width !== this.width || this.renderArea.height !== this.height)
+        this.renderArea.set_size(this.width, this.height);
+
       this._iconSizeScaledDown = iconSize;
       this._scaledDown = scaleDown;
 
@@ -1508,6 +1555,10 @@ export let Dock = GObject.registerClass(
       return true;
     } finally {
       this._inLayout = false;
+      if (this._notifyUnifiedLayout) {
+        this._notifyUnifiedLayout = false;
+        this.extension.desktopLayoutManager?.updateLayout?.();
+      }
     }
   }
 
@@ -1596,7 +1647,8 @@ export let Dock = GObject.registerClass(
       }
 
       let [px, py] = p;
-      if (this._modularViewport && (py < this.y || py >= this.y + this.height)) return false;
+      const vertical = this.isVertical();
+      if (this._modularViewport && (vertical ? py < this.y || py >= this.y + this.height : px < this.x || px >= this.x + this.width)) return false;
 
       if (this._modularViewport && this._background?._pickBoxes) {
         const x = px - this.x - this._background.x;
@@ -1607,8 +1659,8 @@ export let Dock = GObject.registerClass(
 
       // 1. If an icon is actively magnified, allow interaction within its
       // magnified visible actor bounds so interaction remains continuous.
-      const flare = this._modularViewport ? Math.min(this.extension.flare_width ?? 14, this.height / 2) : 0;
-      const rendererVisibleHere = !this._modularViewport || (py >= this.y + flare && py < this.y + this.height - flare);
+      const flare = this._modularViewport ? Math.min(unifiedAppearance(this.extension).flareWidth, (vertical ? this.height : this.width) / 2) : 0;
+      const rendererVisibleHere = !this._modularViewport || (vertical ? py >= this.y + flare && py < this.y + this.height - flare : px >= this.x + flare && px < this.x + this.width - flare);
       if (rendererVisibleHere && this._icons && this._icons.length > 0) {
         for (const icon of this._icons) {
           if (!icon || !icon._icon) continue;
@@ -1634,17 +1686,16 @@ export let Dock = GObject.registerClass(
         // Entry follows the stationary source viewport. The animated contour
         // cannot decide whether to start/stop the animation that resizes it.
         // Magnified renderers above still retain direct pointer interaction.
-        const left = this.x + (this.dash?.translationX || 0);
-        const top = this.y + this._modularViewport.contentTop + (this.dash?.translationY || 0);
-        const width = LEFT_MODULAR_WIDTH;
-        if (px >= left && px < left + width &&
-            py >= top && py < top + this._modularViewport.bodyHeight) return true;
-        // Once entered, the painted body bridges gaps between magnified icons.
-        // Keep no tolerance outside its crown toward an adjacent application.
+        const depth = unifiedAppearance(this.extension).width;
+        const left = this.x + (vertical ? this._position === DockPosition.RIGHT ? this.width - depth : 0 : this._modularViewport.contentTop) + (this.dash?.translationX || 0);
+        const top = this.y + (vertical ? this._modularViewport.contentTop : this._position === DockPosition.BOTTOM ? this.height - depth : 0) + (this.dash?.translationY || 0);
+        const width = vertical ? depth : this._modularViewport.bodyHeight;
+        const height = vertical ? this._modularViewport.bodyHeight : depth;
+        if (px >= left && px < left + width && py >= top && py < top + height) return true;
         const paint = this._background?._paintedRect;
-        return !!this.animated && !!paint && px >= this.x + paint.x &&
-          px < this.x + paint.x + paint.width && py >= this.y + paint.y + flare &&
-          py < this.y + paint.y + paint.height - flare;
+        return !!this.animated && !!paint && px >= this.x + paint.x + (vertical ? 0 : flare) &&
+          px < this.x + paint.x + paint.width - (vertical ? 0 : flare) && py >= this.y + paint.y + (vertical ? flare : 0) &&
+          py < this.y + paint.y + paint.height - (vertical ? flare : 0);
       }
 
       // 2. Resting / Base Dock Background Hit-Test
@@ -1998,12 +2049,13 @@ export let Dock = GObject.registerClass(
 
     _onScrollEvent(obj, evt) {
       if (this._modularViewport?.overflow && this._scrollView) {
-        const adjustment = this._scrollView.vadjustment;
+        const adjustment = this.isVertical() ? this._scrollView.vadjustment : this._scrollView.hadjustment;
         if (adjustment) {
           const direction = evt.get_scroll_direction();
           const delta = direction === Clutter.ScrollDirection.SMOOTH
-            ? evt.get_scroll_delta()[1] : direction === Clutter.ScrollDirection.UP ? -1
-            : direction === Clutter.ScrollDirection.DOWN ? 1 : 0;
+            ? (evt.get_scroll_delta()[1] || evt.get_scroll_delta()[0]) :
+            [Clutter.ScrollDirection.UP, Clutter.ScrollDirection.LEFT].includes(direction) ? -1 :
+            [Clutter.ScrollDirection.DOWN, Clutter.ScrollDirection.RIGHT].includes(direction) ? 1 : 0;
           adjustment.value = Math.max(adjustment.lower, Math.min(adjustment.upper - adjustment.page_size,
             adjustment.value + delta * this._iconSizeScaledDown));
           this._beginAnimation();

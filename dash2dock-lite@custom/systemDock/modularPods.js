@@ -1,13 +1,17 @@
 'use strict';
 
 import GObject from 'gi://GObject';
+import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
+import Pango from 'gi://Pango';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { AttachedDockCanvas } from '../attachedBackground.js';
 import {getAttachedPodPickBoxes, LEFT_MODULAR_WIDTH} from '../attachedGeometry.js';
 import {PodElevation} from './podElevation.js';
+import {unifiedAppearance} from '../unifiedDock.js';
+import {resourceScale, alignPixel} from '../rendering.js';
 import {
   NetworkItem, BluetoothItem, AudioItem, BatteryItem, InputSourceItem, ModularClockItem, DynamicIndicatorItem,
 } from './systemDockItems.js';
@@ -109,11 +113,11 @@ const AttachedPod = GObject.registerClass(
         systemMenus: this.systemMenus,
         systemState: this.systemState,
         extension: this.extension,
-        iconSize: this.extension?.modular_indicator_icon_size ?? 16,
+        iconSize: unifiedAppearance(this.extension).iconSize,
         side: St.Side.LEFT,
       });
       // Compact pod items allocate buttons inside the visible body
-      item.set_style('min-width: 0; min-height: 0; padding: 2px 1px;');
+      this._styleItem(item);
       item.x_expand = true;
       item.x_align = Clutter.ActorAlign.FILL;
       item._systemPod = this;
@@ -127,20 +131,119 @@ const AttachedPod = GObject.registerClass(
       return item;
     }
 
+    _styleItem(item) {
+      const a = unifiedAppearance(this.extension);
+      item.set_style(`min-width: 0; min-height: 0; padding: ${2 * a.scale}px ${a.scale}px;`);
+      item.setIconSize?.(a.iconSize);
+      for (const label of [item._label, item._hourLabel, item._minLabel, item._dayLabel,
+        item._dateLabel, item._monthLabel, item._periodLabel].filter(Boolean))
+        label.set_style(`font-size: ${a.fontSize}px;`);
+    }
+
+    _syncAppearance() {
+      const a = unifiedAppearance(this.extension);
+      for (const item of this._items.values()) this._styleItem(item);
+      for (const label of this._detailLabels.values()) {
+        label.set_style(`font-size: ${a.detailFontSize}px;`);
+        if (label.clutter_text) {
+          label.clutter_text.line_wrap = this._horizontal;
+          label.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+          label.clutter_text.ellipsize = this._horizontal ? Pango.EllipsizeMode.NONE : Pango.EllipsizeMode.END;
+        }
+      }
+      this._spacing = a.itemSpacing;
+      this._contentBox.set_style(`spacing: ${a.itemSpacing}px;`);
+      this._detailsBox.set_style(`spacing: ${a.itemSpacing}px;`);
+    }
+
     _activate() {}
 
-    _syncPointerHover() {
+    setEdge(edge) {
+      this.dockPosition = this.edge = edge;
+      this._right = edge === 'right';
+      this._horizontal = edge === 'top' || edge === 'bottom';
+      this._endAnchored = this._right || edge === 'bottom';
+      this._side = St.Side[edge.toUpperCase()];
+      this._surface.side = this._menuAnchor.side = this._side;
+      const orientation = this._horizontal ? Clutter.Orientation.HORIZONTAL : Clutter.Orientation.VERTICAL;
+      this._contentBox.orientation = orientation;
+      if (this._contentBox.layout_manager) this._contentBox.layout_manager.orientation = orientation;
+      for (const item of this._items.values()) item.side = this._side;
+      const clockBox = this._clockItem?.get_child?.() ?? this._clockItem?.get_children?.()[0];
+      if (clockBox?.layout_manager) {
+        clockBox.orientation = orientation;
+        clockBox.layout_manager.orientation = orientation;
+        clockBox.set_style(`spacing: ${this._horizontal ? unifiedAppearance(this.extension).itemSpacing : 0}px;`);
+      }
+    }
+
+    _containsPointer(pointer) {
+      if (!pointer || !this._geom || !this.visible) return false;
+      const [x, y] = this.get_transformed_position();
+      return this._surface.boxes.some(b => pointer[0] >= x + b.x1 && pointer[0] < x + b.x2 &&
+        pointer[1] >= y + b.y1 && pointer[1] < y + b.y2);
+    }
+
+    _syncPointerHover(pointer = null) {
+      if (this._destroyed) return;
       const stage = typeof global !== 'undefined' ? global.stage : null;
-      const pointer = typeof global !== 'undefined' ? global.get_pointer?.() : null;
+      pointer ??= typeof global !== 'undefined' ? global.get_pointer?.() : null;
       const picked = pointer && stage?.get_actor_at_pos(Clutter.PickMode.REACTIVE, pointer[0], pointer[1]);
-      // Crossing from the capsule button to its stop control can clear the old
-      // hover flag before setting the new one. The current pick bridges that gap.
-      this._pointerInside = picked ? this.contains(picked) :
+      // Geometry is authoritative even when a moving pick region leaves St's
+      // hover flag or the stage's previous pick stale for a crossing event.
+      this._pointerInside = pointer ? this._containsPointer(pointer) && (!picked || this.contains(picked)) :
         [this._surface, ...this._items.values()].some(actor => actor.visible && actor.reactive && actor.hover);
       this._syncElevation();
     }
 
-    _menuOptions() { return {side: St.Side.LEFT, focusActor: this._surface}; }
+    _updatePointerWatch() {
+      const stage = typeof global !== 'undefined' ? global.stage : null;
+      const active = !this._destroyed && this.visible && this._elevation.enabled &&
+        (this._pointerInside || this._menuOpen || this._elevation.progress > 0);
+      if (active && !this._pointerSignal && stage?.connect) {
+        this._pointerStage = stage;
+        this._pointerSignal = stage.connect('captured-event', (_stage, event) => {
+          const type = event.type?.();
+          if ([Clutter.EventType.MOTION, Clutter.EventType.ENTER, Clutter.EventType.LEAVE].includes(type))
+            this._syncPointerHover(event.get_coords?.());
+          return Clutter.EVENT_PROPAGATE;
+        });
+      }
+      if (active && !this._pointerCheckId) {
+        // Native application surfaces/grabs can take motion without sending
+        // another crossing event through Shell's stage. Reconcile the global
+        // pointer only while this pod is raised or returning to rest.
+        this._pointerCheckId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
+          if (this._destroyed || !this.visible) {
+            this._stopPointerWatch();
+            return GLib.SOURCE_REMOVE;
+          }
+          this._syncPointerHover();
+          return this._pointerCheckId ? GLib.SOURCE_CONTINUE : GLib.SOURCE_REMOVE;
+        });
+        GLib.Source.set_name_by_id(this._pointerCheckId, '[dash2dock-lite] pod pointer');
+      }
+      if (!active) this._stopPointerWatch();
+    }
+
+    _stopPointerWatch() {
+      if (this._pointerSignal) this._pointerStage.disconnect(this._pointerSignal);
+      this._pointerSignal = this._pointerStage = null;
+      if (this._pointerCheckId) GLib.source_remove(this._pointerCheckId);
+      this._pointerCheckId = 0;
+    }
+
+    _menuOptions() { return {side: this._side, focusActor: this._surface}; }
+
+    get popupBounds() {
+      if (!this._geom) return null;
+      const g = this._geom;
+      const expansion = (this._expansion ?? 0) + this._elevation.distance;
+      return {left: g.x - (this._right ? expansion : 0),
+        right: g.x + g.width + (this.edge === 'left' ? expansion : 0),
+        top: g.y - (this.edge === 'bottom' ? expansion : 0),
+        bottom: g.y + g.height + (this.edge === 'top' ? expansion : 0)};
+    }
 
     _setDetails(entries) {
       let changed = false;
@@ -156,6 +259,7 @@ const AttachedPod = GObject.registerClass(
         if (!label) {
           label = new St.Label({style_class: 'modular-pod-detail-label', reactive: false,
             y_expand: true, y_align: Clutter.ActorAlign.CENTER});
+          label.set_style(`font-size: ${unifiedAppearance(this.extension).detailFontSize}px;`);
           this._detailLabels.set(key, label);
           this._detailsBox.add_child(label);
           changed = true;
@@ -171,17 +275,42 @@ const AttachedPod = GObject.registerClass(
     _sizeExpansion() {
       const g = this._geom;
       const monitor = Main.layoutManager.findMonitorForActor?.(this) || Main.layoutManager.primaryMonitor;
-      const natural = this._detailsBox.layout_manager?.get_preferred_width?.(this._detailsBox, -1)?.[1] ??
-        Math.max(0, ...[...this._detailLabels.values()].map(label => label.get_preferred_width?.(-1)?.[1] ?? 0));
-      const available = Math.max(0, (monitor?.width ?? 1920) - g.width - this._elevation.distance - 12);
-      this._expansion = Math.min(320, available, Math.ceil(natural) + 18);
-      const reserve = g.width + this._expansion + this._elevation.distance + 4;
-      this.set_size(reserve, g.height);
-      this._canvas.set_size(reserve, g.height);
-      this._surface.set_size(reserve, g.height);
-      this._detailsBox.set_position(g.width + 8, g.contentTop);
-      this._detailsBox.set_size(Math.max(1, this._expansion - 16), g.contentHeight);
+      const scale = unifiedAppearance(this.extension).scale;
+      const natural = this._horizontal
+        ? this._detailsBox.layout_manager?.get_preferred_height?.(this._detailsBox, g.contentWidth)?.[1] ??
+          [...this._detailLabels.values()].reduce((sum, label) => sum + (label.get_preferred_height?.(g.contentWidth)?.[1] ?? 16 * scale), 0) +
+            Math.max(0, this._detailLabels.size - 1) * 3 * scale
+        : this._detailsBox.layout_manager?.get_preferred_width?.(this._detailsBox, -1)?.[1] ??
+          Math.max(0, ...[...this._detailLabels.values()].map(label => label.get_preferred_width?.(-1)?.[1] ?? 0));
+      const depth = this._horizontal ? g.height : g.width;
+      const available = Math.max(0, (this._horizontal ? monitor?.height ?? 1080 : monitor?.width ?? 1920) - depth - this._elevation.distance - 12 * scale);
+      this._expansion = Math.min(320 * scale, available, Math.ceil(natural) + 18 * scale);
+      const reserve = depth + this._expansion + this._elevation.distance + 4 * scale;
+      const near = this._endAnchored ? reserve - depth : 0;
+      const size = this._horizontal ? [g.width, reserve] : [reserve, g.height];
+      this.set_size(...size);
+      this._canvas.set_size(...size);
+      this._surface.set_size(...size);
+      // Chrome is positioned directly in stage coordinates. Its transformed
+      // position can be NaN until Clutter allocates it on the next frame.
+      const rootX = g.x - (this._right ? reserve - depth : 0);
+      const rootY = g.y - (this.edge === 'bottom' ? reserve - depth : 0);
+      this.set_position(rootX, rootY);
+      const pixels = resourceScale(this);
+      const alignedX = value => alignPixel(rootX + value, pixels) - rootX;
+      const alignedY = value => alignPixel(rootY + value, pixels) - rootY;
+      this._contentBox.set_position(alignedX(g.contentLeft + (this._horizontal ? 0 : near)),
+        alignedY(g.contentTop + (this._horizontal ? near : 0)));
+      const anchorNormal = this._endAnchored ? near + 1 : depth - 1;
+      this._menuAnchor.set_position(this._horizontal ? g.width / 2 : anchorNormal,
+        this._horizontal ? anchorNormal : g.height / 2);
+      const detailsNormal = this._endAnchored ? near - this._expansion + 8 * scale : depth + 8 * scale;
+      this._detailsBox.set_position(alignedX(this._horizontal ? g.contentLeft : detailsNormal),
+        alignedY(this._horizontal ? detailsNormal : g.contentTop));
+      this._detailsBox.set_size(this._horizontal ? g.contentWidth : Math.max(1, this._expansion - 16 * scale),
+        this._horizontal ? Math.max(1, this._expansion - 16 * scale) : g.contentHeight);
       this._applyElevation();
+      this._syncPointerHover();
     }
 
     enable() {
@@ -214,6 +343,7 @@ const AttachedPod = GObject.registerClass(
     }
 
     getMeasuredContentHeight() {
+      this._syncAppearance();
       this._refreshContent();
       const [, natural] = this._contentBox.layout_manager?.get_preferred_height?.(this._contentBox, -1) ??
         this._contentBox.get_preferred_height?.(-1) ?? [0, 0];
@@ -225,21 +355,22 @@ const AttachedPod = GObject.registerClass(
       let total = 0;
       for (const item of visibleItems) {
         const preferred = item.get_preferred_height?.(-1) ?? [0, 0];
-        total += preferred[1] > 0 ? preferred[1] : (this.extension?.modular_indicator_icon_size ?? 16) + 4;
+        total += preferred[1] > 0 ? preferred[1] : (unifiedAppearance(this.extension).iconSize) + 4 * unifiedAppearance(this.extension).scale;
       }
-      const spacing = this._spacing ?? (this.extension?.modular_indicator_spacing ?? 3);
+      const spacing = this._spacing ?? (unifiedAppearance(this.extension).itemSpacing);
       total += Math.max(0, visibleItems.length - 1) * spacing;
       this._measuredHeight = Math.ceil(total > 0 ? total : 60);
       return this._measuredHeight;
     }
 
     getMeasuredContentWidth() {
+      this._syncAppearance();
       const preferred = this._contentBox.layout_manager?.get_preferred_width?.(this._contentBox, -1) ??
         this._contentBox.get_preferred_width?.(-1);
       const natural = preferred?.[1];
       const val = Number.isFinite(natural) && natural > 0
         ? natural
-        : (this.extension?.modular_indicator_icon_size ?? 16) + 2;
+        : (unifiedAppearance(this.extension).iconSize) + 2;
       this._measuredWidth = Math.ceil(val);
       return this._measuredWidth;
     }
@@ -253,32 +384,34 @@ const AttachedPod = GObject.registerClass(
     place(geometry) {
       this._geom = geometry;
       if (!geometry) { this.hide(); return; }
-      const gx = Number.isFinite(geometry.x) ? Math.round(geometry.x) : 0;
-      const gy = Number.isFinite(geometry.y) ? Math.round(geometry.y) : 0;
-      const gw = Number.isFinite(geometry.width) && geometry.width > 0 ? Math.round(geometry.width) : LEFT_MODULAR_WIDTH;
-      const gh = Number.isFinite(geometry.height) && geometry.height > 0 ? Math.round(geometry.height) : 60;
+      this.setEdge(geometry.position ?? 'left');
+      this._syncAppearance();
+      const gx = Number.isFinite(geometry.x) ? geometry.x : 0;
+      const gy = Number.isFinite(geometry.y) ? geometry.y : 0;
+      const gw = Number.isFinite(geometry.width) && geometry.width > 0 ? geometry.width : LEFT_MODULAR_WIDTH;
+      const gh = Number.isFinite(geometry.height) && geometry.height > 0 ? geometry.height : 60;
 
       this.set_position(gx, gy);
       this._elevation.configure(this.extension);
       this._canvas.set_position(0, 0);
       this._surface.set_position(0, 0);
       const inset = geometry.contentLeft ?? 2;
-      const safeInset = Number.isFinite(inset) ? Math.round(inset) : 2;
-      const contentTop = Number.isFinite(geometry.contentTop) ? Math.round(geometry.contentTop) : 17;
+      const safeInset = Number.isFinite(inset) ? inset : 2;
+      const contentTop = Number.isFinite(geometry.contentTop) ? geometry.contentTop : 17;
       const contentWidth = Number.isFinite(geometry.contentWidth) && geometry.contentWidth > 0
-        ? Math.round(geometry.contentWidth)
+        ? geometry.contentWidth
         : Math.max(1, gw - safeInset - 2);
       const contentHeight = Number.isFinite(geometry.contentHeight) && geometry.contentHeight > 0
-        ? Math.round(geometry.contentHeight)
+        ? geometry.contentHeight
         : Math.max(1, gh - 2 * contentTop);
       this._contentBox.set_position(safeInset, contentTop);
       this._contentBox.set_size(contentWidth, contentHeight);
       this._menuAnchor.set_position(gw - 1, gh / 2);
-      this._geom = {...geometry, width: gw, height: gh, contentTop, contentHeight};
+      this._geom = {...geometry, x: gx, y: gy, width: gw, height: gh, contentLeft: safeInset, contentTop, contentHeight};
       this._sizeExpansion();
       const monitor = Main.layoutManager.findMonitorForActor?.(this) || Main.layoutManager.primaryMonitor;
       this.visible = geometry.visible !== false && !isFullscreenObscured(monitor);
-      this._syncElevation();
+      this._syncPointerHover();
       this._applyElevation();
     }
 
@@ -287,18 +420,14 @@ const AttachedPod = GObject.registerClass(
       // Focus returning after a popup closes must not latch the capsule open.
       const active = this.visible && (this._pointerInside || this._menuOpen);
       this._elevation.setActive(active, immediate);
+      this._updatePointerWatch();
     }
 
     onMenuStateChanged(open) {
       this._menuOpen = open;
       // Native grabs can suppress crossing events. Re-pick after dismissal
       // instead of retaining a stale pre-menu hover flag.
-      if (!open) {
-        const stage = typeof global !== 'undefined' ? global.stage : null;
-        const pointer = typeof global !== 'undefined' ? global.get_pointer?.() : null;
-        const actor = pointer && stage?.get_actor_at_pos(Clutter.PickMode.REACTIVE, pointer[0], pointer[1]);
-        this._pointerInside = !!actor && this.contains(actor);
-      }
+      if (!open) { this._syncPointerHover(); return; }
       this._syncElevation();
     }
 
@@ -308,37 +437,57 @@ const AttachedPod = GObject.registerClass(
       if (this._menuOpen) this.systemMenus?.closeAll();
       this._menuOpen = false;
       this._elevation.setActive(false, true);
+      this._stopPointerWatch();
     }
 
     _applyElevation() {
       if (!this._geom || this._destroyed) return;
       const offset = this._elevation.progress * this._elevation.distance;
       const reveal = (this._expansion ?? 0) * this._elevation.progress;
-      this._contentBox.translation_x = offset;
-      this._detailsBox.translation_x = offset;
+      const scale = unifiedAppearance(this.extension).scale;
+      const settled = this._elevation.progress === 0 || this._elevation.progress === 1;
+      const pixels = resourceScale(this);
+      const align = value => settled ? alignPixel(value, pixels) : value;
+      const move = align(this._endAnchored ? -offset : offset);
+      const detailsMove = align(this._endAnchored ? (this._expansion ?? 0) - reveal - offset : offset);
+      this._contentBox.translation_x = this._horizontal ? 0 : move;
+      this._contentBox.translation_y = this._horizontal ? move : 0;
+      this._detailsBox.translation_x = this._horizontal ? 0 : detailsMove;
+      this._detailsBox.translation_y = this._horizontal ? detailsMove : 0;
       this._detailsBox.opacity = Math.round(255 * this._elevation.progress);
-      this._detailsBox.set_clip?.(0, 0, Math.max(0, reveal - 8), this._geom.contentHeight);
-      this._surface.boxes = getAttachedPodPickBoxes({...this._geom,
-        width: this._geom.width + reveal, bodyOffset: offset});
+      const clip = Math.max(0, reveal - 8 * scale);
+      this._detailsBox.set_clip?.(0, 0, this._horizontal ? this._geom.contentWidth : clip,
+        this._horizontal ? clip : this._geom.contentHeight);
+      const width = this._geom.width + (this._horizontal ? 0 : reveal);
+      const height = this._geom.height + (this._horizontal ? reveal : 0);
+      const originX = this._right ? this.width - width - offset : 0;
+      const originY = this.edge === 'bottom' ? this.height - height - offset : 0;
+      this._surface.boxes = getAttachedPodPickBoxes({...this._geom, width, height, bodyOffset: offset})
+        .map(b => ({x1: b.x1 + originX, x2: b.x2 + originX, y1: b.y1 + originY, y2: b.y2 + originY}));
       this._surface.queue_redraw?.();
-      this._menuAnchor.translation_x = reveal + offset;
+      const anchorMove = (this._endAnchored ? -1 : 1) * (reveal + offset);
+      this._menuAnchor.translation_x = this._horizontal ? 0 : anchorMove;
+      this._menuAnchor.translation_y = this._horizontal ? anchorMove : 0;
       this.systemMenus?.updateAnchor?.(this);
       this.updateTheme();
+      this._updatePointerWatch();
     }
 
     updateTheme() {
       if (!this._geom) return;
       this._canvas.set_state({
         ...this._geom,
-        width: this._geom.width + (this._expansion ?? 0) * this._elevation.progress,
+        width: this._geom.width + (this._horizontal ? 0 : (this._expansion ?? 0) * this._elevation.progress),
+        height: this._geom.height + (this._horizontal ? (this._expansion ?? 0) * this._elevation.progress : 0),
         // Geometry is already in Shell's logical coordinate space.
         scaleFactor: 1,
-        position: 'left',
+        position: this.dockPosition,
+        alignEnd: this._endAnchored,
         bodyOffset: this._elevation.progress * this._elevation.distance,
         elevationProgress: this._elevation.progress,
         backgroundColor: this.extension?._dockColors?.['background-color'] || [0.08, 0.08, 0.09, 0.72],
         borderColor: this.extension?._dockColors?.['border-color'] || [1, 1, 1, 0.25],
-        borderThickness: this.extension?.border_thickness ?? 0,
+        borderThickness: unifiedAppearance(this.extension).borderThickness,
       });
     }
 
@@ -347,6 +496,7 @@ const AttachedPod = GObject.registerClass(
       this._destroyed = true;
       this._enabled = false;
       if (this._menuOpen) this.systemMenus?.closeAll();
+      this._stopPointerWatch();
       this._elevation?.destroy();
       for (const [object, id] of this._signals) object.disconnect(id);
       this._signals = [];
@@ -416,7 +566,7 @@ export const QuickSettingsPod = GObject.registerClass(
         battery: !!state.battery.present,
         volume: state.audio.available !== false,
       };
-      const iconSize = this.extension?.modular_indicator_icon_size ?? 16;
+      const iconSize = unifiedAppearance(this.extension).iconSize;
       for (const [name, item] of this._items) {
         const key = `modular_show_${name.replaceAll('-', '_')}`;
         const visible = name.startsWith('dynamic-') || ((this.extension?.[key] ?? true) && available[name]);
@@ -424,7 +574,7 @@ export const QuickSettingsPod = GObject.registerClass(
         item.visible = visible;
         if (item._icon?.icon_size !== iconSize) item.setIconSize?.(iconSize);
       }
-      const spacing = this.extension?.modular_indicator_spacing ?? 3;
+      const spacing = unifiedAppearance(this.extension).itemSpacing;
       if (this._spacing !== spacing) {
         this._spacing = spacing;
         this._contentBox.set_style(`spacing: ${spacing}px;`);
@@ -474,7 +624,7 @@ export const InputMethodPod = GObject.registerClass(
       const visible = !!state.available && this.extension?.modular_show_input_source !== false;
       const changed = item.visible !== visible;
       item.visible = visible;
-      const iconSize = this.extension?.modular_indicator_icon_size ?? 16;
+      const iconSize = unifiedAppearance(this.extension).iconSize;
       if (item._sourceIcon?.icon_size !== iconSize) item.setIconSize?.(iconSize);
       this._setDetails([['input-source', [...new Set([state.displayName, state.mode, state.shortName].filter(Boolean))].join(' · ') || 'Input Method']]);
       return changed;
@@ -488,7 +638,7 @@ export const ClockPod = GObject.registerClass(
       super._init({...params, name: 'ClockPod'});
       try {
         this._clockItem = this._addItem('clock', ModularClockItem);
-        this._clockItem.set_style('min-width: 0; min-height: 0; padding: 2px 0;');
+        this._styleItem(this._clockItem);
         this._stateListener = event => {
           if (event === 'clock-changed') {
             this._refreshContent();
@@ -519,10 +669,11 @@ export const ClockPod = GObject.registerClass(
 
     getMeasuredContentHeight() {
       const compact = super.getMeasuredContentHeight();
+      if (this._horizontal) return compact;
       // A time-only compact clock still needs room for all three information
       // lines. Reserve it during placement, never during a hover frame.
       const details = [...this._detailLabels.values()].reduce((sum, label) =>
-        sum + (label.get_preferred_height?.(-1)?.[1] || 16), 0) + 6;
+        sum + (label.get_preferred_height?.(-1)?.[1] || 16 * unifiedAppearance(this.extension).scale), 0) + 6 * unifiedAppearance(this.extension).scale;
       this._measuredHeight = Math.max(compact, Math.ceil(details));
       return this._measuredHeight;
     }

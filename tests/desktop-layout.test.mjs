@@ -71,16 +71,17 @@ async function setup() {
     return {manager, extension, monitor, panel, actors, counts, control, layout, uiGroup, extensionManager};
 }
 
-test('mode transitions keep one provider/menu owner and preserve application dock identity', async () => {
+test('legacy mode writes keep one Unified Dock, provider/menu owner and application dock identity', async () => {
     const env = await setup();
     const {manager, extension, actors, counts, panel} = env;
     const appDock = extension.docks[0];
     manager.enable();
-    assert.equal(actors.size, 1);
+    assert.equal(actors.size, 3);
     for (let i = 0; i < 30; i++) {
         extension.desktop_layout = i % 2 ? 0 : 1;
         manager.onSettingsChanged('desktop-layout', extension.desktop_layout);
-        assert.equal(actors.size, extension.desktop_layout === 1 ? 3 : 1);
+        assert.equal(actors.size, 3);
+        assert.equal(manager.mode, 1);
         assert.equal(counts.states, 1);
         assert.equal(counts.menus, 1);
         assert.equal(extension.docks[0], appDock);
@@ -98,14 +99,14 @@ test('mode transitions keep one provider/menu owner and preserve application doc
 test('failed replacement retains old mode, releases pending actors and keeps system controls', async () => {
     const {manager, extension, control, actors, panel} = await setup();
     manager.enable();
-    const oldRail = manager.systemDock;
+    const oldPod = manager.quickSettingsPod;
     control.fail = 'Clock';
     extension.desktop_layout = 1;
-    manager.onSettingsChanged('desktop-layout', 1);
-    assert.equal(manager.mode, 0);
-    assert.equal(manager.systemDock, oldRail);
-    assert.equal(oldRail.destroyed, undefined);
-    assert.equal(actors.size, 1);
+    manager.onSettingsChanged('modular-show-clock', true);
+    assert.equal(manager.mode, 1);
+    assert.equal(manager.quickSettingsPod, oldPod);
+    assert.equal(oldPod.destroyed, undefined);
+    assert.equal(actors.size, 3);
     assert.equal(panel.visible, false); // retained working rail still controls menus
     manager.destroy();
     assert.equal(panel.visible, true);
@@ -137,7 +138,7 @@ test('pods meet the actual screen corners regardless of frame thickness or monit
     assert.equal(manager.inputMethodPod.x, monitor.x);
     assert.equal(manager.inputMethodPod.startFlush, false);
     assert.equal(manager.inputMethodPod.endFlush, false);
-    assert.equal(manager.clockPod.y + manager.clockPod.height, monitor.y + monitor.height);
+    assert.ok(manager.clockPod.y + manager.clockPod.height <= monitor.y + monitor.height);
     const bounds = manager.getModularConstraints(monitor);
     assert.equal(bounds.topBoundary, manager.inputMethodPod.y + manager.inputMethodPod.height + 16);
     assert.equal(bounds.bottomBoundary, manager.clockPod.y - 16);
@@ -200,14 +201,16 @@ test('panel hidden by another owner stays hidden on layout disable', async () =>
     assert.equal(panel.visible, false);
 });
 
-test('impossible pod placement fails before replacing the working rail', async () => {
-    const {manager, extension, monitor, actors} = await setup();
+test('impossible placement keeps one layout and restores native controls', async () => {
+    const {manager, extension, monitor, actors, panel} = await setup();
     manager.enable();
     monitor.height = 200;
     extension.desktop_layout = 1;
-    manager.onSettingsChanged('desktop-layout', 1);
-    assert.equal(manager.mode, 0);
-    assert.equal(actors.size, 1);
+    manager.updateLayout();
+    assert.equal(manager.mode, 1);
+    assert.equal(manager._geometry.fits, false);
+    assert.equal(panel.visible, true);
+    assert.equal(actors.size, 3);
     manager.destroy();
 });
 
@@ -284,16 +287,73 @@ test('Just Perfection can take panel ownership and keeps its hidden state after 
     assert.equal(settings.signals.size, 0);
 });
 
-test('a monitor shrink recovers to Dual Edge with working controls instead of retaining overlapping pods', async () => {
-    const {manager, extension, monitor, actors} = await setup();
+test('a monitor shrink restores the panel and recovers the same pods when space returns', async () => {
+    const {manager, extension, monitor, actors, panel} = await setup();
     extension.desktop_layout = 1;
     manager.enable();
+    const quick = manager.quickSettingsPod;
     monitor.height = 250;
     manager.updateLayout();
-    assert.equal(manager.mode, 0);
-    assert.equal(extension.desktop_layout, 0);
-    assert.equal(manager.quickSettingsPod, null);
-    assert.equal(manager.clockPod, null);
-    assert.equal(actors.size, 1);
+    assert.equal(manager.mode, 1);
+    assert.equal(extension.desktop_layout, 1);
+    assert.equal(manager.quickSettingsPod, quick);
+    assert.equal(quick.visible, false);
+    assert.equal(manager._geometry.appDock.visible, false);
+    assert.equal(panel.visible, true);
+    assert.equal(actors.size, 3);
+    monitor.height = 900;
+    manager.updateLayout();
+    assert.equal(quick.visible, true);
+    assert.equal(panel.visible, false);
     manager.destroy();
+});
+
+
+test('all four edges retain actors and anchor system pods at opposite screen corners', async () => {
+    const {manager, extension, monitor, actors, counts} = await setup();
+    manager.enable();
+    const pods = [manager.quickSettingsPod, manager.inputMethodPod, manager.clockPod];
+    for (let i = 0; i < 24; i++) {
+        const position = i % 4;
+        const edge = ['top', 'bottom', 'left', 'right'][position];
+        const vertical = position >= 2;
+        extension.unified_edge = position;
+        manager.onSettingsChanged('unified-edge', position);
+        const g = manager._geometry;
+        assert.equal(g.fits, true);
+        assert.equal(manager.quickSettingsPod, pods[0]);
+        assert.equal(manager.inputMethodPod, pods[1]);
+        assert.equal(manager.clockPod, pods[2]);
+        assert.equal(actors.size, 3);
+        assert.equal(counts.states, 1);
+        for (const item of [g.quickSettings, g.inputMethod, g.appDock, g.clock]) {
+            assert.equal(item.position, edge);
+            assert.ok(item.x >= monitor.x && item.x + item.width <= monitor.x + monitor.width);
+            assert.ok(item.y >= monitor.y && item.y + item.height <= monitor.y + monitor.height);
+        }
+        const axis = vertical ? 'y' : 'x', length = vertical ? 'height' : 'width';
+        assert.equal(g.quickSettings[axis], monitor[axis]);
+        assert.equal(g.clock[axis] + g.clock[length], monitor[axis] + monitor[length]);
+        assert.equal(g.inputMethod[axis] - g.quickSettings[axis] - g.quickSettings[length], 3);
+        assert.ok(g.appDock[axis] >= g.inputMethod[axis] + g.inputMethod[length] + 16);
+        assert.ok(g.appDock[axis] + g.appDock[length] + 16 <= g.clock[axis]);
+        assert.equal(g.quickSettings.startFlush, true);
+        assert.equal(g.clock.endFlush, true);
+    }
+    manager.destroy();
+});
+
+test('selected monitor routes the entire group and disconnects monitor signals on disable', async () => {
+    const {manager, extension, layout, monitor} = await setup();
+    layout.monitors = [monitor, {...monitor, index: 1, x: 320, y: 150}];
+    extension.preferred_monitor = 2;
+    manager.enable();
+    assert.equal(manager._geometry.monitor, layout.monitors[1]);
+    assert.equal(manager.quickSettingsPod.x, 320);
+    assert.equal(manager.getModularConstraints(monitor), null);
+    layout.monitors.pop();
+    layout.emit('monitors-changed');
+    assert.equal(manager._geometry.monitor, monitor);
+    manager.destroy();
+    assert.equal(layout.signals.size, 0);
 });

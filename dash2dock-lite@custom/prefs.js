@@ -11,6 +11,7 @@ const GETTEXT_DOMAIN = 'dash2dock-light';
 
 import { schemaId, SettingsKeys } from './preferences/keys.js';
 import { MonitorsConfig } from './monitors.js';
+import {migrateUnifiedSettings} from './unifiedDock.js';
 
 import {
   ExtensionPreferences,
@@ -166,19 +167,27 @@ export default class Preferences extends ExtensionPreferences {
     this._builder = builder;
 
     let UIFolderPath = `${this.path}/ui`;
-    builder.add_from_file(`${UIFolderPath}/general.ui`);
-    builder.add_from_file(`${UIFolderPath}/appearance.ui`);
-    builder.add_from_file(`${UIFolderPath}/systemDock.ui`);
-    builder.add_from_file(`${UIFolderPath}/tweaks.ui`);
-    builder.add_from_file(`${UIFolderPath}/others.ui`);
+    builder.add_from_file(`${UIFolderPath}/unified.ui`);
     builder.add_from_file(`${UIFolderPath}/menu.ui`);
-    window.add(builder.get_object('general'));
-    window.add(builder.get_object('appearance'));
-    window.add(builder.get_object('systemDock'));
-    window.add(builder.get_object('systemControls'));
-    window.add(builder.get_object('desktopFrame'));
-    window.add(builder.get_object('others'));
-    window.add(builder.get_object('tweaks'));
+    for (const id of ['layout', 'appearance', 'behavior']) window.add(builder.get_object(id));
+    const addSubpage = (parent, id, title) => {
+      const group = new Adw.PreferencesGroup();
+      const row = new Adw.ActionRow({title, activatable: true});
+      row.add_suffix(new Gtk.Image({icon_name: 'go-next-symbolic'}));
+      row.connect('activated', () => {
+        const page = builder.get_object(id);
+        const dialog = new Adw.PreferencesDialog({title, search_enabled: true});
+        dialog.add(page);
+        dialog.connect('closed', () => dialog.remove(page));
+        dialog.present(window);
+      });
+      group.add(row);
+      builder.get_object(parent).add(group);
+    };
+    addSubpage('layout', 'desktopFrame', _('Screen Frame and Window Gaps'));
+    addSubpage('appearance', 'appAppearance', _('Application Appearance'));
+    addSubpage('behavior', 'systemControls', _('System Pods'));
+    addSubpage('behavior', 'appBehavior', _('Application Dock'));
     window.set_search_enabled(true);
 
     // this.dump(window, 0);
@@ -191,6 +200,7 @@ export default class Preferences extends ExtensionPreferences {
     }
 
     let settings = this.getSettings(schemaId);
+    migrateUnifiedSettings(settings);
     settings.set_string('msg-to-ext', '');
 
     let settingsKeys = SettingsKeys({
@@ -222,47 +232,15 @@ export default class Preferences extends ExtensionPreferences {
       }
     };
 
-    let updateAttachedRows = () => {
-      let isAttached = settings.get_int('desktop-layout') === 1 || settings.get_int('background-style') === 1;
-      let flareRow = builder.get_object('flare-width-row');
-      let footRow = builder.get_object('foot-depth-row');
-      let radiusRow = builder.get_object('attached-corner-radius-row');
-      if (flareRow) flareRow.visible = isAttached;
-      if (footRow) footRow.visible = isAttached;
-      if (radiusRow) radiusRow.visible = isAttached;
-    };
-
     const preferenceSignals = [];
     const watchSetting = (name, callback) =>
       preferenceSignals.push(settings.connect(`changed::${name}`, callback));
-
-    watchSetting('background-style', () => {
-      updateAttachedRows();
-    });
-    updateAttachedRows();
-
-    const updateLayoutRows = () => {
-      const modular = settings.get_int('desktop-layout') === 1;
-      updateAttachedRows();
-      for (const id of ['group-left-modular', 'group-quick-settings', 'group-clock-pod', 'group-window-layout'])
-        builder.get_object(id).visible = modular;
-      for (const id of ['group-dual-edge', 'group-dual-edge-indicators', 'group-dual-edge-dimensions'])
-        builder.get_object(id).visible = !modular;
+    const updateRows = () => {
       builder.get_object('group-quick-settings').sensitive = settings.get_boolean('modular-show-quicksettings');
       builder.get_object('group-clock-pod').sensitive = settings.get_boolean('modular-show-clock');
-      for (const id of ['group-dual-edge-indicators', 'group-dual-edge-dimensions'])
-        builder.get_object(id).sensitive = settings.get_boolean('enable-system-dock');
-      builder.get_object('system-dock-behavior-row').sensitive = settings.get_boolean('enable-system-dock');
-      // These Application Dock controls are overridden by Left Modular geometry.
-      for (const key of ['dock-location', 'panel-mode', 'edge-distance', 'background-style']) {
-        const control = builder.get_object(key);
-        const row = control?.get_ancestor(Adw.ActionRow);
-        if (row) row.visible = !modular;
-      }
     };
-    for (const name of ['desktop-layout', 'modular-show-quicksettings', 'modular-show-clock', 'enable-system-dock'])
-      watchSetting(name, updateLayoutRows);
-    updateLayoutRows();
+    for (const name of ['modular-show-quicksettings', 'modular-show-clock']) watchSetting(name, updateRows);
+    updateRows();
 
     watchSetting('experimental-features', toggle_experimental);
 
@@ -377,7 +355,7 @@ export default class Preferences extends ExtensionPreferences {
         new Adw.Toast({ title: `Saved to ${tempPath('theme.json')}` })
       );
 
-      this._builder.get_object('theme-export-notice').visible = true;
+
       return;
     }
 
@@ -400,8 +378,14 @@ export default class Preferences extends ExtensionPreferences {
         case 'dropdown':
           this._settings.set_int(k, v);
           break;
+        case 'scale':
+          settingsKeys.setValue(k, v);
+          break;
       }
     });
+    // Older theme files carried opacity in the color tuple.
+    if (p['background-color'] && p['background-opacity'] === undefined)
+      settingsKeys.setValue('background-opacity', p['background-color'][3]);
 
     // settingsKeys.connectBuilder(this._builder);
     settingsKeys._builder = this._builder;

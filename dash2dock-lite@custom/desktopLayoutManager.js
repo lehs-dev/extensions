@@ -1,13 +1,13 @@
 'use strict';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import {SystemDock} from './systemDock/systemDock.js';
 import {QuickSettingsPod, InputMethodPod, ClockPod} from './systemDock/modularPods.js';
 import {SystemState} from './systemDock/systemState.js';
 import {SystemMenus} from './systemDock/systemMenus.js';
-import {computeLeftModularGeometry} from './systemDock/systemDockLayout.js';
+import {computeUnifiedDockGeometry} from './systemDock/systemDockLayout.js';
+import {unifiedAppearance, unifiedEdge} from './unifiedDock.js';
 
-export const LayoutMode = {DUAL_EDGE: 0, LEFT_MODULAR: 1};
+export const LayoutMode = {UNIFIED: 1};
 
 // One owner for state, menus, pod geometry and panel visibility. A mode is only
 // published after every requested actor has been initialized and positioned.
@@ -22,15 +22,25 @@ export class DesktopLayoutManager {
     this.systemDock = this.quickSettingsPod = this.inputMethodPod = this.clockPod = null;
   }
 
-  get mode() { return this._activeMode ?? LayoutMode.DUAL_EDGE; }
+  get mode() { return LayoutMode.UNIFIED; }
+  get edge() { return unifiedEdge(this.extension); }
+  get monitor() {
+    const index = (this.extension.preferred_monitor ?? 0) - 1;
+    return Main.layoutManager.monitors?.[index] ?? Main.layoutManager.primaryMonitor;
+  }
 
   enable() {
     if (this._enabled) return;
     try {
       this.state = new SystemState();
       this.menus = new SystemMenus({state: this.state});
+      this.menus.beforeOpen = () => this.applicationDock?.closeMenus?.();
       this._enabled = true;
       this._connect(Main.layoutManager, 'monitors-changed', () => this.updateLayout());
+      this._connect(typeof global !== 'undefined' ? global.display : null,
+        'in-fullscreen-changed', () => this.updateLayout());
+      for (const signal of ['shown', 'hidden'])
+        this._connect(Main.overview, signal, () => this.updateLayout());
       this._connect(Main.layoutManager.panelBox, 'notify::visible', () => {
         if (!this._changingPanelVisibility) this._syncTopBar();
       });
@@ -39,7 +49,7 @@ export class DesktopLayoutManager {
         this._syncTopBar();
       });
       this._watchPanelOwner();
-      this._applyMode(this.extension?.desktop_layout ?? LayoutMode.DUAL_EDGE);
+      this._applyMode();
     } catch (error) {
       this.destroy();
       throw error;
@@ -62,112 +72,77 @@ export class DesktopLayoutManager {
   _computeGeometry(quickSettingsPod = this.quickSettingsPod, clockPod = this.clockPod,
     inputMethodPod = this.inputMethodPod) {
     const ext = this.extension;
-    const monitor = Main.layoutManager.primaryMonitor;
-    if (!monitor) throw new Error('Left Modular requires an active primary monitor');
-    return computeLeftModularGeometry({
-      monitor,
-      frameThickness: ext.enable_screen_frame ? ext.screen_frame_thickness : 0,
-      frameRadius: ext.enable_screen_frame ? ext.screen_frame_corner_radius : 0,
-      upperPodOffset: ext.modular_upper_pod_offset,
-      lowerPodOffset: ext.modular_lower_pod_offset,
-      minSpacing: ext.modular_min_spacing,
-      flareWidth: ext.flare_width,
-      footDepth: ext.foot_depth,
-      cornerRadius: ext.attached_corner_radius,
-      quickSettingsWidth: ext.modular_quicksettings_width,
-      clockWidth: ext.modular_clock_width,
+    const monitor = this.monitor;
+    if (!monitor) throw new Error('Unified Dock requires an active monitor');
+    for (const pod of [quickSettingsPod, inputMethodPod, clockPod]) pod?.setEdge?.(this.edge);
+    const appearance = unifiedAppearance(ext);
+    return computeUnifiedDockGeometry({
+      monitor, ...appearance, edge: this.edge,
       quickSettingsContentWidth: quickSettingsPod?.getMeasuredContentWidth?.() ?? 0,
       clockContentWidth: clockPod?.getMeasuredContentWidth?.() ?? 0,
       inputMethodContentWidth: inputMethodPod?.getMeasuredContentWidth?.() ?? 0,
       inputMethodContentHeight: inputMethodPod?.getMeasuredContentHeight() ?? 0,
-      iconSpacing: ext.modular_indicator_spacing,
       quickSettingsContentHeight: quickSettingsPod?.getMeasuredContentHeight() ?? 0,
       clockContentHeight: clockPod?.getMeasuredContentHeight() ?? 0,
+      appDockContentHeight: this.applicationDock?.getUnifiedContentHeight?.() ?? appearance.appIconSize,
+      magnify: ext.animation_magnify ?? 0, spread: ext.animation_spread ?? 0.5,
       showQuickSettings: !!quickSettingsPod,
       showClock: !!clockPod,
       showInputMethod: !!inputMethodPod && inputMethodPod.hasUsableControls,
       showAppDock: ext.modular_show_appdock !== false,
-      minimumAppDockHeight: 2 * (ext.flare_width ?? 14) + Math.max(24, ...(ext.docks ?? []).map(dock => dock._preferredIconSize?.() ?? 48)) *
-        (1 + 1.8 * Math.max(0, ext.animation_magnify ?? 0)),
     });
   }
 
-  _applyMode(mode) {
+  _applyMode() {
     if (this._transitioning) return;
     this._transitioning = true;
     const pending = [];
     const oldActors = this._actors();
     try {
       this.menus.closeAll();
-      let systemDock = null, quickSettingsPod = null, inputMethodPod = null, clockPod = null;
-      if (mode === LayoutMode.LEFT_MODULAR) {
-        const params = {extension: this.extension, systemMenus: this.menus,
-          systemState: this.state, onLayoutChanged: () => this.updateLayout()};
-        if (this.extension.modular_show_quicksettings !== false) {
-          quickSettingsPod = new QuickSettingsPod(params);
-          pending.push(quickSettingsPod);
-          quickSettingsPod.enable();
-        }
-        if (this.extension.modular_show_clock !== false) {
-          clockPod = new ClockPod(params);
-          pending.push(clockPod);
-          clockPod.enable();
-        }
-        inputMethodPod = new InputMethodPod(params);
-        pending.push(inputMethodPod);
-        inputMethodPod.enable();
-        const geometry = this._computeGeometry(quickSettingsPod, clockPod, inputMethodPod);
-        if (!geometry.fits) throw new Error('Left Modular pods exceed the available monitor height');
-        quickSettingsPod?.place(geometry.quickSettings);
-        inputMethodPod.place(geometry.inputMethod);
-        clockPod?.place(geometry.clock);
-        this._geometry = geometry;
-      } else if (this.extension.enable_system_dock !== false) {
-        systemDock = new SystemDock({extension: this.extension, state: this.state, menus: this.menus});
-        pending.push(systemDock);
-        systemDock.enable();
-      }
-      // Commit the transition only once all requested components are usable.
-      this.systemDock = systemDock;
+      const params = {extension: this.extension, systemMenus: this.menus,
+        systemState: this.state, onLayoutChanged: () => this.updateLayout()};
+      const create = Pod => {
+        const pod = new Pod(params);
+        pending.push(pod);
+        pod.enable();
+        return pod;
+      };
+      const quickSettingsPod = this.extension.modular_show_quicksettings !== false ? create(QuickSettingsPod) : null;
+      const inputMethodPod = create(InputMethodPod);
+      const clockPod = this.extension.modular_show_clock !== false ? create(ClockPod) : null;
+      const geometry = this._computeGeometry(quickSettingsPod, clockPod, inputMethodPod);
+      quickSettingsPod?.place(geometry.quickSettings);
+      inputMethodPod.place(geometry.inputMethod);
+      clockPod?.place(geometry.clock);
       this.quickSettingsPod = quickSettingsPod;
       this.inputMethodPod = inputMethodPod;
       this.clockPod = clockPod;
-      this._activeMode = mode;
-      this._layoutHealthy = true;
-      if (mode !== LayoutMode.LEFT_MODULAR) this._geometry = null;
-      this.menus.systemDock = systemDock;
-      this.extension.systemDock = systemDock;
+      this._geometry = geometry;
+      this._activeMode = LayoutMode.UNIFIED;
+      this._layoutHealthy = geometry.fits;
+      this.menus.systemDock = null;
+      this.extension.systemDock = null;
       this._dispose(oldActors);
       this.extension._updateStyle?.();
-      this.updateLayout();
-      this._syncTopBar();
     } catch (error) {
       this._dispose(pending);
-      console.error(`dash2dock-lite: layout ${mode} initialization failed; retaining previous layout`, error);
+      console.error('dash2dock-lite: Unified Dock initialization failed; retaining existing controls', error);
       if (this._activeMode === null) throw error;
-      if (this.extension.desktop_layout !== this._activeMode) {
-        this._syncingSetting = true;
-        try {
-          this.extension.desktop_layout = this._activeMode;
-          this.extension._settings?.set_int('desktop-layout', this._activeMode);
-        } finally {
-          this._syncingSetting = false;
-        }
-      }
     } finally {
       this._transitioning = false;
     }
+    this.updateLayout();
   }
 
   get applicationDock() {
     const docks = this.extension.docks ?? [];
-    return docks.find(dock => dock._monitorIndex === Main.layoutManager.primaryIndex) ?? docks[0] ?? null;
+    return docks.find(dock => dock._monitorIndex === (this.monitor?.index ?? Main.layoutManager.primaryIndex)) ?? docks[0] ?? null;
   }
 
   getModularConstraints(monitor) {
-    if (this.mode !== LayoutMode.LEFT_MODULAR) return null;
-    if (monitor.index !== undefined && monitor.index !== Main.layoutManager.primaryIndex) return null;
-    if (monitor.x !== Main.layoutManager.primaryMonitor?.x || monitor.y !== Main.layoutManager.primaryMonitor?.y) return null;
+    const target = this.monitor;
+    if (!target || monitor.x !== target.x || monitor.y !== target.y) return null;
     return this._geometry?.appDock ?? null;
   }
 
@@ -176,7 +151,7 @@ export class DesktopLayoutManager {
       Main.layoutManager.monitors?.map(m => [m.x, m.y, m.width, m.height, m.geometry_scale, m.inFullscreen]),
       this.extension.modular_show_appdock]);
     for (const dock of this.extension.docks ?? []) {
-      if (this.mode === LayoutMode.LEFT_MODULAR && this._dockConstraints.get(dock) === key && !dock._layoutDirty) continue;
+      if (this._dockConstraints.get(dock) === key && !dock._layoutDirty) continue;
       const before = [dock.x, dock.y, dock.width, dock.height];
       dock.layout();
       this._dockConstraints.set(dock, key);
@@ -191,32 +166,23 @@ export class DesktopLayoutManager {
     if (!this._enabled || this._transitioning || this._updating) return;
     this._updating = true;
     try {
-      if (this.mode === LayoutMode.LEFT_MODULAR) {
-        this.quickSettingsPod?._refreshContent?.();
-        this.inputMethodPod?._refreshContent?.();
-        this.clockPod?._refreshContent?.();
-        const geometry = this._computeGeometry();
-        if (!geometry.fits) throw new Error('Left Modular pods exceed the available monitor height');
-        this.quickSettingsPod?.place(geometry.quickSettings);
-        this.inputMethodPod?.place(geometry.inputMethod);
-        this.clockPod?.place(geometry.clock);
-        this._geometry = geometry;
-      } else {
-        this._geometry = null;
-        this.systemDock?.updateLayout();
-      }
-      this._layoutHealthy = true;
+      this.quickSettingsPod?._refreshContent?.();
+      this.inputMethodPod?._refreshContent?.();
+      this.clockPod?._refreshContent?.();
+      const geometry = this._computeGeometry();
+      this.quickSettingsPod?.place(geometry.quickSettings);
+      this.inputMethodPod?.place(geometry.inputMethod);
+      this.clockPod?.place(geometry.clock);
+      this._geometry = geometry;
+      this._layoutHealthy = geometry.fits;
       this.updateApplicationDockConstraints();
       this._syncTopBar();
     } catch (error) {
       this._layoutHealthy = false;
       this._manageTopBar(false);
       console.error('dash2dock-lite: desktop layout update failed; panel restored', error);
-      if (this.mode === LayoutMode.LEFT_MODULAR) {
-        this._applyMode(LayoutMode.DUAL_EDGE);
-        this.extension.desktop_layout = this.mode;
-        this.extension._settings?.set_int('desktop-layout', this.mode);
-      }
+      for (const actor of this._actors()) actor.hide?.();
+      this._geometry = null;
     } finally {
       this._updating = false;
     }
@@ -225,25 +191,23 @@ export class DesktopLayoutManager {
   updateTheme() { for (const actor of this._actors()) actor.updateTheme(); }
 
   onSettingsChanged(name, value) {
-    if (this._syncingSetting) return;
-    if (name === 'desktop-layout' && value === this._activeMode) return;
-    if (name === 'desktop-layout' || name === 'modular-show-quicksettings' ||
-        name === 'modular-show-clock' || name === 'enable-system-dock') {
-      this._applyMode(name === 'desktop-layout' ? value : this.mode);
-    } else if (name === 'system-dock-hide-topbar') {
-      this._syncTopBar();
+    if (name === 'desktop-layout' || name === 'enable-system-dock') return;
+    if (name === 'modular-show-quicksettings' || name === 'modular-show-clock') {
+      this._applyMode();
     } else {
-      this.systemDock?.onSettingsChanged(name, value);
-      this.updateLayout();
+      if (name === 'unified-edge' || name === 'preferred-monitor' || name === 'global-scale') {
+        this.menus.closeAll();
+        this.applicationDock?.closeMenus?.();
+      }
+      // Color/scale changes reach content before measuring the new geometry.
       this.updateTheme();
+      this.updateLayout();
     }
   }
 
   _syncTopBar() {
-    const alternativesReady = this.mode === LayoutMode.LEFT_MODULAR
-      ? !!this.quickSettingsPod && this.quickSettingsPod.hasUsableControls !== false && !!this.clockPod && this._geometry?.fits
-      : !!this.systemDock && (!this.systemDock._geom ||
-        this.systemDock._geom.height <= (Main.layoutManager.primaryMonitor?.height ?? 0));
+    const alternativesReady = !!this.quickSettingsPod && this.quickSettingsPod.hasUsableControls !== false &&
+      !!this.clockPod && this._geometry?.fits;
     const nativeMenusReady = this.menus?.available !== false;
     this._manageTopBar(this._enabled && this._layoutHealthy !== false && this.extension.system_dock_hide_topbar && alternativesReady && nativeMenusReady);
   }
@@ -332,5 +296,6 @@ export class DesktopLayoutManager {
     this.menus?.destroy();
     this.state?.destroy();
     this.menus = this.state = null;
+    this._activeMode = null;
   }
 }

@@ -22,7 +22,8 @@ import {
 
 import { DockPosition } from './dock.js';
 import { AttachedDockCanvas } from './attachedBackground.js';
-import {getAttachedPodPickBoxes, LEFT_MODULAR_WIDTH} from './attachedGeometry.js';
+import {getAttachedPodPickBoxes} from './attachedGeometry.js';
+import {unifiedAppearance} from './unifiedDock.js';
 import {computeDockFrames} from './dockOverflow.js';
 
 class DockItemMenu extends PopupMenu.PopupMenu {
@@ -389,6 +390,7 @@ export const DockBackground = GObject.registerClass(
       } = params;
 
       if (dock.extension?.desktopLayoutManager?.mode === 1) panel_mode = false;
+      const appearance = dock._modularViewport ? unifiedAppearance(dock.extension) : null;
       this._padding = 0;
 
       if (!first || !last || (first == last && !dock._modularViewport)) {
@@ -408,7 +410,7 @@ export const DockBackground = GObject.registerClass(
         this._paintedRect = {...rect};
       };
 
-      let padding =
+      let padding = appearance?.padding ??
         iconSize * 0.1 * (dock.extension.dock_padding || 0) * scaleFactor;
 
       if (first && last) {
@@ -470,9 +472,9 @@ export const DockBackground = GObject.registerClass(
           (dock.extension?.background_style === 1 || dock.extension?.desktopLayoutManager?.mode === 1);
 
         if (isAttachedEdge) {
-          const flareWidth = dock.extension?.flare_width ?? 14;
-          const footDepth = dock.extension?.foot_depth ?? 4;
-          const cornerRadius = dock.extension?.attached_corner_radius ?? 10;
+          const flareWidth = appearance?.flareWidth ?? dock.extension?.flare_width ?? 14;
+          const footDepth = appearance?.footDepth ?? dock.extension?.foot_depth ?? 4;
+          const cornerRadius = appearance?.cornerRadius ?? dock.extension?.attached_corner_radius ?? 10;
           const fw = Math.round(flareWidth * scaleFactor);
 
           if (position === DockPosition.BOTTOM) {
@@ -502,14 +504,14 @@ export const DockBackground = GObject.registerClass(
           }
 
           if (dock._modularViewport) {
-            const inset = Math.max(4 * scaleFactor, padding);
+            const inset = Math.max(4 * (appearance?.scale ?? scaleFactor), padding);
             if (!dock._modularFrames) {
               // Native source allocations can change during redisplay. Their
               // transient bounds never determine the resting capsule width.
-              const contentRight = (LEFT_MODULAR_WIDTH + iconSize * scaleFactor) / 2;
-              dock._restingWidth = LEFT_MODULAR_WIDTH;
+              const contentRight = (appearance.width + iconSize * scaleFactor) / 2;
+              dock._restingWidth = appearance.width;
               dock._modularFrames = computeDockFrames({viewport: dock._modularViewport,
-                height: dock.height, restingWidth: dock._restingWidth, contentRight,
+                height: vertical ? dock.height : dock.width, restingWidth: dock._restingWidth, contentRight,
                 iconSize: iconSize * scaleFactor, slotSize: first.width, inset, flareWidth: fw,
                 magnify: dock.extension.animation_magnify, spread: dock.extension.animation_spread,
                 rise: dock.extension.animation_rise});
@@ -518,6 +520,12 @@ export const DockBackground = GObject.registerClass(
             const progress = dock._dockHoverProgress ?? 0;
             for (const key of ['x', 'y', 'width', 'height'])
               rect[key] = resting[key] + (expanded[key] - resting[key]) * progress;
+            if (!vertical) {
+              const canonical = {...rect};
+              Object.assign(rect, {x: canonical.y, y: canonical.x, width: canonical.height, height: canonical.width});
+            }
+            if (position === DockPosition.RIGHT) rect.x = dock.width - rect.x - rect.width;
+            if (position === DockPosition.BOTTOM) rect.y = dock.height - rect.y - rect.height;
             rect.x += dock.dash.translationX || 0;
             rect.y += dock.dash.translationY || 0;
           }
@@ -535,11 +543,11 @@ export const DockBackground = GObject.registerClass(
           commitRect();
           this.reactive = !!dock._modularViewport && !dock._hidden;
           if (this.reactive) {
-            const pickKey = [rect.width, rect.height, flareWidth, footDepth, cornerRadius].join(':');
+            const pickKey = [rect.width, rect.height, flareWidth, footDepth, cornerRadius, position].join(':');
             if (pickKey !== this._pickKey) {
               this._pickKey = pickKey;
               this._pickBoxes = getAttachedPodPickBoxes({width: rect.width, height: rect.height,
-                flareWidth, footDepth, cornerRadius});
+                flareWidth, footDepth, cornerRadius, position});
             }
           } else {
             this._pickKey = this._pickBoxes = null;
@@ -560,7 +568,7 @@ export const DockBackground = GObject.registerClass(
               position,
               backgroundColor: dock.extension?._dockColors?.['background-color'],
               borderColor: dock.extension?._dockColors?.['border-color'],
-              borderThickness: dock.extension?.border_thickness || 0,
+              borderThickness: appearance?.borderThickness ?? dock.extension?.border_thickness ?? 0,
             });
           }
         } else {

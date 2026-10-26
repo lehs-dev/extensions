@@ -11,6 +11,12 @@ export const schemaId = 'org.gnome.shell.extensions.dash2dock-lite';
 export const SettingsKeys = (patch) => {
   let settingsKeys = new PrefKeys(patch);
   settingsKeys.setKeys({
+    'unified-edge': {
+      default_value: 2, widget_type: 'dropdown', value_type: 'i',
+      options: ['Top', 'Bottom', 'Left', 'Right'],
+    },
+    'global-scale': {default_value: 1, widget_type: 'scale', value_type: 'd'},
+    'background-opacity': {default_value: 0.72, widget_type: 'scale', value_type: 'd', themed: true},
     // debug: {
     //   default_value: false,
     //   widget_type: 'switch',

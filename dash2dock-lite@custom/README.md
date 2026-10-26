@@ -2,6 +2,54 @@
 
 A GNOME Shell 40+ Extension
 
+This fork uses **Unified Dock** on GNOME Shell 51. Quick Settings, Input Method /
+Kimpanel, Application Dock and Clock remain independent Attached Edge pods. Select
+**Top**, **Bottom**, **Left** or **Right** to align the whole layout to that screen
+edge. Quick Settings meets the first screen corner, Clock meets the opposite
+corner, and Kimpanel stays immediately beside Quick Settings. The Application
+Dock is centered in the remaining interval and scrolls when necessary.
+
+Preferences has three main pages: **Layout**, **Appearance** and **Behavior**.
+Appearance shares Global Scale, background color/opacity, border and Attached
+Edge geometry across all pods. System controls, Application Dock details, Screen
+Frame and Window Gaps are available in subpages. Hover follows the current
+pointer coordinates within the painted pod, including when its contour moves;
+active pointer listeners disconnect after collapse and on disable. While a pod
+is raised, an 80 ms pointer check also handles crossings into application
+surfaces when Shell receives no leave/motion event. The check stops after
+collapse, on hide and on destroy; an open native popup retains its pod.
+
+Configuration migration is additive. `unified-edge` stores the selected edge;
+`global-scale` controls pod dimensions, and `background-opacity` takes the alpha
+from a previously saved background color. Version 2 converts earlier corner
+selections to their corresponding left/right edge without rewriting the saved
+`unified-position` values. Legacy layout, width, icon-size, offsets and per-rail
+appearance keys remain stored for downgrade compatibility. Old themes remain
+supported. If the monitor is too short for safe placement, native panel controls
+return until the layout fits again.
+
+Run `npm test` and `npm run check` for regressions and schema/source checks. The
+optional GTK preferences smoke test is
+`GSETTINGS_BACKEND=memory gjs -m tests/native-unified-preferences.js` and requires
+a GTK display (a headless Broadway display also works).
+
+`python3 scripts/test-pod-allocation.py` checks the three system pods with real
+GNOME Shell 51/Clutter actors at all four edges, before and after allocation and
+during expansion. It starts a separate headless compositor with temporary
+settings, runtime directories and D-Bus, and checks provider cleanup on destroy.
+It also moves a virtual pointer between each pod and a real Wayland test window,
+including recovery from stale hover with no further crossing events.
+Add `--application` to exercise the complete extension with native Dash sources,
+including magnification at every edge and scale, padded source allocations and
+asynchronous icon texture filtering. `--artifacts /tmp/unified-dock-rendering`
+saves a screenshot from that isolated compositor.
+The animation checks damage a single pixel outside the dock to wait for paints;
+they do not force the whole stage to repaint. `--application --pixels` also reads
+the already painted framebuffer and compares 42 moving/scaling frames against
+full repaints of the same scene. This optional check needs Mutter 51 development
+headers, a C compiler, `pkg-config` and `gi-compile-repository`; its readback helper
+is compiled into the temporary test directory only.
+
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/icedman)
 
 ![Contributors](https://img.shields.io/github/contributors/icedman/dash2dock-lite?color=dark-green) ![Forks](https://img.shields.io/github/forks/icedman/dash2dock-lite?style=social) ![Stargazers](https://img.shields.io/github/stars/icedman/dash2dock-lite?style=social) ![Issues](https://img.shields.io/github/issues/icedman/dash2dock-lite) ![License](https://img.shields.io/github/license/icedman/dash2dock-lite)

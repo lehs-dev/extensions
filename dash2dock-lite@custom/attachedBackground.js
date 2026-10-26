@@ -134,6 +134,7 @@ export const AttachedDockCanvas = GObject.registerClass(
         prev.width !== s.width ||
         prev.height !== s.height ||
         prev.position !== s.position ||
+        prev.alignEnd !== s.alignEnd ||
         prev.flareWidth !== s.flareWidth ||
         prev.footDepth !== s.footDepth ||
         prev.cornerRadius !== s.cornerRadius ||
@@ -188,6 +189,8 @@ export const AttachedDockCanvas = GObject.registerClass(
         startFlush: this.state.startFlush,
         endFlush: this.state.endFlush,
       });
+
+      if (this.state.alignEnd) ctx.translate(surfaceWidth - geom.width, surfaceHeight - geom.height);
 
       // Subtle ambient shadow along the contour
       ctx.save();

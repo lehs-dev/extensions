@@ -616,10 +616,38 @@
         <summary>Screen Frame Corner Radius</summary>
         <description>Corner curvature radius of the desktop screen frame in logical pixels.</description>
     </key>
+    <key type="i" name="unified-edge">
+        <default>2</default>
+        <range min="0" max="3"/>
+        <summary>Unified Dock edge</summary>
+        <description>0: Top, 1: Bottom, 2: Left, 3: Right. System pods anchor to the two screen corners along this edge.</description>
+    </key>
+    <key type="i" name="unified-position">
+        <default>0</default>
+        <range min="0" max="3"/>
+        <summary>Legacy Unified Dock corner</summary>
+        <description>0: Top Left, 1: Bottom Left, 2: Top Right, 3: Bottom Right.</description>
+    </key>
+    <key type="d" name="global-scale">
+        <default>1.0</default>
+        <range min="0.5" max="2.0"/>
+        <summary>Global Scale</summary>
+        <description>Shared scale for all four pods, including icons, text and attached geometry.</description>
+    </key>
+    <key type="d" name="background-opacity">
+        <default>0.72</default>
+        <range min="0.0" max="1.0"/>
+        <summary>Background Opacity</summary>
+        <description>Shared background alpha; the color tuple alpha is retained for legacy configuration.</description>
+    </key>
+    <key type="i" name="unified-config-version">
+        <default>0</default>
+        <summary>Unified Dock migration version</summary>
+    </key>
     <key type="i" name="desktop-layout">
         <default>0</default>
         <summary>Desktop Layout Mode</summary>
-        <description>Desktop layout arrangement: 0 for Dual Edge (dock left, system right), 1 for Left Modular (three capsules along left edge).</description>
+        <description>Legacy layout selection retained for configuration compatibility. Unified Dock is now the only layout.</description>
     </key>
     <key type="b" name="modular-show-quicksettings">
         <default>true</default>

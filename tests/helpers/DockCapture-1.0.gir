@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<repository version="1.2" xmlns="http://www.gtk.org/introspection/core/1.0" xmlns:c="http://www.gtk.org/introspection/c/1.0" xmlns:glib="http://www.gtk.org/introspection/glib/1.0">
+  <include name="GObject" version="2.0"/>
+  <include name="GLib" version="2.0"/>
+  <namespace name="DockCapture" version="1.0" shared-library="libdock-capture.so" c:identifier-prefixes="DockCapture" c:symbol-prefixes="dock_capture">
+    <function name="read" c:identifier="dock_capture_read">
+      <return-value transfer-ownership="full" nullable="1"><type name="GLib.Bytes" c:type="GBytes*"/></return-value>
+      <parameters>
+        <parameter name="object" transfer-ownership="none"><type name="GObject.Object" c:type="GObject*"/></parameter>
+        <parameter name="x" transfer-ownership="none"><type name="gint" c:type="int"/></parameter>
+        <parameter name="y" transfer-ownership="none"><type name="gint" c:type="int"/></parameter>
+        <parameter name="width" transfer-ownership="none"><type name="gint" c:type="int"/></parameter>
+        <parameter name="height" transfer-ownership="none"><type name="gint" c:type="int"/></parameter>
+      </parameters>
+    </function>
+  </namespace>
+</repository>

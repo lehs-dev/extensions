@@ -1,6 +1,62 @@
 'use strict';
 
 import {LEFT_MODULAR_WIDTH} from '../attachedGeometry.js';
+import {computeDockViewport} from '../dockOverflow.js';
+
+// Screen corners own the system pods. The application viewport is centered in
+// the remaining interval along the selected edge, with one shared coordinate system.
+export function computeUnifiedDockGeometry(params) {
+  const {monitor, width = 34, flareWidth = 14, footDepth = 4, cornerRadius = 10,
+    padding = 3, horizontalPadding = 2, spacing = 16, appIconSize = 30} = params;
+  const edge = params.edge ?? 'left';
+  const vertical = edge === 'left' || edge === 'right';
+  const start = vertical ? monitor.y : monitor.x;
+  const end = start + (vertical ? monitor.height : monitor.width);
+  const normal = vertical ? edge === 'right' ? monitor.x + monitor.width - width : monitor.x
+    : edge === 'bottom' ? monitor.y + monitor.height - width : monitor.y;
+  const pod = (name, fallback, visible, startFlush = false, endFlush = false) => {
+    const along = Math.max(0, params[`${name}Content${vertical ? 'Height' : 'Width'}`] ?? fallback);
+    const across = Math.min(width - 2 * horizontalPadding,
+      params[`${name}Content${vertical ? 'Width' : 'Height'}`] || width - 2 * horizontalPadding);
+    const contentStart = (startFlush ? 0 : flareWidth) + padding;
+    const length = Math.max(width, along + contentStart + (endFlush ? 0 : flareWidth) + padding);
+    return {x: vertical ? normal : start, y: vertical ? start : normal,
+      width: vertical ? width : length, height: vertical ? length : width,
+      contentWidth: vertical ? across : along, contentHeight: vertical ? along : across,
+      contentLeft: vertical ? (width - across) / 2 : contentStart,
+      contentTop: vertical ? contentStart : (width - across) / 2,
+      position: edge, scaleFactor: 1, flareWidth, footDepth, cornerRadius,
+      startFlush, endFlush, visible, length};
+  };
+  const quickSettings = pod('quickSettings', 60, params.showQuickSettings ?? true, true);
+  const inputMethod = pod('inputMethod', 20, params.showInputMethod ?? false, !quickSettings.visible);
+  const clock = pod('clock', 50, params.showClock ?? true, false, true);
+  const setAlong = (item, value) => { item[vertical ? 'y' : 'x'] = value; };
+  const nearSpacing = 3 * (params.scale ?? 1);
+  setAlong(inputMethod, start + (quickSettings.visible ? quickSettings.length + nearSpacing : 0));
+  setAlong(clock, end - clock.length);
+  const upperEnd = inputMethod.visible ? inputMethod[vertical ? 'y' : 'x'] + inputMethod.length
+    : quickSettings.visible ? start + quickSettings.length : start;
+  const topBoundary = upperEnd + (quickSettings.visible || inputMethod.visible ? spacing : 0);
+  const bottomBoundary = clock.visible ? end - clock.length - spacing : end;
+  const availableHeight = Math.max(0, bottomBoundary - topBoundary);
+  const viewport = computeDockViewport({availableHeight: Math.max(1, availableHeight),
+    contentHeight: params.appDockContentHeight, iconSize: appIconSize, flareWidth,
+    magnify: params.magnify, spread: params.spread, scale: params.scale});
+  const center = (topBoundary + Math.max(topBoundary, bottomBoundary)) / 2;
+  const along = center - viewport.height / 2;
+  const appDock = {x: vertical ? normal : along, y: vertical ? along : normal,
+    width: vertical ? width : viewport.height, height: vertical ? viewport.height : width,
+    availableHeight, topBoundary, bottomBoundary, position: edge, vertical,
+    centerX: vertical ? normal + width / 2 : center,
+    centerY: vertical ? center : normal + width / 2,
+    visible: params.showAppDock ?? true, isUnified: true};
+  const fits = upperEnd <= bottomBoundary && (!appDock.visible || availableHeight >= appIconSize + 2 * flareWidth) &&
+    (!clock.visible || end - clock.length >= start);
+  for (const item of [quickSettings, inputMethod, appDock, clock]) item.visible &&= fits;
+  return {monitor, edge, vertical, scaleFactor: 1, flareWidth, footDepth, cornerRadius,
+    minSpacing: spacing, nearSpacing, quickSettings, inputMethod, clock, appDock, fits};
+}
 
 /**
  * Calculates layout geometry for the vertical System Dock attached to the right screen edge.

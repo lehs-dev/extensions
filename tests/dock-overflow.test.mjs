@@ -12,7 +12,7 @@ class NativeActor extends Actor {
 class ScrollBox extends NativeActor {
     get_transformed_position() {
         const [x, y] = super.get_transformed_position();
-        return [x, y - (this.adjustment?.value ?? 0)];
+        return [x - (this.hadjustment?.value ?? 0), y - (this.adjustment?.value ?? 0)];
     }
 }
 class Adjustment extends Actor {
@@ -25,13 +25,13 @@ class Adjustment extends Actor {
     }
 }
 class ScrollView extends NativeActor {
-    constructor(params) { super(params); this.vadjustment = new Adjustment(); }
+    constructor(params) { super(params); this.vadjustment = new Adjustment(); this.hadjustment = new Adjustment(); }
     set_child(child) {
         assert.ok(child === null || child instanceof ScrollBox,
             'GNOME 51 ScrollView requires a St.Scrollable child; native Dash is not one');
         if (this.child) this.remove_child(this.child);
         this.child = child;
-        if (child) { child.adjustment = this.vadjustment; this.add_child(child); }
+        if (child) { child.adjustment = this.vadjustment; child.hadjustment = this.hadjustment; this.add_child(child); }
     }
 }
 
@@ -63,11 +63,11 @@ async function setup(count = 16) {
         'resource:///org/gnome/shell/ui/dash.js': {Dash: class {}},
         'gi://Shell': {default: {}}, 'gi://Gio': {default: {}},
         'gi://GObject': {default: {registerClass: (meta, cls) => cls}},
-        'gi://Clutter': {default: {ActorAlign: {CENTER: 0}, Orientation: {VERTICAL: 1},
+        'gi://Clutter': {default: {ActorAlign: {CENTER: 0}, Orientation: {VERTICAL: 1, HORIZONTAL: 0},
             ScrollDirection: {UP: 0, DOWN: 1, SMOOTH: 4}, EVENT_STOP: true}},
         'gi://Graphene': {default: {Point: class {}}},
         'gi://St': {default: {Widget: NativeActor, BoxLayout: ScrollBox, ScrollView,
-            PolicyType: {NEVER: 0, EXTERNAL: 3}}},
+            Side: {TOP: 0, BOTTOM: 2, LEFT: 3, RIGHT: 1}, PolicyType: {NEVER: 0, EXTERNAL: 3}}},
         './effects/tint_effect.js': {TintEffect: class {}},
         './effects/monochrome_effect.js': {MonochromeEffect: class {}},
         './dockItems.js': {DockIcon: NativeActor, DockItemContainer: NativeActor, DockBackground: NativeActor},
@@ -113,6 +113,26 @@ async function setup(count = 16) {
     };
     return {dock, icons, layoutManager, constraints, allocate, queryMonitor, monitor, chromeChanges};
 }
+
+test('paint viewport follows the dock layout instead of oversized animated icon textures', async () => {
+    for (const edge of [0, 1, 2, 3]) {
+        const {dock, icons} = await setup(3);
+        dock.extension.unified_edge = edge;
+        dock.layout();
+        const expected = [dock.width, dock.height];
+        assert.deepEqual([dock.renderArea.width, dock.renderArea.height], expected);
+        const texture = new NativeActor({x: 4.25, y: 10.75, width: 128, height: 128});
+        dock.renderArea.add_child(texture);
+        for (let frame = 0; frame < 20; frame++) {
+            texture.set_position(frame * 2.3, frame * 3.7);
+            texture.set_scale(0.25 + frame / 100, 0.25 + frame / 100);
+            assert.deepEqual([dock.renderArea.width, dock.renderArea.height], expected);
+        }
+        dock.extension.global_scale = 1.5;
+        dock.layout();
+        assert.deepEqual([dock.renderArea.width, dock.renderArea.height], [dock.width, dock.height]);
+    }
+});
 
 test('modular overflow keeps native Dash in a Scrollable wrapper, wheel/focus expose last app, mode restore retains actors', async () => {
     const {dock, icons, layoutManager, allocate} = await setup();
@@ -530,4 +550,161 @@ test('opening and closing an unpinned app keeps the resting dock at 34 px despit
     layoutManager.mode = 0;
     dock.layout();
     assert.equal(dock._iconSizeScaledDown, 48);
+});
+
+test('Unified Dock reflects source viewport, painted frame, hover and popup sides on the right at every scale', async () => {
+    for (const scale of [0.5, 1, 1.25, 1.5, 2]) {
+        const {dock, icons, allocate, monitor} = await setup(4);
+        dock.extension.global_scale = scale;
+        dock.extension.unified_edge = 3;
+        dock.extension.dock_padding = 9; // legacy pod-only padding no longer affects shared geometry
+        const background = await createBackground();
+        dock._background = background;
+        dock.layout(); allocate();
+        assert.equal(dock._position, 'right');
+        assert.equal(dock._scaleFactor, 1);
+        assert.equal(dock.x + dock.width, monitor.x + monitor.width);
+        assert.equal(dock._scrollView.x + dock._scrollView.width, dock.width);
+        assert.equal(dock.dash.width, Math.round(34 * scale));
+        assert.equal(dock._iconSizeScaledDown, Math.round(30 * scale));
+        for (const progress of [0, 0.25, 0.5, 1, 0]) {
+            dock._dockHoverProgress = progress;
+            background.update({first: icons[0], last: icons.at(-1),
+                iconSize: dock._iconSizeScaledDown, scaleFactor: 1,
+                vertical: true, position: 'right', panel_mode: false, dock});
+            assert.equal(background.x + background.width, dock.width);
+            assert.equal(background._canvas.state.position, 'right');
+            assert.equal(background._canvas.state.flareWidth, 14 * scale);
+            assert.equal(background._padding, 3 * scale);
+            assert.ok(background._pickBoxes.every(b => b.x1 >= 0 && b.x2 <= background.width));
+            assert.equal(dock.isWithinHoverArea([monitor.x + monitor.width - 1, dock.y + dock.height / 2]), true);
+            assert.equal(dock.isWithinHoverArea([dock.x + background.x - 1, dock.y + dock.height / 2]), false);
+            if (!progress) assert.equal(background.width, Math.round(34 * scale));
+        }
+        for (const icon of icons) assert.equal(icon._popupMenuSide, 1);
+    }
+});
+
+test('content redisplay notifies the group once after viewport layout, keeping new app heights out of neighboring pods', async () => {
+    const {dock, icons, layoutManager} = await setup(3);
+    let updates = 0;
+    layoutManager.updateLayout = () => { updates++; };
+    dock.layout();
+    const initial = updates;
+    for (let i = 0; i < 10; i++) dock.layout();
+    assert.equal(updates, initial);
+    icons.push(new NativeActor({_icon: new NativeActor()}));
+    dock.layout();
+    assert.equal(updates, initial + 1);
+});
+
+test('an impossible group releases application struts and dwell until layout space returns', async () => {
+    const {dock, constraints, chromeChanges} = await setup(3);
+    dock._onChrome = true;
+    dock.extension.autohide_dash = false;
+    constraints.visible = false;
+    dock.layout();
+    assert.equal(dock.visible, false);
+    assert.equal(dock.dwell.visible, false);
+    assert.equal(chromeChanges.at(-1)[2].affectsStruts, false);
+    constraints.visible = true;
+    dock.layout();
+    assert.equal(dock.visible, true);
+    assert.equal(chromeChanges.at(-1)[2].affectsStruts, true);
+});
+
+test('the real group coordinator follows app redisplay, corners and scaling without overlapping system pods', async () => {
+    const {dock, icons, monitor} = await setup(3);
+    class Pod {
+        constructor(params) { this.extension = params.extension; }
+        enable() {}
+        getMeasuredContentHeight() { return 60; }
+        get hasUsableControls() { return true; }
+        place(geometry) { this.geometry = geometry; }
+        updateTheme() {}
+        destroy() {}
+    }
+    const {DesktopLayoutManager} = await loadModule('dash2dock-lite@custom/desktopLayoutManager.js', {mocks: {
+        'resource:///org/gnome/shell/ui/main.js': {layoutManager: {primaryIndex: 0, primaryMonitor: monitor, monitors: [monitor]}},
+        './systemDock/systemState.js': {SystemState: class {destroy() {}}},
+        './systemDock/systemMenus.js': {SystemMenus: class {closeAll() {} destroy() {}}},
+        './systemDock/modularPods.js': {QuickSettingsPod: Pod, InputMethodPod: Pod, ClockPod: Pod},
+    }});
+    const extension = dock.extension;
+    extension.docks = [dock];
+    const manager = new DesktopLayoutManager({extension});
+    extension.desktopLayoutManager = manager;
+    manager.enable();
+    const retained = [...icons];
+    for (const position of [0, 1, 2, 3]) {
+        extension.unified_edge = position;
+        manager.onSettingsChanged('unified-edge', position);
+        for (const scale of [1, 1.25, 1.5]) {
+            extension.global_scale = scale;
+            manager.onSettingsChanged('global-scale', scale);
+            for (const count of [1, 2, 3, 25, 3]) {
+                icons.splice(0, icons.length, ...Array.from({length: count}, (_, i) => retained[i] ??
+                    new NativeActor({_icon: new NativeActor()})));
+                dock.layout();
+                const geometry = manager._geometry;
+                assert.equal(geometry.fits, true, JSON.stringify({position, scale, count, geometry}));
+                const vertical = position >= 2;
+                const axis = vertical ? 'y' : 'x', length = vertical ? 'height' : 'width';
+                assert.equal(dock[axis], geometry.appDock[axis]);
+                assert.equal(dock[length], geometry.appDock[length]);
+                assert.ok(geometry.inputMethod[axis] + geometry.inputMethod[length] + 16 * scale <= dock[axis] + 1e-9);
+                assert.ok(dock[axis] + dock[length] + 16 * scale <= geometry.clock[axis] + 1e-9);
+                assert.equal(dock.dash[vertical ? 'width' : 'height'], geometry.clock[vertical ? 'width' : 'height']);
+                assert.equal(dock._position, ['top', 'bottom', 'left', 'right'][position]);
+                assert.ok(dock[axis] >= monitor[axis] && dock[axis] + dock[length] <= monitor[axis] + monitor[length]);
+            }
+        }
+    }
+    manager.destroy();
+});
+
+test('horizontal Application Dock reflects its frame, sources, scrolling and popup sides between top and bottom', async () => {
+    for (const edge of [0, 1]) for (const scale of [1, 1.25, 1.5]) {
+        const {dock, icons, monitor, constraints} = await setup(30);
+        dock.extension.unified_edge = edge;
+        dock.extension.global_scale = scale;
+        constraints.x = monitor.x + 500;
+        const background = await createBackground();
+        dock._background = background;
+        dock.layout();
+        const view = dock._scrollView;
+        icons.forEach((icon, i) => { icon.x = i * icon.width; icon.y = 0; });
+        view.hadjustment.upper = dock.dash.width;
+        view.hadjustment.page_size = view.width;
+        assert.equal(dock._position, edge === 0 ? 'top' : 'bottom');
+        assert.equal(dock.width, 300);
+        assert.equal(dock.dash.height, Math.round(34 * scale));
+        assert.equal(dock._scrollBox.orientation, 0);
+        assert.equal(view.hscrollbar_policy, 3);
+        assert.equal(view.vscrollbar_policy, 0);
+        assert.equal(dock._modularViewport.overflow, true);
+        if (edge === 0) assert.equal(dock.y, monitor.y);
+        else assert.equal(dock.y + dock.height, monitor.y + monitor.height);
+        const before = view.hadjustment.value;
+        dock._onScrollEvent(view, {get_scroll_direction: () => 1});
+        assert.ok(view.hadjustment.value > before);
+        for (const progress of [0, 0.25, 0.75, 1, 0]) {
+            dock._dockHoverProgress = progress;
+            background.update({first: icons[0], last: icons.at(-1),
+                iconSize: dock._iconSizeScaledDown, scaleFactor: 1, vertical: false,
+                position: dock._position, panel_mode: false, dock});
+            assert.equal(background._canvas.state.position, dock._position);
+            assert.ok(background.x >= 0 && background.x + background.width <= dock.width);
+            assert.equal(edge === 0 ? background.y : background.y + background.height, edge === 0 ? 0 : dock.height);
+            assert.ok(background._pickBoxes.every(b => b.x1 >= 0 && b.x2 <= background.width && b.y1 >= 0 && b.y2 <= background.height));
+            assert.equal(dock.isWithinHoverArea([dock.x + dock.width / 2,
+                edge === 0 ? monitor.y + 1 : monitor.y + monitor.height - 1]), true);
+            if (!progress) assert.equal(background.height, Math.round(34 * scale));
+        }
+        for (const icon of icons) assert.equal(icon._popupMenuSide, edge === 0 ? 0 : 2);
+        const adjustment = view.hadjustment;
+        assert.ok(adjustment.signals.size > 0);
+        dock._destroyScrollView();
+        assert.equal(adjustment.signals.size, 0);
+    }
 });

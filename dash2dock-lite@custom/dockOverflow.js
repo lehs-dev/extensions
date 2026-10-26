@@ -1,8 +1,12 @@
 'use strict';
 
 // Stable viewport geometry depends on content/settings, never pointer movement.
-export function computeDockViewport({availableHeight, contentHeight, iconSize, flareWidth = 14, magnify = 0, spread = 0.5}) {
-  const safeAvailable = Number.isFinite(availableHeight) && availableHeight > 0 ? availableHeight : 100;
+export function computeDockViewport({availableHeight, contentHeight, iconSize, flareWidth = 14, magnify = 0, spread = 0.5, scale = 1}) {
+  // Viewports allocate whole pixels. Round the available space down before
+  // computing the reserve, or fractional pod heights can make a full viewport
+  // grow half a pixel beyond the group and incorrectly fail its fit check.
+  const safeAvailable = Number.isFinite(availableHeight) && availableHeight > 0
+    ? Math.max(1, Math.floor(availableHeight)) : 100;
   const safeContent = Number.isFinite(contentHeight) && contentHeight > 0 ? contentHeight : 50;
   const safeIcon = Number.isFinite(iconSize) && iconSize > 0 ? iconSize : 48;
   const safeFlare = Number.isFinite(flareWidth) && flareWidth >= 0 ? flareWidth : 14;
@@ -14,7 +18,7 @@ export function computeDockViewport({availableHeight, contentHeight, iconSize, f
     effectiveSpread = 0.55 + effectiveSpread * 0.2;
   // Reserve room for both renderer growth and the centered spread of nearby
   // icons. Both the viewport and the expanded frame stay independent of hover.
-  const desiredReserve = safeFlare + Math.max(6,
+  const desiredReserve = safeFlare + Math.max(6 * scale,
     safeIcon * Math.min(1, magnification) * (0.5 + 2 * effectiveSpread));
   // On a short monitor, retain at least one full source icon for wheel/focus
   // navigation instead of allocating all the space to animation headroom.
@@ -43,8 +47,8 @@ export function computeDockFrames({viewport, height, restingWidth, contentRight,
     viewport.contentTop + viewport.bodyHeight + inset + flareWidth);
   const resting = {x: 0, y: top, width: restingWidth, height: Math.max(1, bottom - top)};
   const expanded = scale > 0 ? {x: 0, y: 0,
-    width: Math.max(restingWidth, contentRight + (size - iconSize) / 2 +
-      Math.max(0, size - slotSize) / 2 + (size - iconSize) * Math.max(0, rise) * 0.5 + inset),
+    width: Math.max(restingWidth, (restingWidth - iconSize) / 2 + size +
+      (size - iconSize) * Math.max(0, rise) * 0.5 + inset),
     height} : {...resting};
   return {resting, expanded};
 }

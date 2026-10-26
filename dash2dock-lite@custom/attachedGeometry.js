@@ -159,12 +159,15 @@ function curveXAtY(points, y) {
   return cubic(...xs, (low + high) / 2);
 }
 
-/** Conservative, one-pixel bands INSIDE the actual left capsule Bézier path.
+/** Conservative, one-pixel bands INSIDE the actual side capsule Bézier path.
  * Used by Clutter picking, so transparent flares and unused animation reserve
  * do not become an input region. No extra actors or global pointer polling.
  */
 export function getAttachedPodPickBoxes(params) {
-  const g = getAttachedEdgeGeometry({...params, position: 'left'});
+  const horizontal = params.position === 'top' || params.position === 'bottom';
+  const g = getAttachedEdgeGeometry({...params, position: 'left',
+    width: horizontal ? params.height : params.width,
+    height: horizontal ? params.width : params.height});
   const {height: h, width: w} = g;
   const boxes = [];
   const addEnd = (fw, cr, foot, corner, reverse) => {
@@ -189,6 +192,11 @@ export function getAttachedPodPickBoxes(params) {
     [g.rightFootTip, g.rightFootCP2, g.rightFootCP1, g.rightBodyBottom],
     [g.rightBodyTop, g.topRightCP2, g.topRightCP1, g.topRight], true);
   if (h > start + end) boxes.push({x1: 0, y1: start, x2: w, y2: h - end});
-  return boxes;
+  switch (params.position) {
+    case 'right': return boxes.map(b => ({...b, x1: w - b.x2, x2: w - b.x1}));
+    case 'top': return boxes.map(b => ({x1: b.y1, x2: b.y2, y1: b.x1, y2: b.x2}));
+    case 'bottom': return boxes.map(b => ({x1: b.y1, x2: b.y2, y1: w - b.x2, y2: w - b.x1}));
+    default: return boxes;
+  }
 }
 

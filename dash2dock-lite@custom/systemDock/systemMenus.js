@@ -35,6 +35,7 @@ export class SystemMenus {
       return true;
     }
     this.closeAll();
+    this.beforeOpen?.();
     // A menu may already be open from the native panel. Close it before changing its anchor.
     if (menu.isOpen) menu.close(animationOptions(menu, false));
 
@@ -107,7 +108,23 @@ export class SystemMenus {
         // St applies CSS in logical coordinates. BoxPointer itself clamps the allocation
         // to the active monitor; overriding _reposition would break Shell 51's ActorBox API.
         const style = original.style || '';
-        menu.actor.style = `${style}${style && !style.endsWith(';') ? ';' : ''} max-height: ${Math.max(1, workArea.height - 24)}px; max-width: ${Math.max(1, workArea.width - 24)}px;`;
+        const source = sourceButton.get_transformed_position?.();
+        const size = sourceButton.get_transformed_size?.() ?? [1, 1];
+        // Reserve the final hover extent before starting its timeline, so the
+        // native popup cannot flip behind a pod while its anchor moves inward.
+        const bounds = owner?.popupBounds;
+        let maxWidth = workArea.width - 24, maxHeight = workArea.height - 24;
+        if (source) {
+          if (side === ST_SIDE_LEFT)
+            maxWidth = Math.min(maxWidth, workArea.x + workArea.width - (bounds?.right ?? source[0] + size[0]) - 12);
+          else if (side === ST_SIDE_RIGHT)
+            maxWidth = Math.min(maxWidth, (bounds?.left ?? source[0]) - workArea.x - 12);
+          else if (side === St.Side.TOP)
+            maxHeight = Math.min(maxHeight, workArea.y + workArea.height - (bounds?.bottom ?? source[1] + size[1]) - 12);
+          else if (side === St.Side.BOTTOM)
+            maxHeight = Math.min(maxHeight, (bounds?.top ?? source[1]) - workArea.y - 12);
+        }
+        menu.actor.style = `${style}${style && !style.endsWith(';') ? ';' : ''} max-height: ${Math.max(1, maxHeight)}px; max-width: ${Math.max(1, maxWidth)}px;`;
       }
       owner?.onMenuStateChanged?.(true);
       menu.open(animationOptions(menu, true));
@@ -160,5 +177,6 @@ export class SystemMenus {
     this.closeAll();
     this.systemDock = null;
     this.state = null;
+    this.beforeOpen = null;
   }
 }

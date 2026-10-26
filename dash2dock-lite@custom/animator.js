@@ -10,6 +10,8 @@ const Point = Graphene.Point;
 import { Dot } from './apps/dot.js';
 import { DockPosition } from './dock.js';
 import { Vector } from './vector.js';
+import {iconTextureSize, resourceScale, alignPixel} from './rendering.js';
+import {unifiedAppearance} from './unifiedDock.js';
 
 import { DockItemDotsOverlay, DockItemBadgeOverlay } from './dockItems.js';
 import {
@@ -97,6 +99,11 @@ export let Animator = class {
         icon_size: 24,
       });
       renderer.visible = false;
+      // St.Icon replaces its texture asynchronously. Linear filtering alone
+      // aliases when our fixed high-resolution texture shrinks to dock size.
+      // Configure each replacement texture, including theme/DPI reloads.
+      if (Clutter.ScalingFilter) renderer.connect('child-added', (_icon, texture) =>
+        texture.set_content_scaling_filters(Clutter.ScalingFilter.TRILINEAR, Clutter.ScalingFilter.LINEAR));
       target.add_child(renderer);
       const hitTarget = dock._createIconHitTarget?.(renderer);
       if (hitTarget) renderer.connect('destroy', () => hitTarget.destroy());
@@ -475,6 +482,7 @@ export let Animator = class {
         if (deltaMag < mag) {
           appliedVector = currentPosition.add(deltaVector);
         }
+        icon._positionSettled = deltaMag >= mag;
         translationX = appliedVector.x;
         translationY = appliedVector.y;
         icon._deltaVector = appliedVector;
@@ -595,7 +603,8 @@ export let Animator = class {
         // compute icon scale based on size
         icon._scale = targetSize / unscaledIconSize;
 
-        let baseSize = 32 * (dock.extension.icon_quality || 1);
+        const baseSize = iconTextureSize(unscaledIconSize, dock.extension.icon_quality || 1,
+          Math.min(2, 1 + Math.max(0, magnify)));
         if (renderer.icon_size != baseSize) {
           renderer.set_size(baseSize, baseSize);
           renderer.set_icon_size(baseSize);
@@ -625,11 +634,30 @@ export let Animator = class {
           if (iconContainer) {
             // Source actors supply layout and native DND. Moving their inner
             // containers feeds animated geometry back into future allocations.
-            let ry = p[1] + adjustY + icon._animationTranslationY - renderOffset[1];
-            renderer.set_position(
-              p[0] + adjustX + icon._animationTranslationX - renderOffset[0],
-              ry
-            );
+            let screenX = p[0] + adjustX + icon._animationTranslationX;
+            let screenY = p[1] + adjustY + icon._animationTranslationY;
+            if (dock.extension.desktopLayoutManager?.mode === 1) {
+              // Dash's theme padding makes its native source allocation
+              // non-square. Anchor growth to the shared compact edge instead
+              // of centering it across the physical screen boundary.
+              const inset = (unifiedAppearance(dock.extension).width - unscaledIconSize) / 2;
+              if (vertical) {
+                screenX = dock.x + (dock.dash.translationX || 0) +
+                  (dock._position === DockPosition.LEFT ? inset : dock.width - inset - targetSize) +
+                  icon._animationTranslationX;
+              } else {
+                screenY = dock.y + (dock.dash.translationY || 0) +
+                  (dock._position === DockPosition.TOP ? inset : dock.height - inset - targetSize) +
+                  icon._animationTranslationY;
+              }
+            }
+            icon._paintSettled = icon._positionSettled && Math.abs(icon._deltaSize) < 1e-9;
+            if (icon._paintSettled && icon._targetScale === 1) {
+              const pixels = resourceScale(renderer);
+              screenX = alignPixel(screenX, pixels);
+              screenY = alignPixel(screenY, pixels);
+            }
+            renderer.set_position(screenX - renderOffset[0], screenY - renderOffset[1]);
 
             // renderer.ease({
             //   x: p[0] + adjustX + icon._icon.translationX - renderOffset[0],
@@ -717,6 +745,11 @@ export let Animator = class {
                 icon._label.y += sh / 1.25;
               }
               icon._label.x += 2 * (m.geometry_scale || 1);
+            }
+            if (icon._paintSettled) {
+              const pixels = resourceScale(icon._label);
+              icon._label.x = alignPixel(icon._label.x, pixels);
+              icon._label.y = alignPixel(icon._label.y, pixels);
             }
           }
         }
@@ -928,6 +961,8 @@ export let Animator = class {
       // allied areas
       //! this should be at the layout -- make independent of background
       // struts
+      dock.struts.x = dock.x;
+      dock.struts.y = dock.y;
       if (vertical) {
         dock.struts.width =
           (dock._modularViewport ? dock._restingWidth ?? iconSize * scaleFactor + 8 : dock._background.width) +

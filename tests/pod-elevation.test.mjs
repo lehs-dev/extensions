@@ -13,19 +13,19 @@ async function setup() {
     get_preferred_height() {
       const visible = this.children.filter(child => child.visible);
       const size = visible.length
-        ? visible.reduce((sum, child) => sum + child.get_preferred_height()[1], 0)
+        ? this.orientation === 0 ? Math.max(0, ...visible.map(child => child.get_preferred_height()[1])) : visible.reduce((sum, child) => sum + child.get_preferred_height()[1], 0)
         : this.text !== undefined ? 16 : (this.icon_size ?? 18) + 8;
       return [size, size];
     }
     get_preferred_width() {
       const size = this.children.length
-        ? Math.max(0, ...this.children.filter(c => c.visible).map(c => c.get_preferred_width()[1]))
+        ? this.orientation === 0 ? this.children.filter(c => c.visible).reduce((sum, c) => sum + c.get_preferred_width()[1], 0) : Math.max(0, ...this.children.filter(c => c.visible).map(c => c.get_preferred_width()[1]))
         : this.text !== undefined ? this.text.length * 7 : (this.icon_size ?? 18) + 8;
       return [size, size];
     }
     get_transformed_position() {
       const parent = this.parent?.get_transformed_position() ?? [0, 0];
-      return [parent[0] + this.x + (this.translation_x ?? 0), parent[1] + this.y];
+      return [parent[0] + this.x + (this.translation_x ?? 0), parent[1] + this.y + (this.translation_y ?? 0)];
     }
     should_pick() { return this.visible && this.reactive; }
     pick_box(context, box) { context.push(box); }
@@ -47,8 +47,26 @@ async function setup() {
     }
   }
   const settings = new Actor({reducedMotion: 0, enable_animations: true});
+  const pointerChecks = new Map();
+  let nextCheck = 0;
+  const GLib = {PRIORITY_DEFAULT: 0, SOURCE_CONTINUE: true, SOURCE_REMOVE: false,
+    timeout_add(priority, interval, callback) {
+      const id = ++nextCheck;
+      pointerChecks.set(id, {interval, callback});
+      return id;
+    },
+    source_remove(id) { assert.ok(pointerChecks.delete(id), 'remove each pointer check once'); },
+    Source: {set_name_by_id() {}},
+  };
   const stage = new Actor();
   stage.get_key_focus = () => stage.focus;
+  let pointer = [-2000, -2000];
+  Object.defineProperty(stage, 'picked', {get() { return this._picked; }, set(actor) {
+    this._picked = actor;
+    const pod = actor?._systemPod;
+    const box = pod?._surface.boxes.reduce((best, b) => !best || (b.x2 - b.x1) * (b.y2 - b.y1) > (best.x2 - best.x1) * (best.y2 - best.y1) ? b : best, null);
+    pointer = box ? [pod.x + (box.x1 + box.x2) / 2, pod.y + (box.y1 + box.y2) / 2] : [-2000, -2000];
+  }});
   stage.get_actor_at_pos = () => stage.picked;
   const monitor = {index: 0, x: -1440, y: -80, width: 1440, height: 900};
   const chrome = new Set();
@@ -76,7 +94,7 @@ async function setup() {
     quickSettings: {menu: quickMenu}, dateMenu: {menu: dateMenu}, keyboard: {menu: inputMenu},
   }}};
   const Clutter = {Timeline, AnimationMode: {EASE_OUT_CUBIC: 1},
-    Orientation: {VERTICAL: 1}, ActorAlign: {CENTER: 0, FILL: 1},
+    Orientation: {VERTICAL: 1, HORIZONTAL: 0}, EventType: {MOTION: 1, ENTER: 2, LEAVE: 3}, ActorAlign: {CENTER: 0, FILL: 1},
     PickMode: {REACTIVE: 1}, ActorBox: class { constructor(params) { Object.assign(this, params); } },
     EVENT_STOP: true, EVENT_PROPAGATE: false, ScrollDirection: {UP: 0, DOWN: 1, SMOOTH: 4}};
   class BoxLayout extends Widget {
@@ -90,13 +108,15 @@ async function setup() {
     }
   }
   const St = {Widget, Button: Widget, BoxLayout, Icon: Widget, Label: Widget,
-    DrawingArea: Widget, Side: {LEFT: 3, RIGHT: 1}, Settings: {get: () => settings}, ReducedMotion: {REDUCE: 1}};
+    DrawingArea: Widget, Side: {TOP: 0, BOTTOM: 2, LEFT: 3, RIGHT: 1}, Settings: {get: () => settings}, ReducedMotion: {REDUCE: 1}};
   const mocks = {'gi://St': {default: St}, 'gi://Clutter': {default: Clutter},
+    'gi://GLib': {default: GLib},
+    'gi://Pango': {default: {WrapMode: {WORD_CHAR: 2}, EllipsizeMode: {NONE: 0, END: 3}}},
     'gi://GObject': {default: {registerClass: registerGObjectClass}},
     '../attachedBackground.js': {AttachedDockCanvas: Widget},
     'resource:///org/gnome/shell/ui/main.js': Main,
     'resource:///org/gnome/shell/ui/boxpointer.js': {PopupAnimation: {FULL: 3, NONE: 0}}};
-  const globals = {global: {stage, get_pointer: () => [-1400, 70]}};
+  const globals = {global: {stage, get_pointer: () => pointer}};
   const pods = await loadModule('dash2dock-lite@custom/systemDock/modularPods.js', {mocks, globals});
   const {SystemMenus} = await loadModule('dash2dock-lite@custom/systemDock/systemMenus.js', {mocks, globals});
   const {computeLeftModularGeometry} = await loadModule('dash2dock-lite@custom/systemDock/systemDockLayout.js');
@@ -132,6 +152,12 @@ async function setup() {
   function destroy() { menus.destroy(); quick.destroy(); clock.destroy(); input.destroy(); }
   return {quick, clock, input, inputMenu, Main, extension, state, listeners, settings, stage, monitor, geometry, mocks, globals, pods, SystemMenus,
     menus, quickMenu, dateMenu, nativePanelSource, chrome, timelines, enter, leave, finish, destroy,
+    pointerChecks,
+    checkPointer() {
+      for (const [id, check] of [...pointerChecks])
+        if (pointerChecks.has(id) && !check.callback()) pointerChecks.delete(id);
+    },
+    setPointer: coords => { pointer = coords; },
     get layouts() { return layouts; }};
 }
 
@@ -231,7 +257,7 @@ test('both real pod classes move all content together with the shared attached c
         assert.equal(item.scaleX, 1);
         assert.equal(item.scaleY, 1);
         if (item._icon) {
-          assert.equal(item._icon.icon_size, 18);
+          assert.equal(item._icon.icon_size, 16);
           assert.equal(item._icon.scaleX, 1);
           assert.equal(item._icon.scaleY, 1);
         }
@@ -343,6 +369,7 @@ test('reduced motion and disabled elevation use immediate or resting geometry an
   assert.equal(env.listeners.size, 0);
   assert.equal(env.settings.signals.size, 0);
   assert.equal(env.stage.signals.size, 0);
+  assert.equal(env.pointerChecks.size, 0);
   assert.ok(env.timelines.every(t => !t.running && t.signals.size === 0));
 });
 
@@ -415,7 +442,7 @@ test('the real Cairo renderer stretches the contour from its original edge throu
     curveTo(...coords) { for (let i = 0; i < coords.length; i += 2) points.push(coords.slice(i, i + 2)); },
     closePath() {}, save() {}, restore() {}, stroke() {}, strokePreserve() {},
     fill() {}, paint() {}, setOperator() {}, setLineCap() {}, setLineJoin() {},
-    setSourceRGBA() {}, setLineWidth() {}, $dispose() { this.disposed = true; }};
+    translate(x, y) { this.origin = [x, y]; }, setSourceRGBA() {}, setLineWidth() {}, $dispose() { this.disposed = true; }};
   canvas.get_context = () => context;
   canvas.get_surface_size = () => [56, 220];
   const state = {...baseGeometry, bodyOffset: 8, elevationProgress: 1};
@@ -428,6 +455,13 @@ test('the real Cairo renderer stretches the contour from its original edge throu
   assert.ok(points.some(([x, y]) => x === 0 && y === 0), 'Upper attachment remains on edge');
   assert.ok(points.some(([x, y]) => x === 0 && y === 220), 'Lower attachment remains on edge');
   assert.equal(context.disposed, true);
+  points.length = 0;
+  canvas.get_surface_size = () => [200, 220];
+  canvas.set_state({...state, position: 'right', alignEnd: true});
+  canvas.vfunc_repaint();
+  assert.deepEqual(context.origin, [148, 0], 'right contour is anchored at the far edge of the stable reserve');
+  assert.ok(points.some(([x, y]) => x === 52 && y === 0));
+  assert.ok(points.some(([x, y]) => x === 52 && y === 220));
   canvas.destroy(); env.destroy();
 });
 
@@ -447,7 +481,7 @@ test('natural content measurement bypasses previous fixed allocation requests', 
   env.destroy();
 });
 
-test('real pod actors and menu anchors release providers, focus listeners and timelines through repeated mode switches', async () => {
+test('real pod actors release providers, anchors and timelines through repeated enable/disable', async () => {
   const env = await setup();
   env.quick.destroy(); env.clock.destroy(); env.input.destroy();
   let stateOwners = 0;
@@ -466,26 +500,23 @@ test('real pod actors and menu anchors release providers, focus listeners and ti
   });
   env.extension.desktop_layout = 1;
   const manager = new DesktopLayoutManager({extension: env.extension});
-  manager.enable();
   for (let i = 0; i < 8; i++) {
+    manager.enable();
     const quick = manager.quickSettingsPod;
     env.enter(quick);
     quick._elevation._timeline.step(0.2);
     quick._surface.emit('clicked');
-    manager.onSettingsChanged('desktop-layout', 0);
+    assert.equal(env.chrome.size, 3);
+    assert.equal(stateOwners, 1);
+    manager.destroy();
     assert.equal(manager.quickSettingsPod, null);
     assert.equal(manager.clockPod, null);
     assert.equal(env.quickMenu.sourceActor, env.nativePanelSource);
     assert.equal(env.listeners.size, 0);
     assert.equal(env.settings.signals.size, 0);
     assert.equal(env.stage.signals.size, 0);
-    assert.equal(stateOwners, 1);
-    manager.onSettingsChanged('desktop-layout', 1);
-    assert.equal(manager.systemDock, null);
-    assert.equal(env.chrome.size, 3);
-    assert.equal(stateOwners, 1);
   }
-  manager.destroy(); env.menus.destroy();
+  env.menus.destroy();
   assert.equal(stateOwners, 0);
   assert.equal(env.chrome.size, 0);
   assert.equal(env.listeners.size, 0);
@@ -737,8 +768,7 @@ test('native surface hover reveals every pod before any click or keyboard focus 
     assert.equal(env.stage.focus, undefined);
     assert.equal(menu.isOpen, false);
     assert.equal(pod._canvas.state.width, 34);
-    pod._surface.hover = true;
-    pod._surface.emit('notify::hover');
+    env.enter(pod);
     assert.equal(pod._pointerInside, true);
     assert.equal(pod._elevation.target, 1);
     env.finish(pod);
@@ -751,8 +781,7 @@ test('native surface hover reveals every pod before any click or keyboard focus 
     assert.equal(menu.isOpen, true);
     assert.equal(env.timelines.length, timelines, 'click does not start another expansion');
     assert.equal(pod._canvas.state.width, width);
-    pod._surface.hover = false;
-    pod._surface.emit('notify::hover');
+    env.leave(pod);
     assert.equal(pod._elevation.target, 1, 'its open menu retains the current expansion');
     env.menus.closeAll(); env.finish(pod);
     assert.equal(pod._canvas.state.width, 34);
@@ -822,4 +851,221 @@ test('recording stop is actionable inside the unified pod and crossing its butto
   assert.equal(env.quickMenu.isOpen, false);
   env.destroy();
   assert.equal(env.listeners.size, 0);
+});
+
+test('right pods reveal inward, pick only their mirrored contour and open native menus toward the screen interior', async () => {
+  const env = await setup();
+  for (const pod of [env.quick, env.input, env.clock]) {
+    const g = {...pod._geom, position: 'right'};
+    g.x = env.monitor.x + env.monitor.width - g.width;
+    pod.place(g);
+    const allocation = [pod.x, pod.y, pod.width, pod.height];
+    const edge = env.monitor.x + env.monitor.width;
+    assert.equal(pod.x + pod.width, edge);
+    assert.equal(pod._canvas.state.alignEnd, true);
+    assert.equal(pod._canvas.state.position, 'right');
+    assert.ok(pod._surface.boxes.every(b => b.x1 >= pod.width - g.width));
+    env.enter(pod);
+    for (const p of [0.2, 0.5, 1]) {
+      pod._elevation._timeline.step(p);
+      const state = pod._canvas.state;
+      assert.ok(pod._contentBox.translation_x < 0);
+      assert.equal(pod.x + pod.width, edge);
+      assert.deepEqual([pod.x, pod.y, pod.width, pod.height], allocation);
+      const origin = pod.width - state.width - state.bodyOffset;
+      assert.ok(pod._surface.boxes.every(b => b.x1 >= origin - 1e-9 && b.x2 <= pod.width));
+      assert.ok(pod._surface.boxes.some(b => b.x2 === pod.width));
+    }
+    pod._surface.emit('clicked');
+    const menu = pod === env.quick ? env.quickMenu : pod === env.input ? env.inputMenu : env.dateMenu;
+    assert.equal(menu._boxPointer._arrowSide, 1);
+    assert.equal(menu.sourceActor, pod._menuAnchor);
+    const maxWidth = Number(menu.actor.style.match(/max-width: ([\d.]+)px/)[1]);
+    assert.ok(maxWidth <= pod.popupBounds.left - env.monitor.x - 12);
+    env.menus.closeAll();
+    env.leave(pod); env.finish(pod);
+    assert.ok(pod._surface.boxes.every(b => b.x1 >= pod.width - g.width));
+  }
+  env.destroy();
+  assert.equal(env.listeners.size, 0);
+  assert.equal(env.settings.signals.size, 0);
+});
+
+test('global scale reaches system icons, clock/input text, details, padding, elevation and borders together', async () => {
+  const env = await setup();
+  env.extension.global_scale = 1.5;
+  env.extension.border_thickness = 2;
+  const background = [0.2, 0.3, 0.4, 0.5], border = [0.7, 0.8, 0.9, 1];
+  env.extension._dockColors = {'background-color': background, 'border-color': border};
+  for (const pod of [env.quick, env.input, env.clock]) {
+    pod.place({...pod._geom, width: 51, flareWidth: 21, footDepth: 6, cornerRadius: 15});
+    assert.equal(pod._canvas.state.borderThickness, 3);
+    assert.equal(pod._canvas.state.scaleFactor, 1);
+    assert.equal(pod._canvas.state.backgroundColor, background);
+    assert.equal(pod._canvas.state.borderColor, border);
+    assert.equal(pod._elevation.distance, 12);
+    assert.match(pod._contentBox.style, /spacing: 4.5px/);
+    for (const label of pod._detailLabels.values()) assert.match(label.style, /font-size: 18px/);
+    for (const item of pod._items.values()) {
+      assert.match(item.style, /padding: 3px 1.5px/);
+      if (item._icon) assert.equal(item._icon.icon_size, 24);
+    }
+  }
+  assert.match(env.clock._clockItem._hourLabel.style, /font-size: 16.5px/);
+  assert.match(env.input._items.get('input-source')._label.style, /font-size: 16.5px/);
+  env.destroy();
+});
+
+test('pointer motion collapses every pod despite stale hover flags and stale stage picks', async () => {
+  const env = await setup();
+  for (const pod of [env.quick, env.input, env.clock]) {
+    for (const edge of ['left', 'right', 'top', 'bottom']) {
+      const horizontal = edge === 'top' || edge === 'bottom';
+      const g = {...pod._geom, position: edge, x: -1400, y: 40, width: horizontal ? 180 : 34, height: horizontal ? 34 : 180,
+        contentLeft: 3, contentTop: 3, contentWidth: horizontal ? 160 : 28, contentHeight: horizontal ? 28 : 160};
+      pod.place(g);
+      env.enter(pod); env.finish(pod);
+      assert.equal(pod._elevation.progress, 1);
+      assert.ok(env.stage.signals.size > 0);
+      assert.equal(pod._surface.hover, true);
+      env.setPointer([2000, 2000]);
+      env.stage.emit('captured-event', {type: () => 1, get_coords: () => [2000, 2000]});
+      assert.equal(pod._surface.hover, true, 'simulate St failing to emit a leave notification');
+      assert.equal(env.stage.picked, pod._surface, 'simulate a previous pick retained during contour changes');
+      assert.equal(pod._pointerInside, false);
+      assert.equal(pod._elevation.target, 0);
+      env.finish(pod);
+      assert.equal(pod._detailsBox.opacity, 0);
+      assert.equal(env.stage.signals.size, 0, 'idle pods keep no stage hook');
+    }
+  }
+  env.destroy();
+});
+
+test('top and bottom pods keep upright content, reveal inward, anchor native menus and leave no reactive reserve', async () => {
+  const env = await setup();
+  for (const edge of ['top', 'bottom']) {
+    for (const pod of [env.quick, env.input, env.clock]) {
+      pod.place({...pod._geom, position: edge, x: -1400, y: edge === 'top' ? -80 : 786,
+        width: 180, height: 34, contentLeft: 17, contentTop: 3, contentWidth: 146, contentHeight: 28});
+      assert.equal(pod._contentBox.orientation, 0);
+      const allocation = [pod.x, pod.y, pod.width, pod.height];
+      env.enter(pod); env.finish(pod);
+      assert.deepEqual([pod.x, pod.y, pod.width, pod.height], allocation);
+      assert.equal(pod._canvas.state.width, 180);
+      assert.ok(pod._canvas.state.height > 34);
+      assert.equal(pod._canvas.state.position, edge);
+      assert.equal(pod._contentBox.translation_x, 0);
+      assert.ok(edge === 'top' ? pod._contentBox.translation_y > 0 : pod._contentBox.translation_y < 0);
+      pod._surface.emit('clicked');
+      const menu = pod === env.quick ? env.quickMenu : pod === env.clock ? env.dateMenu : env.inputMenu;
+      assert.equal(menu._boxPointer._arrowSide, edge === 'top' ? 0 : 2);
+      assert.equal(menu.sourceActor, pod._menuAnchor);
+      env.leave(pod); env.menus.closeAll(); env.finish(pod);
+      assert.equal(pod._detailsBox.opacity, 0);
+      assert.ok(pod._surface.boxes.every(b => edge === 'top' ? b.y2 <= 34 : b.y1 >= pod.height - 34));
+    }
+  }
+  env.destroy();
+});
+
+
+test('system text settles on the physical pixel grid without quantizing hover progress', async () => {
+  const env = await setup();
+  for (const edge of ['left', 'right', 'top', 'bottom']) for (const scale of [1, 1.25, 1.5, 2]) {
+    const pod = env.input;
+    pod.get_resource_scale = () => scale;
+    env.extension.global_scale = 1.25;
+    env.extension.modular_elevation_distance = 3;
+    pod.place({...pod._geom, position: edge, x: -1400.25, y: 80.25,
+      contentLeft: 4.5, contentTop: 3.75});
+    const rest = pod._contentBox.get_transformed_position();
+    assert.ok(rest.every(v => Math.abs(v * scale - Math.round(v * scale)) < 1e-9));
+    const allocation = [pod.x, pod.y, pod.width, pod.height];
+    env.enter(pod);
+    pod._elevation._timeline.step(0.25);
+    const expected = pod._elevation.progress * pod._elevation.distance;
+    const moved = edge === 'left' || edge === 'right' ? pod._contentBox.translation_x : pod._contentBox.translation_y;
+    assert.equal(Math.abs(moved), expected, 'animation retains fractional coordinates between endpoints');
+    env.finish(pod);
+    const raised = pod._contentBox.get_transformed_position();
+    assert.ok(raised.every(v => Math.abs(v * scale - Math.round(v * scale)) < 1e-9));
+    assert.deepEqual([pod.x, pod.y, pod.width, pod.height], allocation);
+    env.leave(pod); env.finish(pod);
+  }
+  env.destroy();
+});
+
+test('pod content has finite positions before Shell allocates the root actor', async () => {
+  const env = await setup();
+  try {
+    for (const pod of [env.quick, env.input, env.clock]) {
+      // Clutter cannot transform an actor whose allocation is still pending.
+      // Placement must use the known monitor geometry rather than that result.
+      pod.get_transformed_position = () => [NaN, NaN];
+      for (const edge of ['left', 'right', 'top', 'bottom']) {
+        pod.place({...pod._geom, position: edge});
+        for (const actor of [pod, pod._contentBox, pod._detailsBox, pod._menuAnchor])
+          for (const property of ['x', 'y', 'width', 'height'])
+            assert.ok(Number.isFinite(actor[property]), `${pod.name} ${edge} ${property} is finite before allocation`);
+        env.state.emit('input-source-changed', env.state.inputSource);
+        assert.ok(Number.isFinite(pod._contentBox.x) && Number.isFinite(pod._contentBox.y),
+          'provider refresh before allocation also preserves valid content');
+      }
+    }
+  } finally { env.destroy(); }
+});
+
+test('pods collapse when the pointer enters an application without Shell crossing or motion events', async () => {
+  const env = await setup();
+  try {
+    assert.equal(env.pointerChecks.size, 0, 'collapsed pods do not poll');
+    for (const pod of [env.quick, env.input, env.clock]) for (const edge of ['left', 'right', 'top', 'bottom']) {
+      pod.place({...pod._geom, position: edge});
+      env.enter(pod); env.finish(pod);
+      assert.equal(pod._elevation.progress, 1);
+      assert.equal(env.pointerChecks.size, 1, 'one active check for the expanded pod');
+      assert.ok([...env.pointerChecks.values()].every(check => check.interval <= 100));
+      // Model a native application surface taking pointer motion, with both
+      // St.hover and the stage's picked actor still cached on the old pod.
+      env.setPointer([2000, 2000]);
+      env.checkPointer();
+      assert.equal(pod._surface.hover, true, 'no notify::hover was delivered');
+      assert.equal(env.stage.picked, pod._surface, 'no stage pick update was delivered');
+      assert.equal(pod._pointerInside, false);
+      assert.equal(pod._elevation.target, 0, 'real pointer position starts contraction');
+      env.finish(pod);
+      assert.equal(pod._detailsBox.opacity, 0);
+      assert.equal(env.pointerChecks.size, 0, 'check removed after contraction');
+      assert.equal(env.stage.signals.size, 0, 'stage listener removed after contraction');
+    }
+  } finally { env.destroy(); }
+});
+
+test('pointer checks preserve native menus, support re-entry and stop on hide or destruction', async () => {
+  const env = await setup();
+  try {
+    env.enter(env.quick); env.finish(env.quick);
+    env.quick._surface.emit('clicked');
+    env.setPointer([2000, 2000]); env.checkPointer();
+    assert.equal(env.quick._pointerInside, false);
+    assert.equal(env.quick._elevation.target, 1, 'native popup keeps its pod open');
+    env.menus.closeAll(); env.finish(env.quick);
+    assert.equal(env.pointerChecks.size, 0);
+    env.enter(env.quick); env.finish(env.quick);
+    env.setPointer([2000, 2000]); env.checkPointer();
+    env.quick._elevation._timeline.step(0.4);
+    env.stage.picked = env.quick._surface; env.checkPointer();
+    assert.equal(env.quick._elevation.target, 1, 're-entering mid-collapse reverses from the current state');
+    env.finish(env.quick);
+    env.quick.visible = false; env.quick.emit('notify::visible');
+    assert.equal(env.pointerChecks.size, 0, 'hidden pods have no remaining check');
+    env.quick.visible = true;
+    env.enter(env.quick); env.finish(env.quick);
+    const callback = [...env.pointerChecks.values()][0].callback;
+    env.quick.destroy();
+    assert.equal(env.pointerChecks.size, 0, 'destroy releases a running check');
+    assert.equal(callback(), false, 'a queued callback cannot access a destroyed pod');
+    assert.equal(env.stage.signals.size, 0);
+  } finally { env.destroy(); }
 });
